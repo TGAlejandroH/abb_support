@@ -1,0 +1,39 @@
+MODULE TG_Cell(SYSMODULE)
+    !***********************************************************************
+    ! Cell hardware macros for the TetraGen ABB prototype.
+    !
+    ! RAPID port of the small FANUC utility programs the .tgs programs call
+    ! between requests - on FANUC each is a tiny standalone .ls program that
+    ! flips a digital output:
+    !   CAM_OPEN / CAM_CLOSE  ->  TG_CamOpen / TG_CamClose
+    ! Future (plan, phase 4): WELD_PREP, CAM_PREP, DRY_RUN_ON/OFF,
+    ! TEACHMODE_ON follow the same pattern.
+    !
+    ! Kept separate from TG_Comms.sys on purpose: TG_Comms is pure HMI
+    ! protocol, this module is cell hardware. Loaded resident like TG_Comms;
+    ! .tgs programs reach these PROCs through the task-wide global scope.
+    !
+    ! doTG_Camera is a DUMMY digital output driving the camera flap (the
+    ! cover that shields the lens from weld spatter). It must exist in the
+    ! I/O configuration (EIO) or the program check fails with an
+    ! unknown-symbol error - creation steps in docs/robotstudio_setup.md. On
+    ! the virtual controller leave it unassigned to any device (a simulated
+    ! signal); TODO: on the real cell map it to the actual flap output.
+    !***********************************************************************
+
+    PROC TG_CamOpen()
+        ! FANUC: CAM_OPEN (.ls utility) - open the camera flap.
+        SetDO doTG_Camera,1;
+        TPWrite "TG: camera flap open";
+    ENDPROC
+
+    PROC TG_CamClose()
+        ! FANUC: CAM_CLOSE (.ls utility) - close the camera flap.
+        ! The FANUC .tgs programs call this defensively in several places
+        ! (after capture sets, after R_W_F, before rest home); calling it
+        ! with the output already low is expected and harmless.
+        SetDO doTG_Camera,0;
+        TPWrite "TG: camera flap closed";
+    ENDPROC
+
+ENDMODULE
