@@ -96,10 +96,353 @@ start order does not matter, robot-first is simplest.
 | `TG: cycle error, ERRNO = …` then a new cycle | Expected recovery path: the HMI side died mid-cycle; the robot resets the sockets and listens again. |
 | Port seems dead after stopping RAPID mid-cycle | Restart the program from main — `main()` starts with `TG_SocketDisc` and `TG_SocketCom` closes before re-creating. Worst case: warm-start the controller. |
 
-## 5. For Phase 3 (reference)
+## 5. Phase 2: full request set + sample .tgs program
+
+Additional module to load (same way as §2):
+
+3. Right-click `T_ROB1` → **Load Module…** → `abb/rapid/TGS/TD05Test.mod`.
+
+In Phase 2 the .tgs module is loaded manually; `TG_Main` calls it by the name
+the HMI sends, via late binding (`%stTG_ProgName%`). Phase 3 adds `Load`/
+`UnLoad` from `HOME:/TGS/` so nothing is pre-loaded.
+
+⚠ **The robot moves in this phase** (`MoveAbsJ` between safe joint poses at
+`v100`). Run it in the simulated station; keep the default joint targets
+unless you have changed the cell.
+
+Run exactly as in §3. One Python cycle now exercises every priority request:
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 1
+```
+
+Expected request order on the Python console:
+`10` (file transfer) → `5` (pass check) → `1`,`2`,`1`,`2` (two camera
+frames + captures) → `11` (global captures done) → `4` (weld frame) →
+`14` (weld params) → `100` (end).
+
+Things worth checking after the run (Controller tab → RAPID → `TG_Comms` data,
+or a RAPID Watch on the PERS variables):
+
+- `wobjTG_Cam.uframe` ≈ `[[850,-120,400],[…]]` and `wobjTG_Weld.uframe` ≈
+  `[[900,80,350],[…]]` — the dummy frames served by `abb_server.py`
+  (`cam_frame_xyzwpr` / `weld_frame_xyzwpr`), proving the received frames
+  landed in the work objects the .tgs program uses.
+- `nTG_TravelSpeed`=17.5, `nTG_WeldProc`=5, `nTG_WireFeed`=250,
+  `nTG_ArcLength`=2.5, `nTG_PassOK`=1, `nTG_GlobalCapOK`=1.
+
+To exercise the robot-side branches, edit the canned values at the top of
+`AbbTgsHmi.__init__` (e.g. `pass_ok = 0` → the program terminates without the
+end request, exactly like the FANUC `END`; `weld_status = 2` → abort path;
+`udwp_flag = 0` → predefined weld schedule). The automated tests in
+`hmi_prototype/test_phase2.py` cover the same branches against a fake robot.
+
+## 6. Phase 3: dynamic loading (nothing pre-loaded)
 
 The VC's `HOME:` maps to a plain Windows folder inside the solution:
-`<solution>\Virtual Controllers\<controller-name>\HOME\`. The dynamically
-loaded .tgs modules will live in `HOME:/TGS/` — creating that folder and
-copying `.mod` files into it with Explorer/Python stands in for the FTP
-transfer used on the real cell.
+`<solution>\Virtual Controllers\<controller-name>\HOME\`. In Phase 3 the .tgs
+module is **not** loaded in RobotStudio at all — the Python side copies it
+into `HOME:/TGS/` during the file-transfer request (the FTP stand-in), and
+`TG_Main` runs `Load \Dynamic` → `%name%` → `UnLoad` around the call.
+
+Setup changes from Phase 2:
+
+1. **Remove the manually loaded `TD05Test_Mod` module** from `T_ROB1`
+   (right-click → Delete, Apply). Only `TG_Comms` and `TG_Main` stay loaded.
+   (If you forget, the robot logs `TG WARN: module already loaded - using it`
+   and runs the pre-loaded copy — tolerated, but then the dynamic path is
+   not what is being tested.)
+2. Reload the updated `TG_Main.mod` (it now contains the Load/UnLoad logic).
+
+Run (note the 4th argument — adjust the path to your solution):
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 "C:\...\<solution>\Virtual Controllers\Controller1\HOME"
+```
+
+Expected additions to the transcripts:
+
+- Python: `transferred ...\abb\rapid\TGS\TD05Test.mod -> ...\HOME\TGS\TD05Test.mod`
+  during request 10.
+- Operator window: `TG: loading HOME:/TGS/TD05Test.mod` before
+  `TG: calling program TD05Test`.
+- In the RAPID browser you can watch the `TD05Test_Mod` module appear during
+  the run and disappear after `UnLoad`.
+
+Error paths (all end the cycle cleanly and reconnect):
+missing file → `TG ERROR: cannot load ...`; failed copy on the Python side →
+ftp status 0 → `TG ERROR: file transfer failed - skipping program`;
+module lacking the expected PROC → `TG ERROR: no PROC named ...`.
+
+**Pass criterion (Phase 3)**: two consecutive cycles with the module loaded
+from `HOME:/TGS/` each time (delete `HOME:\TGS\TD05Test.mod` beforehand to
+prove it is the fresh copy being run).
+
+## 7. Weld-frame demonstration (visible proof the received frame takes effect)
+
+`TD05Test.mod` moves to the **same target twice** — once before
+`TG_ReqWeldFrame` and once immediately after it — using
+`MoveJ rtWeldDemo,v200,fine,tTG_Weld\WObj:=wobjTG_Weld`. `rtWeldDemo` is
+expressed in `wobjTG_Weld`, so the identical instruction lands the robot in a
+different place once the HMI's frame has been written into the work object.
+
+With the default frame served by `abb_server.py`
+(`weld_frame_xyzwpr = [900, 80, 350, -2.5, 3.5, 90]`) and
+`rtWeldDemo` at `[1000, 0, 600]` in the work object:
+
+| | TCP in base coordinates |
+|---|---|
+| before `R_W_F` (frame reset to identity) | `[1000.00, 0.00, 600.00]` |
+| after `R_W_F` (frame received from the HMI) | `[873.83, 1114.73, 887.26]` |
+
+The two positions are **1158 mm apart** — the robot visibly swings left and up.
+Both are inside the IRB 4600-20/2.50 envelope (horizontal radius 1416 mm).
+The Operator Window prints both, so the move can be checked numerically:
+
+```
+TG DEMO: before R_W_F, TCP =[1000,0,600]
+TG: weld frame set, weld status = 1
+TG DEMO: after  R_W_F, TCP =[873.83,1114.73,887.26]
+```
+
+Change `weld_frame_xyzwpr` in `abb_server.py` and the "after" position follows
+it — that is the whole point of the frame request.
+
+Two demo-only concessions, marked as such in the module:
+
+- The weld frame is **reset to identity** right before the first move, so the
+  "before" position is identical on every cycle. `wobjTG_Weld` otherwise
+  persists between runs (exactly like FANUC `UFRAME[6]`), which would make
+  cycle 2's "before" equal to cycle 1's "after". A production .tgs program
+  must never clear a received frame.
+- `ConfJ\Off` / `ConfL\Off` around the demo (restored at the end): one stored
+  `confdata` cannot be valid for the same target evaluated in two different
+  frames, so configuration control is relaxed for the demonstration only.
+
+## 8. Cell I/O macros: TG_CamOpen / TG_CamClose (FANUC CAM_OPEN / CAM_CLOSE)
+
+`abb/rapid/TG_Cell.sys` ports the FANUC utility programs that flip the camera
+flap output (the cover shielding the lens from weld spatter). The signal is a
+dummy (`doTG_Camera`) and **must exist in the I/O configuration before the
+module can pass the program check** — otherwise Apply fails with an
+unknown-symbol error on `doTG_Camera`.
+
+Create the signal (once per controller system):
+
+1. Controller tab → **Configuration → I/O System** → type **Signal** →
+   right-click → *New Signal…*
+2. Name: `doTG_Camera` · Type of Signal: **Digital Output** ·
+   **Assigned to Device: leave blank** (an unassigned signal is simulated —
+   exactly right for the VC; the real cell maps it to the flap output).
+3. OK → **restart the controller** (warm start) when prompted — I/O config
+   changes only take effect after a restart.
+
+Then load `abb/rapid/TG_Cell.sys` into `T_ROB1` the same way as `TG_Comms.sys`
+(it is resident, like TG_Comms — the .tgs programs call it via the task-wide
+global scope) and Apply.
+
+What to watch during a run:
+
+- Operator Window: `TG: camera flap open` inside each capture branch,
+  `TG: camera flap closed` after global-captures-done, after the weld frame
+  request, and before rest home — the same call sites as FANUC lines 38/50,
+  62, 201 and 409 of `TD05tRJYQd.ls`.
+- I/O window (Controller tab → Inputs/Outputs, filter `doTG_Camera`): the
+  signal toggles 1/0 live during the cycle.
+
+No wire-protocol change: these macros are controller-local, so the Python side
+and its tests are unaffected.
+
+## 9. Settling fix verification (settle ladder in tgSendPose)
+
+Before every reported pose, `tgSendPose` now runs the full settle ladder —
+`WaitRob \InPos` → `WaitRob \ZeroSpeed` → `WaitTime nTG_SettleTime` — so no
+pose is reported while the servos are still converging (findings doc, "related
+observation"). `nTG_SettleTime` is a PERS num (default 0.2 s, the FANUC-parity
+value); tune it from the RAPID data view without reloading code, 0 disables it.
+
+Measured history on this VC, request 4's pose vs the programmed demo target
+`[1000, 0, 600]`:
+
+| Configuration | Reported pose | Error |
+|---|---|---|
+| no wait | `[1001.08, -0.29, 600.72]` | 1.3 mm |
+| `WaitRob \InPos` only | `[1000.24, -0.08, 600.14]` | 0.28 mm |
+| full ladder (expected) | `[1000.00, 0.00, 600.00]` | ≪ 0.1 mm |
+
+**Pass criteria** (reload `TG_Comms.sys`, run one cycle):
+
+1. Request 4's pose on the Python console reads `[[1000.00,0.00,600.00],[0,0,1,0]]`
+   (residuals ≪ 0.1 mm are fine).
+2. `R_C_F` and `R_C` at the same joint target report identical poses (with
+   `WaitRob \InPos` alone they still differed by ~2.2 mm).
+
+Cost: ~0.25 s per reported pose (5–9 per program). If that ever matters, lower
+`nTG_SettleTime`; keep the two `WaitRob` calls.
+
+## 10. Explicit \Tool/\WObj request parameters (plan §7.6, style b)
+
+*Status 2026-08-28: **all criteria met** — program check clean, two
+consecutive cycles, no fallback warning, every reported pose verified
+numerically at the 0.01 mm wire-quantization floor. Frame persistence through
+the parameter path confirmed: after the frames had been served once, the
+first `R_C_F` of every later cycle (including across a program restart)
+reported the predicted persisted value `[[1186.89,-91.53,1051.11],...]`.
+Note: reloading `TG_Comms.sys` resets the PERS frames to identity, so the
+very first post-reload `R_C_F` pose is in base — expected. Note for
+transcript diffing: `CRobT` may return the sign-flipped equivalent quaternion
+(one run's `R_W_F` gave `[0,-0,1,0]`, the next `[0,0,-1,0]` — same rotation)
+and signed zeros; compare poses numerically with q ≡ −q equivalence, never
+byte-wise on quaternion strings.*
+
+The pose-touching requests (`TG_ReqPassCheck`, `TG_ReqCamFrame`, `TG_ReqCapture`,
+`TG_ReqWeldFrame`, `TG_ReqEnd`) now take explicit `\PERS tooldata Tool,\PERS
+wobjdata WObj` arguments; `TD05Test.mod` and `TG_Main` pass them on every call.
+The FANUC-style modal numbers (`nTG_ActTool`/`nTG_ActFrame`) are still present
+as a **deprecated fallback** for argument-less calls — nothing exercises them
+in a normal cycle. The wire format is unchanged, so transcripts must match the
+Phase 3 / §9 runs exactly.
+
+Setup: reload `TG_Comms.sys`, `TG_Main.mod` (the .tgs module needs nothing —
+request 10 copies the updated `abb/rapid/TGS/TD05Test.mod` from the repo into
+`HOME:/TGS/` each cycle). Run two consecutive cycles.
+
+New syntax exercised (⚠ first VC contact for these, plan §2.14): optional
+`\PERS` parameters on user PROCs, conditional argument propagation
+(`tgSendPose \Tool?Tool \WObj?WObj`), and a component write through a PERS
+parameter (`WObj.uframe:=...`).
+
+**Pass criteria:**
+
+1. RAPID program check is clean after loading (this alone validates the §2.14
+   syntax).
+2. Two consecutive cycles with the request order of §5 — transcripts identical
+   to the §9 run: request 4's pose still `[[1000.00,0.00,600.00],[0,0,1,0]]`
+   (residuals ≪ 0.1 mm fine), and the weld-frame demo still reports two
+   different TCPs before/after `R_W_F` (this is the proof that the served
+   frame written *through the PERS parameter* reaches `wobjTG_Weld`).
+3. The Operator Window shows **no**
+   `TG WARNING: tgSendPose needs BOTH Tool and WObj` line — that warning means
+   some call passed only one argument and silently fell back to the deprecated
+   modal numbers.
+
+Optional fallback check (the back-pocket path still works): in the RAPID
+watch set `nTG_ActTool:=2`, `nTG_ActFrame:=5`, then from the FlexPendant
+call `TG_ReqEnd` with no arguments during a connected cycle — the reported
+pose should be the camera TCP in the camera frame. Not part of the standard
+pass criteria.
+
+## 11. Error-recovery fixes I1 + I4 (error matrix)
+
+I1: `ResetRetryCount` in `TG_SocketCom`'s reconnect retries (the RAPID retry
+counter is bounded by system parameter *No Of Retry*, default 4 — without the
+reset a run of consecutive connect failures halts the server loop). I4: a
+malformed frame payload now forces the skip path (R_C_F → `do capture = 0`)
+or the abort path (R_W_F → `weld status = 2` → `R_E`) instead of proceeding
+against the stale frame. Happy-path behavior and transcripts are unchanged.
+
+Setup: reload `TG_Comms.sys` only. Note the reload resets the PERS frames to
+identity, so first-cycle `R_C_F` poses are in base (expected, see §10).
+
+**Check 1 — program check + clean run.** RAPID program check clean (validates
+`ResetRetryCount` and the new branches), then one normal cycle: transcript
+identical to §10 (no new lines, no behavior change).
+
+**Check 2 — corrupt camera frame.**
+
+```
+python abb_server.py 127.0.0.1 2000 1 "<...>\HOME" corrupt-cam
+```
+
+Expected: request order `10, 5, 1, 1, 11, 4, 14, 100` — both R_C_F served,
+**no request 2** despite the HMI sending `do capture = 1`. Operator Window per
+R_C_F: `TG ERROR: bad pose payload:` + `[[850.00,-120.00,4` +
+`TG ERROR: bad cam frame payload - capture skipped` +
+`TG: cam frame set, do capture = 0`. The weld section then runs normally
+(demo TPWrites, request 14) and `R_E` completes the cycle.
+
+**Check 3 — corrupt weld frame.**
+
+```
+python abb_server.py 127.0.0.1 2000 1 "<...>\HOME" corrupt-weld
+```
+
+Expected: request order `10, 5, 1, 2, 1, 2, 11, 4, 100` — captures normal,
+**no request 14** despite the HMI sending `weld status = 1`. Operator Window:
+`TG ERROR: bad pose payload:` + payload +
+`TG ERROR: bad weld frame payload - aborting program` +
+`TG: weld frame set, weld status = 2`, the demo's "before" TPWrite but **no
+"after"** (abort skips the second demo move and the return home). The robot
+aborts from the demo position with the demo's identity frame, so R_E's pose
+reads `[[1000.00,0.00,600.00],[0,0,±1,0]]` (q ≡ −q, §10 note).
+
+**Pass criteria:** all three checks match; in checks 2–3 the wire choreography
+never desyncs (the Python side serves every request to completion and prints
+`robot disconnected (end of cycle)` / `all cycles complete`).
+
+I1's fault-injection validation (5+ consecutive connect failures surviving the
+retry limit) needs the `--die-at` harness from the matrix doc §6 — deferred
+with I2/I3; program check plus code review covers it until then.
+
+## 12. Stale-module fix I2 + I3 (error matrix F-B, F-E)
+
+An aborted cycle used to leave the .tgs module loaded in the task; the next
+cycle's `Load` hit `ERR_LOADED` and silently ran the **old in-memory copy**
+even though a fresh file had just been transferred. Fix (all marked with
+`! FIX 2026-08-28` comments in `TG_Main.mod`): `ERR_LOADED` → best-effort
+unload + `RETRY` the Load; a `tgTryUnload` helper + `tg_module_loaded` flag;
+and an explicit `RAISE` tail in `tgRunTgsProgram`'s handler — implementing it
+surfaced that a RAPID error handler falling off its end acts as RETURN, so
+mid-.tgs errors were being **silently swallowed** (F-E), never reaching
+`tgMainCycle`'s log line.
+
+Setup: reload `TG_Main.mod` only. Happy-path transcripts are unchanged.
+
+**Check 1 — program check + clean run.** Program check clean; one normal cycle
+identical to §10.
+
+**Check 2 — aborted cycle cleans up (F-B core + F-E).**
+
+1. Start `python abb_server.py 127.0.0.1 2000 1 "<...>\HOME"` and press
+   **Ctrl+C in the Python console** once a mid-program request is being served
+   (e.g. when `serving request 1` appears).
+2. Expected Operator Window — the F-E behavior change makes the abort visible
+   for the first time:
+   `TG: cycle error, ERRNO = …` (NEW — was silently absent before the fix),
+   then `TG: socket disconnected` / `TG: waiting for HMI on port 2000`.
+   No unload warning: the module was Load-ed by us, so the cleanup unload
+   succeeds silently.
+3. Run one normal cycle. Expected: `TG: loading HOME:/TGS/TD05Test.mod` with
+   **no** `TG WARN: module already loaded` — the abort left nothing behind.
+   Transcript matches §10.
+
+**Check 3 — fallback path still works (Phase-2 style manual load).** Load
+`TD05Test.mod` into T_ROB1 manually via RobotStudio, then run one cycle.
+Expected: `TG WARN: module already loaded - reloading from file`, then either
+(a) a clean reload (unload succeeded) or (b) `TG WARN: could not unload …` +
+`TG WARN: module already loaded - using it` (RobotStudio-loaded modules may
+not be UnLoad-able) — both acceptable; the cycle must complete either way.
+Record which of (a)/(b) the VC shows.
+
+**Check 4 — freshness proof (optional, strongest evidence).** After the
+Ctrl+C abort of check 2, temporarily edit a TPWrite string in the repo's
+`TD05Test.mod` (e.g. append `v2` to the `TG DEMO: before R_W_F` text), run one
+cycle, and confirm the **new** text prints — the freshly transferred file ran,
+not a stale module. Revert the edit afterwards.
+
+**Pass criteria:** checks 1–3 match (check 2's `TG: cycle error` line is the
+F-E confirmation ⚠); check 4 optional.
+
+## 13. Cell-macro placeholders (phase 4)
+
+`TG_Cell.sys` gained the remaining FANUC cell macros as **empty placeholder
+PROCs**: `TG_WeldPrep`, `TG_CamPrep`, `TG_DryRunOn`, `TG_DryRunOff`.
+`TD05Test.mod` now calls them in the FANUC sample's order (DRY_RUN_OFF →
+conditional DRY_RUN_ON after the password check; WELD_PREP at program start
+and again before the weld transition).
+
+Setup: reload `TG_Cell.sys` (TD05Test recopies itself on request 10).
+
+**Pass criteria:** (1) RAPID program check clean — this confirms the ⚠ that
+an empty PROC body is accepted; (2) one normal cycle with wire transcript and
+Operator Window identical to §10 (the placeholders are silent no-ops).
