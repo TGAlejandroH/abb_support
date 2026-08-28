@@ -252,3 +252,30 @@ What to watch during a run:
 
 No wire-protocol change: these macros are controller-local, so the Python side
 and its tests are unaffected.
+
+## 9. Settling fix verification (settle ladder in tgSendPose)
+
+Before every reported pose, `tgSendPose` now runs the full settle ladder —
+`WaitRob \InPos` → `WaitRob \ZeroSpeed` → `WaitTime nTG_SettleTime` — so no
+pose is reported while the servos are still converging (findings doc, "related
+observation"). `nTG_SettleTime` is a PERS num (default 0.2 s, the FANUC-parity
+value); tune it from the RAPID data view without reloading code, 0 disables it.
+
+Measured history on this VC, request 4's pose vs the programmed demo target
+`[1000, 0, 600]`:
+
+| Configuration | Reported pose | Error |
+|---|---|---|
+| no wait | `[1001.08, -0.29, 600.72]` | 1.3 mm |
+| `WaitRob \InPos` only | `[1000.24, -0.08, 600.14]` | 0.28 mm |
+| full ladder (expected) | `[1000.00, 0.00, 600.00]` | ≪ 0.1 mm |
+
+**Pass criteria** (reload `TG_Comms.sys`, run one cycle):
+
+1. Request 4's pose on the Python console reads `[[1000.00,0.00,600.00],[0,0,1,0]]`
+   (residuals ≪ 0.1 mm are fine).
+2. `R_C_F` and `R_C` at the same joint target report identical poses (with
+   `WaitRob \InPos` alone they still differed by ~2.2 mm).
+
+Cost: ~0.25 s per reported pose (5–9 per program). If that ever matters, lower
+`nTG_SettleTime`; keep the two `WaitRob` calls.

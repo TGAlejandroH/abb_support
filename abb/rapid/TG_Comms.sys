@@ -25,6 +25,13 @@ MODULE TG_Comms(SYSMODULE)
     PERS string stTG_ServerIP:="127.0.0.1";
     PERS num nTG_Port:=2000;
 
+    ! Settle time (s) applied after WaitRob and before every reported pose.
+    ! VC measurements (findings doc): WaitRob \InPos alone left up to ~2 mm
+    ! of residual convergence; 0.2 s reaches full settle (and matches the
+    ! FANUC WAIT 0.20 before R_C). Tune from the data view without reloading
+    ! code; on the real cell it also covers mechanical vibration damping.
+    PERS num nTG_SettleTime:=0.2;
+
     ! ------------------------------------------------------------------
     ! Shared state: FANUC register-map equivalents (plan 4.3).
     PERS string stTG_ProgPass:="none";     ! SR[24] program name == project password
@@ -247,6 +254,19 @@ MODULE TG_Comms(SYSMODULE)
         ! the Euler<->quaternion conversion now lives on the PC side.
         VAR robtarget rt;
         VAR pose p;
+        ! Never report a pose while the servos are still converging: on the
+        ! VC, CRobT read right after a fine point was 1-3 mm / ~0.08 deg off
+        ! the settled position (rapid_validation_findings_v1.md, 'related
+        ! observation'). Captures register against this reported pose, so
+        ! the error would flow into registration.
+        ! Measured escalation (2026-08-28): \InPos alone shrank the error
+        ! 1.3 mm -> 0.28 mm but left ~2 mm right after a move, so all three
+        ! stages are applied: stop point reached, true standstill, then a
+        ! settle time for residual servo creep / mechanical vibration
+        ! (FANUC used WAIT 0.20 + DELAY in the same places).
+        WaitRob \InPos;
+        WaitRob \ZeroSpeed;
+        IF nTG_SettleTime>0 WaitTime nTG_SettleTime;
         tTG_Scratch:=tgActTool();
         wobjTG_Scratch:=tgActWobj();
         rt:=CRobT(\Tool:=tTG_Scratch \WObj:=wobjTG_Scratch);

@@ -50,6 +50,6 @@ end-to-end against a RobotStudio virtual controller (2026-08-28).
 ## Out of scope for v1 (Phase 4 backlog)
 
 Real FTP to a physical IRC5 (FTP option), `R_W_S`, touch-sense and
-camera-calibration request families, RobotWare Arc welddata mapping,
-`WaitRob \InPos` before pose reports, and the C++ `ABBRobot : Robot` class in
-TGuideWeldingHMI.
+camera-calibration request families, RobotWare Arc welddata mapping, and the
+C++ `ABBRobot : Robot` class in TGuideWeldingHMI. (`WaitRob \InPos` before
+pose reports was promoted out of the backlog and is in `tgSendPose`.)

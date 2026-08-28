@@ -165,15 +165,59 @@ instruction.
 
 ---
 
-## Related observation (not a defect)
+## Related observation (not a defect) — FIXED 2026-08-28
 
 Within a cycle, `R_C_F` and `R_C` reported poses differing by roughly 3 mm and
-0.08° at the same joint target. Cause: `CRobT` is read a moment before the servos
-have fully settled, and `R_C` happens to read settled values because of the
-`WaitTime 0.2` that precedes it (FANUC used `DELAY` in the same places, for
-vibration damping). Harmless for the prototype, and left as-is. If capture-pose
-accuracy matters on the real cell, add `WaitRob \InPos` before the pose-reporting
-requests — carried in the Phase 4 backlog.
+0.08° at the same joint target; the weld-frame demo later showed the same
+effect directly (TCP reported `[1001.08, -0.29, 600.72]` at a fine point whose
+programmed target is `[1000, 0, 600]`). Cause: `CRobT` is read a moment before
+the servos have fully settled — `fine` releases program execution on the
+stop-point criteria, and convergence continues briefly afterwards. `R_C` read
+settled values only because of the `WaitTime 0.2` preceding it (FANUC used
+`DELAY` in the same places, for vibration damping).
+
+This matters beyond cosmetics: **captures register against the pose reported at
+that instant**, so the error flows straight into registration and weld placement.
+
+**Fix (promoted ahead of Phase 4, per team decision)** — applied in
+`tgSendPose`, one chokepoint covering every pose-reporting request
+(1, 2, 4, 5, 100). Arrived at in two measured steps:
+
+1. `WaitRob \InPos;` alone (tested on the VC 2026-08-28): request 4's pose
+   improved from `[1001.08, -0.29, 600.72]` to `[1000.24, -0.08, 600.14]`
+   against the programmed `[1000, 0, 600]` — error 1.3 mm → 0.28 mm — but a
+   pose read immediately after a move (`R_C_F`) was still ~2.2 mm away from
+   the settled value its `R_C` reported 200 ms later. As suspected, \InPos
+   shares its convergence criteria with the `fine`-point release, so it does
+   not guarantee standstill.
+2. Escalated to the full ladder:
+   ```rapid
+   WaitRob \InPos;
+   WaitRob \ZeroSpeed;
+   IF nTG_SettleTime>0 WaitTime nTG_SettleTime;
+   ```
+   `nTG_SettleTime` is a `PERS` (default **0.2 s** — the value the VC
+   measurements showed reaches full settle, and the FANUC parity value:
+   `WAIT 0.20` before `R_C`). Tunable from the data view without a code
+   reload; set to 0 to disable.
+
+**Validated on the VC 2026-08-28** with the full ladder: request 4 reported
+exactly `[[1000.00,0.00,600.00],[0,0,1,0]]` (zero error), and `R_C_F`/`R_C` at
+the same joints reported bit-identical poses. Summary of the measurements:
+
+| Configuration | Request-4 error | R_C_F vs R_C at same joints |
+|---|---|---|
+| no wait | 1.3 mm | ~2–3.5 mm apart |
+| `WaitRob \InPos` only | 0.28 mm | ~2.2 mm apart |
+| full ladder (`\InPos` + `\ZeroSpeed` + 0.2 s) | **0** | **identical** |
+
+The demo's raw `CPos` TPWrites (deliberately not behind the ladder) still show
+the unsettled value in the same run — a built-in control group demonstrating
+the ladder is what closes the gap.
+
+Exporter note either way: pose-reporting requests should follow a **stop point**
+(`fine`), not a fly-by zone — the FANUC sample does the same (`FINE` before
+`R_C`).
 
 ---
 
