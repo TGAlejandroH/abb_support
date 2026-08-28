@@ -1,0 +1,56 @@
+PROGRAM R_F_T
+    -- Request File Transfer
+
+VAR
+    comm_file:                 FILE
+    status:                    INTEGER
+    cmd:                       STRING[254]
+    resp:                      STRING[254]
+    ftp_status:                INTEGER
+    total:                     INTEGER
+    free:                      INTEGER
+    volume:                    STRING [30]
+	free_str:                  STRING[254]
+
+
+BEGIN -- Begin Program
+    
+    WRITE('Requesting FTP file transfer:', CR)
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+    
+	-- Sending request ID
+    resp = '10' -- request id
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+	
+	
+	-- ADDED on March 06, 2026
+	-- Sending free space in TPP memory - Returns the total bytes, free bytes, and volume name for the specified device
+    VOL_SPACE('tpp:', total, free, volume)
+    CNV_INT_STR(free, 1, 0, free_str)
+    
+    WRITE('Free TTP memory (bytes):', free_str, CR)
+    
+    WRITE comm_file (free_str)
+    READ comm_file (cmd::1)
+	
+    
+    -- Receiving FTP status
+    WRITE comm_file ('Give me FTP status')
+    READ comm_file (cmd::1)
+    CNV_STR_INT(cmd,ftp_status)
+    SET_INT_REG(189,ftp_status,status)
+    
+    -- ADDED on Dec 12, 2024
+	-- Receiving program name
+    WRITE comm_file ('Give me prog name')
+    READ comm_file (cmd::10)
+    SET_STR_REG(24, cmd, status)
+    
+	
+    
+    CLOSE FILE comm_file
+    DELAY 50
+	
+END R_F_T

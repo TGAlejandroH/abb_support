@@ -1,0 +1,31 @@
+PROGRAM R_G_C_D
+    -- Request Global Captures Done
+
+VAR
+    comm_file:          FILE
+    status:             INTEGER
+    cmd:                STRING[254]
+    resp:               STRING[254]
+    capture_status:     INTEGER
+
+BEGIN -- Begin main program
+
+    WRITE('Requesting global captures done.', CR)
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+    
+	--     Sending request ID
+    resp = '11' -- request id
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    
+    -- Receiving camera capture status
+    WRITE comm_file ('Give me global loc status')
+    READ comm_file (cmd::1)
+    CNV_STR_INT(cmd,capture_status)
+    SET_INT_REG(187,capture_status,status)
+    
+    CLOSE FILE comm_file
+
+END R_G_C_D

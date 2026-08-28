@@ -1,0 +1,24 @@
+PROGRAM REQ_PROG_SEL
+    -- Request Selected Program ID
+
+VAR
+    comm_file:         	FILE
+    status:             INTEGER
+    cmd:                STRING[254]
+    prog_idx:           INTEGER
+
+BEGIN
+
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+
+    -- Receiving selected program ID
+    WRITE comm_file ('Give me the program ID')
+    READ comm_file (cmd::1)
+    CNV_STR_INT(cmd, prog_idx)
+    SET_INT_REG(188, prog_idx, status)
+    WRITE('Received program ID: ', prog_idx, CR)
+
+    CLOSE FILE comm_file
+
+END REQ_PROG_SEL

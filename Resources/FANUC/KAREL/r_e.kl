@@ -1,0 +1,74 @@
+PROGRAM R_E
+    -- Request End
+
+
+VAR
+    comm_file:          FILE
+    status:             INTEGER
+    entry:              INTEGER
+    cmd:                STRING[254]
+    resp:               STRING[254]
+    sub_name: STRING[254]
+    out:               STRING[254]
+    keep_conn:          BOOLEAN
+    uframe_str:         STRING[1]
+    tool_str:           STRING[1]
+    cpos: XYZWPR
+    
+CONST
+    SERVER_TAG_NUM = 3
+    PORT_NUMBER = 18735
+    UFRAMENUM = 8
+    TOOLNUM = 8
+
+
+BEGIN -- Begin main program
+    -- clear screen
+DELAY 5
+    WRITE('Requesting capture frame.', CR)
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+    --     Sending request ID
+    resp = '100' -- request id
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    
+   
+   --     Sending current pose
+    $GROUP[1].$UTOOL = $MNUTOOL[1,$MNUTOOLNUM[1]]
+    $GROUP[1].$UFRAME = $MNUFRAME[1,$MNUFRAMENUM[1]]
+    
+    cpos = CURPOS(0, 0)
+    CNV_REAL_STR(cpos.x, 8, 3, out)
+    resp =  out
+
+    CNV_REAL_STR(cpos.y, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.z, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.w, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.p, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.r, 8, 3, out)
+    resp = resp + ',' + out
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    
+   --     Sending sub_name
+    GET_STR_REG(25,sub_name,status)
+    WRITE('sub_name.',sub_name, CR)
+    WRITE comm_file (sub_name)
+    READ comm_file (cmd::1)
+    
+    
+    CLOSE FILE comm_file
+   --RETURN(TRUE)
+    delay 5
+END R_E

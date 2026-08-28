@@ -1,0 +1,63 @@
+PROGRAM TGMAINKL
+    -- Main Program Loop
+%STACKSIZE = 4000
+%NOLOCKGROUP
+%NOPAUSE = ERROR + COMMAND + TPENABLE
+%ALPHABETIZE
+%COMMENT = 'MAPPDK SERVER V1.0.1'
+
+VAR
+    status:                 INTEGER
+    capture_status:         INTEGER
+    ftp_status:             INTEGER
+    r_flg:                  BOOLEAN
+    r_val:                  REAL
+    prog_idx:               INTEGER
+    prog_name:              STRING[254]
+
+BEGIN
+		-- Always close any open socket connection
+    	CALL_PROG('SOCKET_DISC', status)
+
+    	WHILE TRUE DO
+			
+			-- Robot waits for PC connection
+	    	CALL_PROG('SOCKET_COM', status)
+
+	    	CALL_PROG('REQ_PROG_SEL', status)
+	    	GET_REG(188, r_flg, prog_idx, r_val,  status)
+
+	    	IF prog_idx = 1 THEN
+	    		WRITE('Calling welding program', CR)
+
+	    		CALL_PROG('R_F_T', status)
+				status = 0
+
+				IF status = 0 THEN
+					GET_REG(189, r_flg, ftp_status, r_val, status)
+					WRITE('ftp_status: ', ftp_status, CR)
+			
+					IF ftp_status = 1 THEN
+
+						GET_STR_REG(24, prog_name,  status)
+						
+						WRITE('prog_name: ', prog_name, CR)
+						
+						CALL_PROG(prog_name, capture_status)
+						
+					ENDIF
+				ELSE
+					WRITE('ErrCode 1001. Problem when copying/loading the robot program.', status, CR)
+				ENDIF
+	    	ENDIF
+
+	    	IF prog_idx = 2 THEN
+	    		WRITE('Calling camera calibration program', CR)
+	    		CALL_PROG('CAMCALPROG', status)
+	    	ENDIF     
+
+	    	CALL_PROG('SOCKET_DISC',capture_status)
+
+    ENDWHILE
+
+END TGMAINKL

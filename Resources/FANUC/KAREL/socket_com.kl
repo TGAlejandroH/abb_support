@@ -1,0 +1,28 @@
+PROGRAM SOCKET_COM
+%STACKSIZE = 4000
+%NOLOCKGROUP
+%NOPAUSE = ERROR + COMMAND + TPENABLE
+%ALPHABETIZE
+%COMMENT = 'SOCKET SERVER V0.0.1'
+
+VAR
+    comm_file:          FILE
+    status:             INTEGER
+    entry:              INTEGER
+    cmd:                STRING[254]
+
+BEGIN
+    cmd = '0000'
+    
+    SET_FILE_ATR(comm_file, ATR_IA)
+    SET_VAR(entry, '*SYSTEM*','$HOSTC_CFG[3].$SERVER_PORT',2000,status)
+    WRITE(status, CR)
+
+    -- Always disconnect when attempting to connect
+    MSG_DISCO('S3:', status)
+    WRITE('Connecting...', CR)
+    
+    MSG_CONNECT('S3:', status)
+    WRITE('Connect Status = ', status, CR)
+
+END SOCKET_COM

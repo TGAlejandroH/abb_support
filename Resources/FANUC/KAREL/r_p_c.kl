@@ -1,0 +1,99 @@
+PROGRAM R_P_C
+    -- Request Password Check
+
+
+VAR
+    comm_file:          FILE
+    status:             INTEGER
+    entry:              INTEGER
+    cmd:                STRING[254]
+    resp:               STRING[254]
+    sub_name: STRING[254]
+    proj_pass: STRING[254]
+    out:               STRING[254]
+    keep_conn:          BOOLEAN
+    uframe_str:         STRING[1]
+    tool_str:           STRING[1]
+    cpos: XYZWPR
+    pass_correct:INTEGER
+    dry_run:INTEGER
+    
+CONST
+    SERVER_TAG_NUM = 3
+    PORT_NUMBER = 18735
+    UFRAMENUM = 8
+    TOOLNUM = 8
+
+
+BEGIN -- Begin main program
+    -- clear screen
+    --DELAY 5
+    WRITE('Requesting capture frame.', CR)
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+    --     Sending request ID
+    resp = '5' -- request id
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    
+   
+   --     Sending current pose
+    $GROUP[1].$UTOOL = $MNUTOOL[1,$MNUTOOLNUM[1]]
+    $GROUP[1].$UFRAME = $MNUFRAME[1,$MNUFRAMENUM[1]]
+    
+    cpos = CURPOS(0, 0)
+    CNV_REAL_STR(cpos.x, 8, 3, out)
+    resp =  out
+
+    CNV_REAL_STR(cpos.y, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.z, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.w, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.p, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.r, 8, 3, out)
+    resp = resp + ',' + out
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    
+   --     Sending sub_name
+    GET_STR_REG(25,sub_name,status)
+    WRITE('sub_name.',sub_name, CR)
+    WRITE comm_file (sub_name)
+    READ comm_file (cmd::1)
+    
+    
+     --     Sending password_name
+    GET_STR_REG(24,proj_pass,status)
+    WRITE('password.',proj_pass, CR)
+    WRITE comm_file (proj_pass)
+    READ comm_file (cmd::1)
+    
+     --     Receiving password check and dry-rin
+    WRITE comm_file ('Give me the status')
+    
+    WRITE('cmd: ',cmd, CR)
+    READ comm_file (cmd::2)
+    WRITE('cmd: ',cmd, CR)
+    
+    CNV_STR_INT(SUB_STR(cmd,1,1),pass_correct)
+    CNV_STR_INT(SUB_STR(cmd,2,1),dry_run)
+    WRITE('Got pass: ', pass_correct)
+    WRITE('Got dry run status: ', dry_run)
+   
+    SET_INT_REG(200,pass_correct,status)
+    SET_INT_REG(199,dry_run,status)
+    
+    
+    CLOSE FILE comm_file
+   --RETURN(TRUE)
+    --delay 5
+END R_P_C

@@ -1,0 +1,135 @@
+PROGRAM R_W_P
+    -- Request Welding Parameters
+	-- Miller Support
+	-- FroniusTPSi Support
+
+
+VAR
+    entry:              INTEGER
+    int_value:          INTEGER
+    comm_file:          FILE
+    status:             INTEGER
+    cmd:                STRING[254]
+    resp:               STRING[254]
+    flag:               INTEGER
+    proc_no:            STRING[254]
+	welder_type:        INTEGER
+    real_value:         REAL
+
+BEGIN -- Begin main program
+
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+    
+    --     Sending request ID
+    resp = '14' -- request id
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+	
+    -- Get user defined welding parameters flag
+    WRITE comm_file ('Give me UDWP flag')
+    READ comm_file (cmd::1)
+    CNV_STR_INT(SUB_STR(cmd,1,1), flag)
+    SET_INT_REG(170, flag, status)
+    
+    WRITE comm_file ('Give me travel speed')
+    cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9), real_value)
+    -- SET TRAVEL SPEED TO REGISTER
+    SET_REAL_REG(175, real_value, status)
+
+    IF flag = 1 THEN -- USER-DEFINED WELD PARAMETERS
+		
+		-- Get Welder Type 01 -> MILLER, 02 -> FRONIUSTPSi
+		WRITE comm_file ('Give me welder type')
+		cmd = ''
+		READ comm_file (cmd::2)
+		CNV_STR_INT(SUB_STR(cmd,1,2), welder_type)
+		
+		IF welder_type = 1 THEN
+		
+		   --WRITE('Receiving custom weld parameters', CR)
+		   proc_no = ''
+		   WRITE comm_file ('Give me proc')
+		   READ comm_file (proc_no::2)
+		   CNV_STR_INT(SUB_STR(proc_no,1,2), int_value)
+		   SET_INT_REG(171, int_value, status)
+		
+		   -- SET TRAVEL SPEED TO CUSTOM SCHEDULE
+		   SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_WSPEED',  real_value,  status)
+	
+		   WRITE comm_file ('Give me wire feed speed')
+		   cmd = ''
+		   READ comm_file (cmd::9)
+		   CNV_STR_REAL(SUB_STR(cmd,1,9), real_value)
+		   SET_REAL_REG(172, real_value, status)
+		   SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_VOLTS',  real_value,  status)
+		
+		   WRITE comm_file ('Give me arc length')
+		   cmd = ''
+		   READ comm_file (cmd::9)
+		   CNV_STR_REAL(SUB_STR(cmd,1,9), real_value)
+		   SET_REAL_REG(173, real_value, status)
+		   SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_WFS',  real_value,  status)
+		
+		   WRITE comm_file ('Give me arc control')
+		   cmd = ''
+		   READ comm_file (cmd::9)
+		   CNV_STR_REAL(SUB_STR(cmd,1,9), real_value)
+		   SET_REAL_REG(174, real_value, status)
+		   --SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_WSPEED',   real_value,  status)   - HARDCODED TO ZERO IN PREDEFINED SCHEDULE
+		ENDIF
+		
+		
+		IF welder_type = 2 THEN
+		   
+		   --WRITE('Receiving custom weld parameters', CR)
+		   WRITE comm_file ('Give me proc')
+		   proc_no = ''
+		   READ comm_file (proc_no::2)
+		   CNV_STR_INT(SUB_STR(proc_no,1,2), int_value)
+		   SET_INT_REG(171, int_value, status)
+		
+		   -- SET TRAVEL SPEED TO CUSTOM SCHEDULE
+		   SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_WSPEED',  real_value,  status)
+	
+		   WRITE comm_file ('Give me wire feed speed')
+		   cmd = ''
+		   READ comm_file (cmd::9)
+		   CNV_STR_REAL(SUB_STR(cmd,1,9), real_value)
+		   SET_REAL_REG(172, real_value, status)
+		   SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_VOLTS',  real_value,  status)
+		
+		   WRITE comm_file ('Give me arc length')
+		   cmd = ''
+		   READ comm_file (cmd::9)
+		   CNV_STR_REAL(SUB_STR(cmd,1,9), real_value)
+		   SET_REAL_REG(173, real_value, status)
+		   SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_WFS',  real_value,  status)
+		
+		   WRITE comm_file ('Give me arc control')
+		   cmd = ''
+		   READ comm_file (cmd::9)
+		   CNV_STR_REAL(SUB_STR(cmd,1,9), real_value)
+		   SET_REAL_REG(174, real_value, status)
+		   --SET_VAR (entry, 'AWE1WP'+proc_no, 'SCH[20].$CMD_WSPEED',   real_value,  status)   - HARDCODED TO ZERO IN PREDEFINED SCHEDULE
+		
+		
+		ENDIF
+		
+    ELSE
+
+    	--WRITE('Resetting weld schedule registers.', CR)
+    	SET_INT_REG(171, 0, status)
+    	SET_REAL_REG(172, 0.0, status)
+    	SET_REAL_REG(173, 0.0, status)
+    	SET_REAL_REG(174, 0.0, status)
+    	    			
+    ENDIF
+
+    
+    
+    CLOSE FILE comm_file
+
+END R_W_P

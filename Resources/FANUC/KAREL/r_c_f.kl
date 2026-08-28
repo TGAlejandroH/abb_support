@@ -1,0 +1,131 @@
+PROGRAM R_C_F
+    -- Request Camera Frame
+
+
+VAR
+    comm_file:          FILE
+    status:             INTEGER
+    entry:              INTEGER
+    capture_value: INTEGER
+    cmd:                STRING[254]
+    resp:               STRING[254]
+    sub_name: STRING[254]
+    out:               STRING[254]
+    keep_conn:          BOOLEAN
+    uframe_str:         STRING[1]
+    tool_str:           STRING[1]
+    cpos: XYZWPR
+    
+CONST
+    SERVER_TAG_NUM = 3
+    PORT_NUMBER = 18735
+    UFRAMENUM = 8
+    TOOLNUM = 8
+
+
+BEGIN -- Begin main program
+    -- clear screen
+	DELAY 5
+    WRITE('Requesting capture frame.', CR)
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+    --     Sending request ID
+    resp = '1' -- request id
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    
+   
+   --     Sending current pose
+    $GROUP[1].$UTOOL = $MNUTOOL[1,$MNUTOOLNUM[1]]
+    $GROUP[1].$UFRAME = $MNUFRAME[1,$MNUFRAMENUM[1]]
+    
+    cpos = CURPOS(0, 0)
+    CNV_REAL_STR(cpos.x, 8, 3, out)
+    resp =  out
+
+    CNV_REAL_STR(cpos.y, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.z, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.w, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.p, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.r, 8, 3, out)
+    resp = resp + ',' + out
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    DELAY 5
+   --     Sending sub_name
+    GET_STR_REG(25,sub_name,status)
+    WRITE('sub_name.',sub_name, CR)
+    WRITE comm_file (sub_name)
+    DELAY 5
+    READ comm_file (cmd::1)
+    DELAY 5
+    
+    
+    -- Receiving camera capture frame
+    
+    WRITE comm_file ('Give me the frame x')
+     --DELAY 5
+     cmd = ''
+    READ comm_file (cmd::9)
+    --DELAY 5
+    --WRITE(cmd::10,CR)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.x)
+    
+    WRITE comm_file ('Give me the frame y')
+     --DELAY 5
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.y)
+    
+    WRITE comm_file ('Give me the frame z')
+     --DELAY 5
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.z)
+    
+    WRITE comm_file ('Give me the frame w')
+     --DELAY 5
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.w)
+    
+    WRITE comm_file ('Give me the frame p')
+     --DELAY 5
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.p)
+    
+    WRITE comm_file ('Give me the frame r')
+     --DELAY 5
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.r)
+    
+    
+    -- Setting the received frame in the PR 5
+    WRITE(cpos,CR)
+    SET_EPOS_REG(5,cpos,status)
+    
+    -- Receiving the flag to perform camera capture or not
+    WRITE comm_file ('Give me capture status')
+    READ comm_file (cmd::1)
+    
+    CNV_STR_INT(SUB_STR(cmd,1,1),capture_value)
+    WRITE('Camera status: ', capture_value)
+    
+    SET_INT_REG(197,capture_value,status)
+    
+    CLOSE FILE comm_file
+   --RETURN(TRUE)
+    delay 5
+END R_C_F
