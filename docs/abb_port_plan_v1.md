@@ -1,7 +1,8 @@
 # FANUC → ABB Port: Plan & Recommended Design (v1)
 
-Status: **APPROVED with decisions locked (2026-08-27) — implementation not started.**
-Decisions log in §7 (formerly open questions).
+Status: **v1 PROTOTYPE COMPLETE — Phases 1–3 implemented and validated end-to-end
+on the RobotStudio virtual controller (2026-08-28).** Decisions log in §7;
+per-phase status notes in §5; controller-only RAPID gotchas recorded in §2/§4.
 Scope: prototype of the TetraGen HMI request protocol on ABB RAPID (IRC5, RobotWare
 6.15.08.0, IRB 4600-20/2.5) + a Python socket prototype standing in for the HMI.
 
@@ -392,8 +393,9 @@ criterion: connect / prog-sel / end / disconnect loop runs twice in a row.
 `hmi_prototype/abb_server.py`). Python side + pose codec + full choreography
 verified by automated tests (`hmi_prototype/test_phase1.py`, 11/11 green,
 including a fake-robot emulation of the RAPID message sequence). RAPID syntax
-cross-checked against the known-good RoboDK RW6 driver; RobotStudio validation
-pending — follow [robotstudio_setup.md](robotstudio_setup.md).*
+cross-checked against the known-good RoboDK RW6 driver.
+**Validated on the VC 2026-08-27** (two clean cycles, transcripts matched the
+expected choreography exactly).*
 
 **Phase 2 — priority requests.** All PROCs of §4.2 + shared PERS; Python handlers
 with dummy data; verify scalar field widths and the §4.5 pose codec round-trip
@@ -407,7 +409,12 @@ ERR_REFUNKPRC handling) — Phase 3 only adds Load/UnLoad + the file copy.
 13 new automated tests (24 total green): full-cycle choreography vs a fake-robot
 executable spec, plus every branch (ftp fail, wrong password → FANUC 'END'
 semantics, capture fail → abort, weld skip/abort, predefined vs user-defined
-schedule). RobotStudio validation pending — robotstudio_setup.md §5.*
+schedule).
+**Validated on the VC 2026-08-28** after two controller-only fixes (module-name
+ambiguity §4.1; stale PERS frame copy → modal-number active frame §4.3; CRobT
+PERS-parameter rule §2.10). Frame math verified numerically: the reported
+capture pose matched a hand-computed transform of the base pose into the served
+camera frame to 0.01 mm, and frames persist across cycles like FANUC UFRAME[n].*
 
 **Phase 3 — dynamic program flow.** `TG_Main` loop + `Load \Dynamic`/late
 binding/`UnLoad` + sample .tgs module; full end-to-end: Python pushes
@@ -419,7 +426,10 @@ ERR_REFUNKPRC and ERR_IOERROR (each ends the cycle with a clean R_E or a warn);
 `abb_server.py` takes an optional `vc_home_dir` argument and copies
 `abb/rapid/TGS/<prog>.mod` into `<HOME>/TGS/` during request 10, reporting a
 failed copy as ftp status 0 (FANUC error-path parity). 3 new tests (27 total
-green). RobotStudio validation pending — robotstudio_setup.md §6.*
+green).
+**Validated on the VC 2026-08-28**: two consecutive cycles with nothing
+pre-loaded — transfer → `Load \Dynamic` → late-bound call → all requests →
+`UnLoad` → `R_E` → disconnect → repeat. This completes the v1 prototype scope.*
 
 **Phase 4 — hardening & scope growth (post-prototype).** Reconnect/error-recovery
 matrix; real file transfer via the **FTP option** (decided §7; verify option id and
