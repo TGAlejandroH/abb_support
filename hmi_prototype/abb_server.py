@@ -20,11 +20,19 @@ Phase 2 scope: program selection + all priority requests
 Dummy, configurable answers everywhere; no real HMI/camera logic.
 
 Usage:
-    python abb_server.py [host] [port] [cycles]
-    defaults: 127.0.0.1 2000 2
+    python abb_server.py [host] [port] [cycles] [vc_home_dir]
+    defaults: 127.0.0.1 2000 2 (no module transfer)
+
+    vc_home_dir: path to the virtual controller's HOME folder (e.g.
+    "<solution>\\Virtual Controllers\\Controller1\\HOME"). When given, the
+    file-transfer request (10) copies abb/rapid/TGS/<prog_name>.mod into
+    <vc_home_dir>/TGS/ - the prototype's stand-in for the FTP upload the
+    real HMI will do (FTP option, plan section 7.3).
 """
 
 import math
+import os
+import shutil
 import socket
 import sys
 import time
@@ -112,12 +120,20 @@ class AbbTgsHmi:
     """Application-level request server / transport-level TCP client."""
 
     def __init__(self, host="127.0.0.1", port=2000, program_selection=1,
-                 verbose=True):
+                 verbose=True, vc_home_dir=None):
         self.host = host
         self.port = port
         self.program_selection = program_selection
         self.verbose = verbose
         self.sock = None
+
+        # Module transfer (the FTP stand-in): where the controller's HOME:
+        # lives on disk (virtual controller only), and where the .tgs module
+        # sources are in this repo.
+        self.vc_home_dir = vc_home_dir
+        self.tgs_source_dir = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "abb", "rapid", "TGS"))
 
         # ---- canned answers (dummy values; tweak to exercise robot branches)
         self.ftp_status = 1                # R_F_T: 1 = transfer succeeded
@@ -252,14 +268,32 @@ class AbbTgsHmi:
     def handle_file_transfer_req(self):
         """FANUC R_F_T (id 10): free memory in; transfer status + name out.
 
-        A real HMI would FTP the .tgs module to the controller here (for the
-        virtual controller: copy it into HOME:/TGS/, see robotstudio_setup.md).
-        The prototype only serves the status and the program name.
+        This is the point where the real HMI uploads the .tgs module to the
+        controller (FTP). The prototype copies the module file into the
+        virtual controller's HOME:/TGS/ folder when ``vc_home_dir`` is set;
+        a failed copy is reported to the robot as ftp status 0, which makes
+        TG_Main skip the program - same as the FANUC error path.
         """
         self.last_free_bytes = int(self.do_receive())
-        self.do_send(str(self.ftp_status))
+        status = self.ftp_status
+        if status == 1 and self.vc_home_dir:
+            try:
+                self._transfer_tgs_module()
+            except OSError as exc:
+                self._log(f"ERROR: module transfer failed: {exc}")
+                status = 0
+        self.do_send(str(status))
         self.do_send(self.prog_name)  # on FANUC this is the project password
                                       # (== program name); <= 10 chars
+
+    def _transfer_tgs_module(self):
+        """FTP stand-in: copy abb/rapid/TGS/<prog>.mod into <HOME>/TGS/."""
+        src = os.path.join(self.tgs_source_dir, f"{self.prog_name}.mod")
+        dst_dir = os.path.join(self.vc_home_dir, "TGS")
+        os.makedirs(dst_dir, exist_ok=True)
+        dst = os.path.join(dst_dir, f"{self.prog_name}.mod")
+        shutil.copyfile(src, dst)
+        self._log(f"  transferred {src} -> {dst}")
 
     def handle_global_captures_done_req(self):
         """FANUC R_G_C_D (id 11): global localization status out."""
@@ -311,7 +345,8 @@ def main(argv):
     host = argv[1] if len(argv) > 1 else "127.0.0.1"
     port = int(argv[2]) if len(argv) > 2 else 2000
     cycles = int(argv[3]) if len(argv) > 3 else 2
-    hmi = AbbTgsHmi(host=host, port=port)
+    vc_home_dir = argv[4] if len(argv) > 4 else None
+    hmi = AbbTgsHmi(host=host, port=port, vc_home_dir=vc_home_dir)
     for i in range(cycles):
         print(f"--- cycle {i + 1}/{cycles} ---", flush=True)
         hmi.serve_cycle()

@@ -135,7 +135,11 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
    consecutive .tgs programs can't collide).
 9. **No `GLOBAL` keyword and no `TRY/ENDTRY` in RAPID** — the pre-assessment's
    snippets are pseudo-code (see §3).
-10. **Pose math**: `CRobT(\Tool:=... \WObj:=...)` for current pose. ABB orientations
+10. **Pose math**: `CRobT(\Tool:=... \WObj:=...)` for current pose — and its
+    `\Tool`/`\WObj` are **PERS parameters**: passing a `VAR` or a FUNC result
+    raises "Argument error(123): not a persistent reference" (hit on the VC
+    2026-08-28; same rule as motion instructions). When the tool/wobj must be
+    computed, copy it into a scratch `PERS` first. ABB orientations
     are **normalized quaternions** (`orient`: q1²+q2²+q3²+q4²=1; violating it raises
     error 50076 "Orientation not correct"; `NOrient()` re-normalizes defensively).
     Verified 2026-08-27.
@@ -248,10 +252,13 @@ PERS wobjdata wobjTG_Weld := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,
 PERS tooldata tTG_Cam  := ...;  ! UT[2]  — DUMMY VALUES, replace with calibrated camera tool
 PERS tooldata tTG_Weld := ...;  ! UT[8]  — DUMMY VALUES, replace with calibrated torch TCP
 
-! FANUC modal UFRAME_NUM/UTOOL_NUM equivalent: the .tgs program declares which
-! tool/frame is "active" before issuing requests; request PROCs read the pose with these.
-PERS tooldata tTG_Act  := ...;   ! assigned tTG_Cam or tTG_Weld by the .tgs program
-PERS wobjdata wobjTG_Act := ...;
+! FANUC modal UFRAME_NUM/UTOOL_NUM equivalent: the .tgs program selects the
+! active tool/frame BY NUMBER; tgSendPose resolves the number to the LIVE
+! tooldata/wobjdata at read time. (Revised 2026-08-28 after VC testing: the
+! original PERS-to-PERS "active copy" went stale when a request updated the
+! frame — RAPID assignment copies by value. Numbers need no refresh.)
+PERS num nTG_ActTool  := 8;   ! UTOOL_NUM:  2=camera, 8=torch
+PERS num nTG_ActFrame := 0;   ! UFRAME_NUM: 5=camera, 6=weld, else base
 ```
 
 The received frames land in `wobjTG_Cam.uframe` / `wobjTG_Weld.uframe`
@@ -259,8 +266,14 @@ The received frames land in `wobjTG_Cam.uframe` / `wobjTG_Weld.uframe`
 argument of each move, "receiving the frame and updating it in the welding
 program" needs **no activation step** — the next `MoveL ... \WObj:=wobjTG_Weld`
 uses the new value. This is the RAPID answer to the `R_W_F → PR[6] → UFRAME[6]=PR[6]`
-idiom (and why the exporter's "re-emit UFRAME after frame-PR-writing routines"
-invariant has no ABB counterpart).
+idiom. **Caveat learned on the VC (2026-08-28)**: this holds only for data
+referenced *by name*. A PERS-to-PERS copy (the original `wobjTG_Act := wobjTG_Cam`
+"active frame") is by value and goes stale when the request updates the source —
+the exact hazard behind FANUC's "re-emit `UFRAME[n]=PR[n]` after every
+frame-PR-writing routine" invariant. The exporter must therefore never emit
+frame copies; the active tool/frame is selected by number (`nTG_ActFrame`) and
+resolved live inside `tgSendPose`, which makes the FANUC re-emit ritual
+unnecessary on ABB by construction.
 
 ### 4.4 Wire-protocol helpers (the "figure it out once" layer)
 
@@ -400,6 +413,13 @@ schedule). RobotStudio validation pending — robotstudio_setup.md §5.*
 binding/`UnLoad` + sample .tgs module; full end-to-end: Python pushes
 `TD05Test.mod` into VC `HOME:/TGS/` (file copy), selects program 1, robot loads
 and runs it, all requests served, `R_E`, disconnect, loop again.
+*Status 2026-08-28: implemented — `tgRunTgsProgram` does Load \Dynamic → %name% →
+UnLoad with graceful handling of ERR_LOADED (Phase-2 leftover module), ERR_UNLOAD,
+ERR_REFUNKPRC and ERR_IOERROR (each ends the cycle with a clean R_E or a warn);
+`abb_server.py` takes an optional `vc_home_dir` argument and copies
+`abb/rapid/TGS/<prog>.mod` into `<HOME>/TGS/` during request 10, reporting a
+failed copy as ftp status 0 (FANUC error-path parity). 3 new tests (27 total
+green). RobotStudio validation pending — robotstudio_setup.md §6.*
 
 **Phase 4 — hardening & scope growth (post-prototype).** Reconnect/error-recovery
 matrix; real file transfer via the **FTP option** (decided §7; verify option id and

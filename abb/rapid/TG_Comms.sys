@@ -58,11 +58,21 @@ MODULE TG_Comms(SYSMODULE)
     PERS tooldata tTG_Cam:=[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]];
     PERS tooldata tTG_Weld:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
 
-    ! FANUC modal UTOOL_NUM/UFRAME_NUM equivalent: the .tgs program assigns
-    ! the currently "active" tool/frame here before issuing requests; request
-    ! PROCs report the robot pose measured with these.
-    PERS tooldata tTG_Act:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
-    PERS wobjdata wobjTG_Act:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+    ! FANUC modal UTOOL_NUM/UFRAME_NUM equivalent: the .tgs program selects
+    ! the active tool/frame BY NUMBER before issuing requests; tgSendPose
+    ! resolves the number to the LIVE tooldata/wobjdata at read time.
+    ! (A PERS-to-PERS copy would go stale when a request updates the frame -
+    ! the same hazard FANUC handles by re-emitting UFRAME[n]=PR[n] after
+    ! every frame-PR-writing routine. Numbers need no refresh.)
+    PERS num nTG_ActTool:=8;               ! UTOOL_NUM:  2=camera, 8=torch
+    PERS num nTG_ActFrame:=0;              ! UFRAME_NUM: 5=camera, 6=weld, else base
+
+    ! Scratch persistents for CRobT: its \Tool/\WObj are PERS parameters
+    ! (a VAR or FUNC result is rejected with Argument error 123). tgSendPose
+    ! refreshes them from the live data on every call, so they cannot go
+    ! stale. Internal - never reference these in .tgs programs.
+    LOCAL PERS tooldata tTG_Scratch:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+    LOCAL PERS wobjdata wobjTG_Scratch:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
     ! ------------------------------------------------------------------
     ! Socket state. Lifecycle owned by TG_Main via TG_SocketCom/TG_SocketDisc;
@@ -211,13 +221,35 @@ MODULE TG_Comms(SYSMODULE)
         RETURN ok;
     ENDFUNC
 
+    LOCAL FUNC tooldata tgActTool()
+        ! Resolve the FANUC-style active tool number to live tooldata.
+        IF nTG_ActTool=2 THEN
+            RETURN tTG_Cam;
+        ENDIF
+        RETURN tTG_Weld;
+    ENDFUNC
+
+    LOCAL FUNC wobjdata tgActWobj()
+        ! Resolve the FANUC-style active frame number to live wobjdata.
+        IF nTG_ActFrame=5 THEN
+            RETURN wobjTG_Cam;
+        ELSEIF nTG_ActFrame=6 THEN
+            RETURN wobjTG_Weld;
+        ENDIF
+        RETURN wobj0;
+    ENDFUNC
+
     LOCAL PROC tgSendPose()
-        ! Robot->HMI: current pose of the ACTIVE tool in the ACTIVE wobj,
-        ! sent as a pose literal (plan 4.5). KAREL sent Euler x,y,z,w,p,r;
+        ! Robot->HMI: current pose of the ACTIVE tool in the ACTIVE frame
+        ! (resolved live, so a frame updated by a request is used by the
+        ! very next pose report - FANUC UFRAME[n]=PR[n] semantics included).
+        ! Sent as a pose literal (plan 4.5). KAREL sent Euler x,y,z,w,p,r;
         ! the Euler<->quaternion conversion now lives on the PC side.
         VAR robtarget rt;
         VAR pose p;
-        rt:=CRobT(\Tool:=tTG_Act \WObj:=wobjTG_Act);
+        tTG_Scratch:=tgActTool();
+        wobjTG_Scratch:=tgActWobj();
+        rt:=CRobT(\Tool:=tTG_Scratch \WObj:=wobjTG_Scratch);
         p.trans:=rt.trans;
         p.rot:=rt.rot;
         tgSendAck tgPoseToStr(p);

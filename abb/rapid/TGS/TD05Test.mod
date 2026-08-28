@@ -29,8 +29,8 @@ MODULE TD05Test_Mod
         stTG_ProgPass:="TD05Test";     ! SET_PASS_SR: program name == password
         stTG_RobStatus:="Ok";          ! SET_ROB_S_SR('Ok')
         stTG_SubName:="none";          ! deterministic start (SR[25] was stale on FANUC)
-        tTG_Act:=tTG_Weld;             ! UTOOL_NUM=8
-        wobjTG_Act:=wobj0;             ! UFRAME[9] home frame -> base for the demo
+        nTG_ActTool:=8;                ! UTOOL_NUM=8 (torch)
+        nTG_ActFrame:=0;               ! UFRAME[9] home frame -> base for the demo
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
 
         ! --- password / dry-run check (FANUC lines 9-16) ---
@@ -43,8 +43,11 @@ MODULE TD05Test_Mod
         ! weld enable signals are cell-specific, deferred to phase 4.
 
         ! --- capture set (FANUC lines 27-62: camera tool UT[2], frame UFRAME[5]) ---
-        tTG_Act:=tTG_Cam;              ! UTOOL_NUM=2
-        wobjTG_Act:=wobjTG_Cam;        ! UFRAME_NUM=5
+        nTG_ActTool:=2;                ! UTOOL_NUM=2 (camera)
+        nTG_ActFrame:=5;               ! UFRAME_NUM=5 - resolved LIVE by tgSendPose,
+                                       ! so the frame received by TG_ReqCamFrame is
+                                       ! used from the very next pose report
+                                       ! (FANUC needed UFRAME[5]=PR[5] re-emits)
         MoveAbsJ jtCap1,v100,fine,tTG_Cam;
         stTG_SubName:="C1PGlobal_m45_3";
         TG_ReqCamFrame;                ! R_C_F -> wobjTG_Cam.uframe + nTG_DoCapture
@@ -70,8 +73,8 @@ MODULE TD05Test_Mod
         ! FANUC: CAM_CLOSE / WELD_PREP - cell hardware macros, phase 4.
 
         ! --- weld (FANUC lines 197-226: torch UT[8], frame UFRAME[6]) ---
-        tTG_Act:=tTG_Weld;
-        wobjTG_Act:=wobjTG_Weld;
+        nTG_ActTool:=8;
+        nTG_ActFrame:=6;
         stTG_SubName:="PWeld2";
         TG_ReqWeldFrame;               ! R_W_F -> wobjTG_Weld.uframe + nTG_WeldStatus
         IF nTG_WeldStatus=2 GOTO abort_end;

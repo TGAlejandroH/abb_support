@@ -55,26 +55,45 @@ MODULE TG_Main
 
     LOCAL PROC tgRunTgsProgram()
         ! Run the .tgs program named by the HMI (FANUC: CALL_PROG(prog_name)).
-        ! Late binding: %string% calls the PROC whose name is in the string.
-        ! Phase 2: the .tgs module (e.g. abb/rapid/TGS/TD05Test.mod) must be
-        ! loaded manually in RobotStudio.
-        ! ---- Phase 3 ----
-        ! Load \Dynamic,"HOME:/TGS/"+stTG_ProgName+".mod";
-        ! ... call ...
-        ! UnLoad "HOME:/TGS/"+stTG_ProgName+".mod";
-        ! -----------------
+        ! The HMI put the module file into HOME:/TGS/ during
+        ! TG_ReqFileTransfer (real cell: FTP; prototype: file copy into the
+        ! VC's HOME folder). Load it dynamically, late-bind the PROC
+        ! (%string% calls the PROC whose name is in the string), unload it
+        ! again so the next transfer can replace the file. \Dynamic also
+        ! auto-unloads the module if PP is moved to main mid-run.
+        VAR string sPath;
+        sPath:="HOME:/TGS/"+stTG_ProgName+".mod";
+        TPWrite "TG: loading "+sPath;
+        Load \Dynamic,sPath;
         TPWrite "TG: calling program "+stTG_ProgName;
         %stTG_ProgName%;
         TPWrite "TG: program "+stTG_ProgName+" finished";
+        UnLoad sPath;
     ERROR
-        IF ERRNO=ERR_REFUNKPRC THEN
-            ! Program not loaded / name wrong: report and end the cycle
-            ! cleanly so the HMI is not left waiting mid-protocol.
+        IF ERRNO=ERR_LOADED THEN
+            ! A module of this name is already in the task (e.g. loaded
+            ! manually during Phase 2 testing): skip the Load, run it as-is.
+            TPWrite "TG WARN: module already loaded - using it";
+            TRYNEXT;
+        ELSEIF ERRNO=ERR_UNLOAD THEN
+            ! Unload failed (module was the manually loaded one): keep going.
+            TPWrite "TG WARN: could not unload "+sPath;
+            TRYNEXT;
+        ELSEIF ERRNO=ERR_REFUNKPRC THEN
+            ! Module loaded but no PROC of that name / name wrong: report
+            ! and end the cycle cleanly so the HMI is not left waiting.
             TPWrite "TG ERROR: no PROC named "+stTG_ProgName;
             stTG_SubName:="none";
             TG_ReqEnd;
             RETURN;
+        ELSEIF ERRNO=ERR_IOERROR THEN
+            ! File missing/unreadable in HOME:/TGS/.
+            TPWrite "TG ERROR: cannot load "+sPath;
+            stTG_SubName:="none";
+            TG_ReqEnd;
+            RETURN;
         ENDIF
+        ! Anything else propagates to tgMainCycle, which resets the cycle.
     ENDPROC
 
 ENDMODULE

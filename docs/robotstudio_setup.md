@@ -137,10 +137,43 @@ end request, exactly like the FANUC `END`; `weld_status = 2` → abort path;
 `udwp_flag = 0` → predefined weld schedule). The automated tests in
 `hmi_prototype/test_phase2.py` cover the same branches against a fake robot.
 
-## 6. For Phase 3 (reference)
+## 6. Phase 3: dynamic loading (nothing pre-loaded)
 
 The VC's `HOME:` maps to a plain Windows folder inside the solution:
-`<solution>\Virtual Controllers\<controller-name>\HOME\`. The dynamically
-loaded .tgs modules will live in `HOME:/TGS/` — creating that folder and
-copying `.mod` files into it with Explorer/Python stands in for the FTP
-transfer used on the real cell.
+`<solution>\Virtual Controllers\<controller-name>\HOME\`. In Phase 3 the .tgs
+module is **not** loaded in RobotStudio at all — the Python side copies it
+into `HOME:/TGS/` during the file-transfer request (the FTP stand-in), and
+`TG_Main` runs `Load \Dynamic` → `%name%` → `UnLoad` around the call.
+
+Setup changes from Phase 2:
+
+1. **Remove the manually loaded `TD05Test_Mod` module** from `T_ROB1`
+   (right-click → Delete, Apply). Only `TG_Comms` and `TG_Main` stay loaded.
+   (If you forget, the robot logs `TG WARN: module already loaded - using it`
+   and runs the pre-loaded copy — tolerated, but then the dynamic path is
+   not what is being tested.)
+2. Reload the updated `TG_Main.mod` (it now contains the Load/UnLoad logic).
+
+Run (note the 4th argument — adjust the path to your solution):
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 "C:\...\<solution>\Virtual Controllers\Controller1\HOME"
+```
+
+Expected additions to the transcripts:
+
+- Python: `transferred ...\abb\rapid\TGS\TD05Test.mod -> ...\HOME\TGS\TD05Test.mod`
+  during request 10.
+- Operator window: `TG: loading HOME:/TGS/TD05Test.mod` before
+  `TG: calling program TD05Test`.
+- In the RAPID browser you can watch the `TD05Test_Mod` module appear during
+  the run and disappear after `UnLoad`.
+
+Error paths (all end the cycle cleanly and reconnect):
+missing file → `TG ERROR: cannot load ...`; failed copy on the Python side →
+ftp status 0 → `TG ERROR: file transfer failed - skipping program`;
+module lacking the expected PROC → `TG ERROR: no PROC named ...`.
+
+**Pass criterion (Phase 3)**: two consecutive cycles with the module loaded
+from `HOME:/TGS/` each time (delete `HOME:\TGS\TD05Test.mod` beforehand to
+prove it is the fresh copy being run).
