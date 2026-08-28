@@ -4,26 +4,15 @@ PROGRAM R_C
 VAR
     comm_file:          FILE
     status:             INTEGER
-    entry:              INTEGER
     cmd:                STRING[254]
     resp:               STRING[254]
     sub_name:           STRING[254]
     out:                STRING[254]
-    keep_conn:          BOOLEAN
-    uframe_str:         STRING[1]
-    tool_str:           STRING[1]
     cpos:               XYZWPR
     capture_status:     INTEGER
-    
-CONST
-    SERVER_TAG_NUM = 3
-    PORT_NUMBER = 18735
-    UFRAMENUM = 8
-    TOOLNUM = 8
 
 
-BEGIN -- Begin main program
-    -- clear screen
+BEGIN
     
     -- Delay to wait for vibrations to dampen. Adjust as needed.
     DELAY 5
@@ -31,14 +20,13 @@ BEGIN -- Begin main program
     WRITE('Requesting capture frame.', CR)
     SET_FILE_ATR(comm_file, ATR_IA)
     OPEN FILE comm_file ('rw', 'S3:')
-    --     Sending request ID
+
+    -- Sending request ID
     resp = '2' -- request id
-    
     WRITE comm_file (resp)
     READ comm_file (cmd::1)
-    
-   
-    -- Sending Current pose
+
+    -- Sending current pose
     $GROUP[1].$UTOOL = $MNUTOOL[1,$MNUTOOLNUM[1]]
     $GROUP[1].$UFRAME = $MNUFRAME[1,$MNUFRAMENUM[1]]
     
@@ -60,9 +48,9 @@ BEGIN -- Begin main program
 
     CNV_REAL_STR(cpos.r, 8, 3, out)
     resp = resp + ',' + out
-    
+
     WRITE('Sending capture frame:',CR,resp, CR)
-    
+
     WRITE comm_file (resp)
     READ comm_file (cmd::1)
     
@@ -77,9 +65,6 @@ BEGIN -- Begin main program
     READ comm_file (cmd::1)
     CNV_STR_INT(cmd,capture_status)
     SET_INT_REG(196,capture_status,status)
-    
-    
+
     CLOSE FILE comm_file
-   --RETURN(TRUE)
-    delay 5
 END R_C
