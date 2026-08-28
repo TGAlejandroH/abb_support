@@ -2,11 +2,14 @@
 
 Status: **v1 PROTOTYPE COMPLETE — Phases 1–3 implemented and validated end-to-end
 on the RobotStudio virtual controller (2026-08-28).** Decisions log in §7;
-per-phase status notes in §5; controller-only RAPID gotchas recorded in §2/§4.
+per-phase status notes in §5; controller-only RAPID gotchas inline in §2/§4 and
+collected in the findings doc below.
 Scope: prototype of the TetraGen HMI request protocol on ABB RAPID (IRC5, RobotWare
 6.15.08.0, IRB 4600-20/2.5) + a Python socket prototype standing in for the HMI.
 
 Related docs:
+- [rapid_validation_findings_v1.md](rapid_validation_findings_v1.md) — **the three defects found during VC validation**, their root causes and the rules they imply for the production port and the exporter.
+- [robotstudio_setup.md](robotstudio_setup.md) — how to build the VC and run each phase's smoke test.
 - [fanuc_hmi_request_program_calls_v1.md](fanuc_hmi_request_program_calls_v1.md) — request-number table (authoritative).
 - [abb_robot_architecture_guide.md](abb_robot_architecture_guide.md) — pre-assessment. Feasible overall; §3 below lists corrections.
 - [RDK_DriverSocket_RW5_6_vs_RW7.md](RDK_DriverSocket_RW5_6_vs_RW7.md) — RW6 vs RW7 socket API (identical for our purposes).
@@ -464,7 +467,7 @@ Python prototype into a C++ `ABBRobot : Robot` class in TGuideWeldingHMI (small:
 8. Tool/frame numbers (UT2/UT8/UFRAME5/6/9) become the named PERS data of §4.3
    with **dummy values marked `! TODO replace with calibrated data`**.
 
-## 7. Decisions log (answered by A. Hernandez, 2026-08-27)
+## 7. Decisions log
 
 1. **Wire compatibility**: byte-level FANUC compatibility for the message
    choreography (ids, prompts, acks, scalar widths), **except frames/poses**, which

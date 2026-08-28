@@ -18,6 +18,7 @@ end-to-end against a RobotStudio virtual controller (2026-08-28).
 | `hmi_prototype/abb_server.py` | Python HMI prototype: serves all robot-initiated requests with dummy data; Euler↔quaternion pose codec; copies the .tgs module into the VC's `HOME:/TGS/` (FTP stand-in) |
 | `hmi_prototype/test_phase*.py` | 27 automated tests incl. fake-robot executable specs of the RAPID choreography |
 | `docs/abb_port_plan_v1.md` | **The** design doc: extracted FANUC protocol, ABB architecture, decisions log, RAPID gotchas learned on the controller |
+| `docs/rapid_validation_findings_v1.md` | The three defects found during VC validation — root causes and the rules they imply for the production port |
 | `docs/robotstudio_setup.md` | How to build the VC and run each phase's smoke test |
 | `docs/fanuc_hmi_request_program_calls_v1.md` | FANUC request-number table (reference) |
 | `resources/FANUC/` | Source material: KAREL/LS programs, sample .tgs export, Python socket sample |
