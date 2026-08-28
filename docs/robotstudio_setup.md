@@ -96,7 +96,48 @@ start order does not matter, robot-first is simplest.
 | `TG: cycle error, ERRNO = …` then a new cycle | Expected recovery path: the HMI side died mid-cycle; the robot resets the sockets and listens again. |
 | Port seems dead after stopping RAPID mid-cycle | Restart the program from main — `main()` starts with `TG_SocketDisc` and `TG_SocketCom` closes before re-creating. Worst case: warm-start the controller. |
 
-## 5. For Phase 3 (reference)
+## 5. Phase 2: full request set + sample .tgs program
+
+Additional module to load (same way as §2):
+
+3. Right-click `T_ROB1` → **Load Module…** → `abb/rapid/TGS/TD05Test.mod`.
+
+In Phase 2 the .tgs module is loaded manually; `TG_Main` calls it by the name
+the HMI sends, via late binding (`%stTG_ProgName%`). Phase 3 adds `Load`/
+`UnLoad` from `HOME:/TGS/` so nothing is pre-loaded.
+
+⚠ **The robot moves in this phase** (`MoveAbsJ` between safe joint poses at
+`v100`). Run it in the simulated station; keep the default joint targets
+unless you have changed the cell.
+
+Run exactly as in §3. One Python cycle now exercises every priority request:
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 1
+```
+
+Expected request order on the Python console:
+`10` (file transfer) → `5` (pass check) → `1`,`2`,`1`,`2` (two camera
+frames + captures) → `11` (global captures done) → `4` (weld frame) →
+`14` (weld params) → `100` (end).
+
+Things worth checking after the run (Controller tab → RAPID → `TG_Comms` data,
+or a RAPID Watch on the PERS variables):
+
+- `wobjTG_Cam.uframe` ≈ `[[850,-120,400],[…]]` and `wobjTG_Weld.uframe` ≈
+  `[[900,80,350],[…]]` — the dummy frames served by `abb_server.py`
+  (`cam_frame_xyzwpr` / `weld_frame_xyzwpr`), proving the received frames
+  landed in the work objects the .tgs program uses.
+- `nTG_TravelSpeed`=17.5, `nTG_WeldProc`=5, `nTG_WireFeed`=250,
+  `nTG_ArcLength`=2.5, `nTG_PassOK`=1, `nTG_GlobalCapOK`=1.
+
+To exercise the robot-side branches, edit the canned values at the top of
+`AbbTgsHmi.__init__` (e.g. `pass_ok = 0` → the program terminates without the
+end request, exactly like the FANUC `END`; `weld_status = 2` → abort path;
+`udwp_flag = 0` → predefined weld schedule). The automated tests in
+`hmi_prototype/test_phase2.py` cover the same branches against a fake robot.
+
+## 6. For Phase 3 (reference)
 
 The VC's `HOME:` maps to a plain Windows folder inside the solution:
 `<solution>\Virtual Controllers\<controller-name>\HOME\`. The dynamically

@@ -40,6 +40,7 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_GlobalCapOK:=0;           ! R[187] global captures done status
     PERS num nTG_WeldStatus:=0;            ! R[198] 0=skip weld, 1=weld, 2=abort program
     PERS num nTG_UdwpFlag:=0;              ! R[170] user-defined weld params flag
+    PERS num nTG_WelderType:=0;            ! 1=Miller, 2=FroniusTPSi (KAREL local var)
     PERS num nTG_WeldProc:=0;              ! R[171] weld procedure number
     PERS num nTG_WireFeed:=0;              ! R[172] wire feed speed
     PERS num nTG_ArcLength:=0;             ! R[173] arc length
@@ -161,12 +162,23 @@ MODULE TG_Comms(SYSMODULE)
 
     LOCAL FUNC num tgParseReal(string s)
         ! Tolerant scalar parse; returns 0 on garbage (and reports it).
+        ! Strips the FANUC-format leading "+" ("+0017.500"): an explicit plus
+        ! sign is not part of a RAPID num literal, so StrToVal may reject it.
+        ! (Nested IFs: RAPID AND does not short-circuit; local copy: IN
+        ! parameters are not writable.)
+        VAR string s2;
         VAR num v:=0;
         VAR bool ok;
-        ok:=StrToVal(s,v);
+        s2:=s;
+        IF StrLen(s2)>0 THEN
+            IF StrPart(s2,1,1)="+" THEN
+                s2:=StrPart(s2,2,StrLen(s2)-1);
+            ENDIF
+        ENDIF
+        ok:=StrToVal(s2,v);
         IF NOT ok THEN
             TPWrite "TG ERROR: bad number payload:";
-            TPWrite s;
+            TPWrite s2;
             v:=0;
         ENDIF
         RETURN v;
@@ -213,9 +225,7 @@ MODULE TG_Comms(SYSMODULE)
 
 
     !===================================================================
-    ! Request PROCs - Phase 1 subset
-    ! (Phase 2 adds: TG_ReqFileTransfer, TG_ReqPassCheck, TG_ReqCamFrame,
-    !  TG_ReqCapture, TG_ReqGlobalCapDone, TG_ReqWeldFrame, TG_ReqWeldParams)
+    ! Request PROCs (priority set, plan section 1.4)
     !===================================================================
 
     PROC TG_ReqProgSel()
@@ -242,6 +252,149 @@ MODULE TG_Comms(SYSMODULE)
         tgSendPose;
         tgSendAck stTG_SubName;
         TPWrite "TG: end request served";
+    ENDPROC
+
+    PROC TG_ReqFileTransfer()
+        ! FANUC: R_F_T (HMI request id 10) - the HMI transfers the .tgs
+        ! program module now, then reports the transfer status and the
+        ! program name. -> nTG_FtpStatus (R[189]), stTG_ProgName (SR[24];
+        ! on FANUC the program name doubles as the project password).
+        VAR string reply;
+        tgSendAck "10";
+        ! Free space on the program storage. FANUC sent VOL_SPACE of tpp:.
+        ! TODO Phase 4: real value via FSSize("HOME:" ...) - dnum territory,
+        ! num only holds exact integers to 2^23. Dummy is safe: the HMI just
+        ! checks the program fits.
+        tgSendAck "99999999";
+        reply:=tgPromptRecv("Give me FTP status");
+        nTG_FtpStatus:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me prog name");
+        stTG_ProgName:=reply;
+        TPWrite "TG: ftp status = "\Num:=nTG_FtpStatus;
+        TPWrite "TG: prog name = "+stTG_ProgName;
+    ENDPROC
+
+    PROC TG_ReqPassCheck()
+        ! FANUC: R_P_C (HMI request id 5) - password / dry-run check.
+        ! Sequence: id -> pose -> sub token -> password -> recv 2 chars
+        ! (char 1 = password correct, char 2 = dry run).
+        ! -> nTG_PassOK (R[200]), nTG_DryRun (R[199])
+        VAR string reply;
+        tgSendAck "5";
+        tgSendPose;
+        tgSendAck stTG_SubName;
+        tgSendAck stTG_ProgPass;
+        reply:=tgPromptRecv("Give me the status");
+        IF StrLen(reply)>=2 THEN
+            nTG_PassOK:=tgParseReal(StrPart(reply,1,1));
+            nTG_DryRun:=tgParseReal(StrPart(reply,2,1));
+        ELSE
+            nTG_PassOK:=0;
+            nTG_DryRun:=0;
+            TPWrite "TG ERROR: bad pass-check payload:";
+            TPWrite reply;
+        ENDIF
+        TPWrite "TG: pass ok = "\Num:=nTG_PassOK;
+        TPWrite "TG: dry run = "\Num:=nTG_DryRun;
+    ENDPROC
+
+    PROC TG_ReqCamFrame()
+        ! FANUC: R_C_F (HMI request id 1) - request camera frame.
+        ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal,
+        ! plan 4.5; KAREL received 6 prompted reals) -> recv capture flag.
+        ! -> wobjTG_Cam.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197])
+        VAR string reply;
+        VAR pose pFrame;
+        tgSendAck "1";
+        tgSendPose;
+        tgSendAck stTG_SubName;
+        reply:=tgPromptRecv("Give me the frame");
+        IF tgTryStrToPose(reply,pFrame) THEN
+            wobjTG_Cam.uframe:=pFrame;
+        ENDIF
+        reply:=tgPromptRecv("Give me capture status");
+        nTG_DoCapture:=tgParseReal(reply);
+        TPWrite "TG: cam frame set, do capture = "\Num:=nTG_DoCapture;
+    ENDPROC
+
+    PROC TG_ReqCapture()
+        ! FANUC: R_C (HMI request id 2) - request camera capture at the
+        ! current position. -> nTG_CaptureOK (R[196])
+        VAR string reply;
+        ! FANUC: DELAY 5 (ms) "to wait for vibrations to dampen. Adjust as
+        ! needed." Increase for the real cell if captures come out blurred.
+        WaitTime 0.005;
+        tgSendAck "2";
+        tgSendPose;
+        tgSendAck stTG_SubName;
+        reply:=tgPromptRecv("Give me capture status");
+        nTG_CaptureOK:=tgParseReal(reply);
+        TPWrite "TG: capture ok = "\Num:=nTG_CaptureOK;
+    ENDPROC
+
+    PROC TG_ReqGlobalCapDone()
+        ! FANUC: R_G_C_D (HMI request id 11) - all global captures done;
+        ! the HMI runs global localization. -> nTG_GlobalCapOK (R[187])
+        VAR string reply;
+        tgSendAck "11";
+        reply:=tgPromptRecv("Give me global loc status");
+        nTG_GlobalCapOK:=tgParseReal(reply);
+        TPWrite "TG: global loc ok = "\Num:=nTG_GlobalCapOK;
+    ENDPROC
+
+    PROC TG_ReqWeldFrame()
+        ! FANUC: R_W_F (HMI request id 4) - request weld frame.
+        ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal)
+        ! -> recv weld status (0=skip, 1=weld, 2=abort program).
+        ! -> wobjTG_Weld.uframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
+        VAR string reply;
+        VAR pose pFrame;
+        tgSendAck "4";
+        tgSendPose;
+        tgSendAck stTG_SubName;
+        reply:=tgPromptRecv("Give me the frame");
+        IF tgTryStrToPose(reply,pFrame) THEN
+            wobjTG_Weld.uframe:=pFrame;
+        ENDIF
+        reply:=tgPromptRecv("Give me weld status");
+        nTG_WeldStatus:=tgParseReal(reply);
+        TPWrite "TG: weld frame set, weld status = "\Num:=nTG_WeldStatus;
+    ENDPROC
+
+    PROC TG_ReqWeldParams()
+        ! FANUC: R_W_P (HMI request id 14) - welding parameters.
+        ! -> nTG_UdwpFlag (R[170]), nTG_TravelSpeed (R[175]); when the flag
+        ! is set also nTG_WelderType, nTG_WeldProc (R[171]), nTG_WireFeed
+        ! (R[172]), nTG_ArcLength (R[173]), nTG_ArcControl (R[174]).
+        ! KAREL additionally wrote the values into the ArcTool schedule
+        ! (SET_VAR AWE1WP*/SCH[20]) - the RobotWare Arc welddata mapping is
+        ! deferred (plan, phase 4); values are only stored in PERS here.
+        ! KAREL's two welder-type branches were byte-identical; collapsed.
+        VAR string reply;
+        tgSendAck "14";
+        reply:=tgPromptRecv("Give me UDWP flag");
+        nTG_UdwpFlag:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me travel speed");
+        nTG_TravelSpeed:=tgParseReal(reply);
+        IF nTG_UdwpFlag=1 THEN
+            reply:=tgPromptRecv("Give me welder type");
+            nTG_WelderType:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me proc");
+            nTG_WeldProc:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me wire feed speed");
+            nTG_WireFeed:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me arc length");
+            nTG_ArcLength:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me arc control");
+            nTG_ArcControl:=tgParseReal(reply);
+        ELSE
+            ! KAREL resets the schedule registers when not user-defined
+            nTG_WeldProc:=0;
+            nTG_WireFeed:=0;
+            nTG_ArcLength:=0;
+            nTG_ArcControl:=0;
+        ENDIF
+        TPWrite "TG: weld params, UDWP = "\Num:=nTG_UdwpFlag;
     ENDPROC
 
 ENDMODULE

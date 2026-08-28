@@ -25,19 +25,20 @@ MODULE TG_Main
 
     LOCAL PROC tgMainCycle()
         ! One HMI session: connect, serve one program selection, disconnect.
+        ! Mirrors TGMAINKL: prog-sel -> file transfer -> run the .tgs program.
         TG_SocketCom;
         TG_ReqProgSel;
         IF nTG_ProgSel=1 THEN
-            ! ---- Phase 3 ----
-            ! TG_ReqFileTransfer;                  -> nTG_FtpStatus, stTG_ProgName
-            ! IF nTG_FtpStatus=1 tgRunTgsProgram;  Load \Dynamic + %name% + UnLoad
-            ! -----------------
-            ! Phase 1 placeholder: end the cycle so the HMI sees the full
-            ! FANUC choreography (prog-sel ... R_E ... disconnect).
-            stTG_SubName:="none";
-            TG_ReqEnd;
+            TG_ReqFileTransfer;
+            IF nTG_FtpStatus=1 THEN
+                tgRunTgsProgram;
+            ELSE
+                ! FANUC: 'ErrCode 1001. Problem when copying/loading...'
+                TPWrite "TG ERROR: file transfer failed - skipping program";
+            ENDIF
         ELSEIF nTG_ProgSel=2 THEN
             ! Camera calibration program: out of v1 scope (plan, phase 4).
+            TPWrite "TG: camera calibration not implemented - ending cycle";
             stTG_SubName:="none";
             TG_ReqEnd;
         ELSE
@@ -50,6 +51,30 @@ MODULE TG_Main
         TPWrite "TG: cycle error, ERRNO = "\Num:=ERRNO;
         TG_SocketDisc;
         RETURN;
+    ENDPROC
+
+    LOCAL PROC tgRunTgsProgram()
+        ! Run the .tgs program named by the HMI (FANUC: CALL_PROG(prog_name)).
+        ! Late binding: %string% calls the PROC whose name is in the string.
+        ! Phase 2: the .tgs module (e.g. abb/rapid/TGS/TD05Test.mod) must be
+        ! loaded manually in RobotStudio.
+        ! ---- Phase 3 ----
+        ! Load \Dynamic,"HOME:/TGS/"+stTG_ProgName+".mod";
+        ! ... call ...
+        ! UnLoad "HOME:/TGS/"+stTG_ProgName+".mod";
+        ! -----------------
+        TPWrite "TG: calling program "+stTG_ProgName;
+        %stTG_ProgName%;
+        TPWrite "TG: program "+stTG_ProgName+" finished";
+    ERROR
+        IF ERRNO=ERR_REFUNKPRC THEN
+            ! Program not loaded / name wrong: report and end the cycle
+            ! cleanly so the HMI is not left waiting mid-protocol.
+            TPWrite "TG ERROR: no PROC named "+stTG_ProgName;
+            stTG_SubName:="none";
+            TG_ReqEnd;
+            RETURN;
+        ENDIF
     ENDPROC
 
 ENDMODULE

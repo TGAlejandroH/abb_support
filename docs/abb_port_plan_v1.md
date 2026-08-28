@@ -382,6 +382,15 @@ pending — follow [robotstudio_setup.md](robotstudio_setup.md).*
 with dummy data; verify scalar field widths and the §4.5 pose codec round-trip
 (known frame → Python → RAPID → `wobjTG_*.uframe` → sent back → matches, incl.
 Euler↔quaternion conversion and normalization; check in RobotStudio watch window).
+*Status 2026-08-28: implemented — all 7 remaining request PROCs in `TG_Comms.sys`,
+sample .tgs module `abb/rapid/TGS/TD05Test.mod` (mirrors the TD05tRJYQd call
+order, touch-sense omitted), Python handlers for ids 1/2/4/5/10/11/14. `TG_Main`
+already late-binds the received program name (`%stTG_ProgName%` with
+ERR_REFUNKPRC handling) — Phase 3 only adds Load/UnLoad + the file copy.
+13 new automated tests (24 total green): full-cycle choreography vs a fake-robot
+executable spec, plus every branch (ftp fail, wrong password → FANUC 'END'
+semantics, capture fail → abort, weld skip/abort, predefined vs user-defined
+schedule). RobotStudio validation pending — robotstudio_setup.md §5.*
 
 **Phase 3 — dynamic program flow.** `TG_Main` loop + `Load \Dynamic`/late
 binding/`UnLoad` + sample .tgs module; full end-to-end: Python pushes
