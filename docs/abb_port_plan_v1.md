@@ -220,8 +220,9 @@ late binding, socket shared via module-level data) is **sound and adopted**. But
 SystemModule  TG_Comms.sys      ← the "KAREL library" equivalent (resident)
 SystemModule  TG_Cell.sys       ← cell-hardware macros: FANUC's tiny .ls utility
                                   programs (CAM_OPEN/CAM_CLOSE → TG_CamOpen/
-                                  TG_CamClose via dummy DO doTG_Camera; phase 4
-                                  adds WELD_PREP, DRY_RUN_*, …). Separate from
+                                  TG_CamClose via dummy DO doTG_Camera;
+                                  WELD_PREP/CAM_PREP/DRY_RUN_* added 2026-08-28
+                                  as empty placeholder PROCs). Separate from
                                   TG_Comms on purpose: protocol vs hardware.
 NormalModule  TG_Main.mod       ← TGMAINKL equivalent (resident; owns main())
 NormalModule  <TgsName>.mod     ← one per .tgs program (dynamically loaded from HOME:/TGS/)
@@ -489,8 +490,10 @@ for FANUC parity, I6 counters declined; VC validation of I1/I4 + I2/I3
 pending, robotstudio_setup §11–§12); real file transfer via the **FTP option** (decided §7; verify option id and
 server behavior on RW6.15 when quoting the real cell); remaining requests (R_W_S,
 R_TS_*, camera calibration set — the cam-cal .tgs must set `nTG_ActFrame:=0`, §1.4.1
-corollary b); RobotWare Arc mapping for R_W_P; cell macros currently stubbed in
-`TG_Cell.sys` (WELD_PREP, DRY_RUN_ON/OFF); real `FSSize` free-space value in R_F_T
+corollary b); RobotWare Arc mapping for R_W_P; cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
+placeholder PROCs in `TG_Cell.sys`, called from the sample .tgs in the FANUC
+order — sample lines 13–19/63; ⚠ empty PROC bodies to confirm at the next VC
+program check); real `FSSize` free-space value in R_F_T
 (dnum, §2.6); port of the Python prototype into a C++ `ABBRobot : Robot` class in
 TGuideWeldingHMI (small: `do_receive`/`do_send` identical, plus the §4.5 quaternion
 codec, no XML path). The tool/frame parameter style is **decided** (§7.6: explicit

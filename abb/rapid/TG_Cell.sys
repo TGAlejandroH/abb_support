@@ -5,9 +5,16 @@ MODULE TG_Cell(SYSMODULE)
     ! RAPID port of the small FANUC utility programs the .tgs programs call
     ! between requests - on FANUC each is a tiny standalone .ls program that
     ! flips a digital output:
-    !   CAM_OPEN / CAM_CLOSE  ->  TG_CamOpen / TG_CamClose
-    ! Future (plan, phase 4): WELD_PREP, CAM_PREP, DRY_RUN_ON/OFF,
-    ! TEACHMODE_ON follow the same pattern.
+    !   CAM_OPEN / CAM_CLOSE  ->  TG_CamOpen  / TG_CamClose   (working, dummy DO)
+    !   WELD_PREP             ->  TG_WeldPrep                  (placeholder)
+    !   CAM_PREP              ->  TG_CamPrep                   (placeholder)
+    !   DRY_RUN_ON / _OFF     ->  TG_DryRunOn / TG_DryRunOff   (placeholder)
+    ! The placeholders (added phase 4, 2026-08-28) are deliberately EMPTY
+    ! PROCs - an empty routine body is legal RAPID (statement list may be
+    ! empty; comments are not statements) - so .tgs programs can already
+    ! call them in the FANUC call order while the cell hardware I/O is
+    ! still unknown. TEACHMODE_ON belongs to the touch-sense family (out
+    ! of v1 scope) and will follow the same pattern when that is ported.
     !
     ! Kept separate from TG_Comms.sys on purpose: TG_Comms is pure HMI
     ! protocol, this module is cell hardware. Loaded resident like TG_Comms;
@@ -34,6 +41,37 @@ MODULE TG_Cell(SYSMODULE)
         ! with the output already low is expected and harmless.
         SetDO doTG_Camera,0;
         TPWrite "TG: camera flap closed";
+    ENDPROC
+
+    PROC TG_WeldPrep()
+        ! FANUC: WELD_PREP (.ls utility) - prepare the welding equipment.
+        ! Called at program start and again after the capture sets, before
+        ! the weld transitions (sample TD05tRJYQd.ls lines 19 and 63).
+        ! PLACEHOLDER (phase 4): intentionally empty. TODO real cell:
+        ! power-supply readiness / gas / weld-enable outputs - hardware-
+        ! and welder-brand-specific.
+    ENDPROC
+
+    PROC TG_CamPrep()
+        ! FANUC: CAM_PREP (.ls utility) - prepare the camera. Commented
+        ! out even in the FANUC sample ("!-- CALL CAM_PREP", line 18).
+        ! PLACEHOLDER (phase 4): intentionally empty. TODO real cell.
+    ENDPROC
+
+    PROC TG_DryRunOn()
+        ! FANUC: DRY_RUN_ON (.ls utility) - disable welding so the program
+        ! runs through all motions without striking an arc. The .tgs
+        ! program calls TG_DryRunOff unconditionally after the password
+        ! check, then TG_DryRunOn when the HMI sent dry_run=1 (R[199],
+        ! sample lines 13-16).
+        ! PLACEHOLDER (phase 4): intentionally empty. TODO real cell:
+        ! weld-enable inhibit output / RobotWare Arc weld-enable state.
+    ENDPROC
+
+    PROC TG_DryRunOff()
+        ! FANUC: DRY_RUN_OFF (.ls utility) - (re-)enable welding; the
+        ! default state, set unconditionally after the password check.
+        ! PLACEHOLDER (phase 4): intentionally empty. TODO real cell.
     ENDPROC
 
 ENDMODULE

@@ -53,8 +53,14 @@ MODULE TD05Test_Mod
             ! FANUC: 'END' - terminate immediately, NO end request (R_E).
             RETURN;
         ENDIF
-        ! nTG_DryRun=1 would disable welding (FANUC DRY_RUN_ON/OFF macros) -
-        ! weld enable signals are cell-specific, deferred to phase 4.
+        ! Dry-run handling (FANUC lines 13-16): default welding ON, then
+        ! disable it when the HMI sent dry_run=1. Placeholder PROCs in
+        ! TG_Cell.sys - empty until the real cell's weld-enable I/O exists.
+        TG_DryRunOff;
+        IF nTG_DryRun=1 TG_DryRunOn;
+        ! FANUC line 18 has CAM_PREP commented out ("!-- CALL CAM_PREP");
+        ! TG_CamPrep exists as a placeholder if a cell ever needs it.
+        TG_WeldPrep;                   ! FANUC line 19
 
         ! --- capture set (FANUC lines 27-62: camera tool UT[2], frame UFRAME[5]) ---
         ! \WObj:=wobjTG_Cam is both the report frame AND the wobj the request
@@ -87,7 +93,7 @@ MODULE TD05Test_Mod
         ! --- end of captures: global localization (FANUC lines 61-63) ---
         TG_ReqGlobalCapDone;           ! R_G_C_D -> nTG_GlobalCapOK
         TG_CamClose;                   ! FANUC CALL CAM_CLOSE
-        ! FANUC: WELD_PREP - cell hardware macro, phase 4.
+        TG_WeldPrep;                   ! FANUC line 63 (before the weld transition)
 
         ! --- weld (FANUC lines 197-226: torch UT[8], frame UFRAME[6]) ---
         ! DEPRECATED modal alternative (plan 7.6): nTG_ActTool:=8; nTG_ActFrame:=6;

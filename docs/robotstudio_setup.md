@@ -432,3 +432,17 @@ not a stale module. Revert the edit afterwards.
 
 **Pass criteria:** checks 1–3 match (check 2's `TG: cycle error` line is the
 F-E confirmation ⚠); check 4 optional.
+
+## 13. Cell-macro placeholders (phase 4)
+
+`TG_Cell.sys` gained the remaining FANUC cell macros as **empty placeholder
+PROCs**: `TG_WeldPrep`, `TG_CamPrep`, `TG_DryRunOn`, `TG_DryRunOff`.
+`TD05Test.mod` now calls them in the FANUC sample's order (DRY_RUN_OFF →
+conditional DRY_RUN_ON after the password check; WELD_PREP at program start
+and again before the weld transition).
+
+Setup: reload `TG_Cell.sys` (TD05Test recopies itself on request 10).
+
+**Pass criteria:** (1) RAPID program check clean — this confirms the ⚠ that
+an empty PROC body is accepted; (2) one normal cycle with wire transcript and
+Operator Window identical to §10 (the placeholders are silent no-ops).
