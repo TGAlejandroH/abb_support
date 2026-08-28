@@ -193,10 +193,14 @@ NormalModule  <TgsName>.mod     ← one per .tgs program (dynamically loaded fro
 - `TG_Main.mod`: `PROC main()` = production entry. AUTO-start of the cell runs it
   (FANUC's "controller starts tgmain.ls on AUTO" maps to setting `main` as
   production entry and starting from the FlexPendant/System IO).
-- `.tgs` module: `MODULE TD05Test` containing `PROC TD05Test()`. **Module file name
-  = module name = PROC name** (needed for `Load`+late-binding by one string).
-  Constraint for the future exporter: RAPID identifiers ≤ 32 chars, start with a
-  letter, `[A-Za-z0-9_]`, case-insensitive — current 10-char base62 .tgs names fit.
+- `.tgs` module: `MODULE TD05Test_Mod` containing `PROC TD05Test()`. **File name
+  = PROC name = the program name the HMI sends** (`Load "HOME:/TGS/"+name+".mod"`
+  then `%name%`); the **module name carries a `_Mod` suffix** because RAPID module
+  names and global routine names share one namespace — naming a module like its own
+  PROC is a semantic error ("Name error(45): module name ambiguous"; hit in
+  RobotStudio 2026-08-28). Constraints for the future exporter: RAPID identifiers
+  ≤ 32 chars, start with a letter, `[A-Za-z0-9_]`, case-insensitive (current
+  10-char base62 .tgs names fit), and module name ≠ any global symbol name.
 
 ### 4.2 Naming map (KAREL → RAPID)
 

@@ -1,4 +1,4 @@
-MODULE TD05Test
+MODULE TD05Test_Mod
     !***********************************************************************
     ! Sample .tgs welding program for the ABB prototype (Phase 2/3).
     !
@@ -6,8 +6,11 @@ MODULE TD05Test
     ! call order of the FANUC sample TD05tRJYQd.ls (one capture set with two
     ! captures + one weld; touch-sense family omitted - out of v1 scope).
     !
-    ! Contract (plan 4.1): file name = module name = PROC name, so TG_Main
-    ! can Load + late-bind it from the single string the HMI sends.
+    ! Naming contract (plan 4.1): file name = PROC name = the program name
+    ! the HMI sends ("TD05Test"); TG_Main loads "HOME:/TGS/"+name+".mod" and
+    ! late-binds %name%. The MODULE name carries a "_Mod" suffix because
+    ! RAPID module names and global routine names share one namespace - a
+    ! module named like its own PROC is a semantic error ("name ambiguous").
     ! It calls the TG_* request PROCs and reads the PERS data from
     ! TG_Comms.sys directly - no include mechanism needed (task-wide scope).
     !
