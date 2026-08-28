@@ -16,13 +16,22 @@ MODULE TD05Test_Mod
     !
     ! Motion is MoveAbsJ between safe joint poses so it runs on any virtual
     ! controller. Real capture/weld moves in the received frames are shown
-    ! as comments where they belong.
+    ! as comments where they belong - except the weld-frame demonstration
+    ! (search "demonstration"), which does move in wobjTG_Weld on purpose:
+    ! the same target before and after TG_ReqWeldFrame, to show the received
+    ! frame taking effect.
     !***********************************************************************
 
     ! Safe joint poses (VC demo only - a real .tgs program carries its own targets)
     LOCAL CONST jointtarget jtHome:=[[0,0,0,0,30,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
     LOCAL CONST jointtarget jtCap1:=[[15,10,-10,0,40,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
     LOCAL CONST jointtarget jtCap2:=[[-15,10,-10,0,40,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
+
+    ! Weld-frame demonstration target. Coordinates are relative to
+    ! wobjTG_Weld, so the SAME target resolves to a different Cartesian
+    ! position once TG_ReqWeldFrame writes the frame received from the HMI.
+    ! Orientation [0,0,1,0] = tool pointing along -z of the work object.
+    LOCAL CONST robtarget rtWeldDemo:=[[1000,0,600],[0,0,1,0],[0,0,0,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
 
     PROC TD05Test()
         ! --- program header (FANUC lines 1-8) ---
@@ -76,9 +85,35 @@ MODULE TD05Test_Mod
         nTG_ActTool:=8;
         nTG_ActFrame:=6;
         stTG_SubName:="PWeld2";
+
+        ! ---------------- weld-frame demonstration (demo only) ----------------
+        ! Same target, moved to BEFORE and AFTER the frame request. Because
+        ! rtWeldDemo is expressed in wobjTG_Weld, the robot ends up in two
+        ! different Cartesian positions - visible proof that TG_ReqWeldFrame
+        ! updated the frame the welding motions run in.
+        !
+        ! Reset to identity first, so the "before" position is the same on
+        ! every cycle (wobjTG_Weld otherwise persists from the previous run,
+        ! exactly like FANUC UFRAME[6] does). Demo-only: a production .tgs
+        ! program must NOT clear a received frame.
+        wobjTG_Weld.uframe:=[[0,0,0],[1,0,0,0]];
+        ! The same target in two different frames needs two different arm
+        ! configurations, so the stored confdata cannot satisfy both.
+        ! Demo-only: a production program keeps configuration control on.
+        ConfJ\Off;
+        ConfL\Off;
+        MoveJ rtWeldDemo,v200,fine,tTG_Weld\WObj:=wobjTG_Weld;
+        TPWrite "TG DEMO: before R_W_F, TCP ="\Pos:=CPos(\Tool:=tTG_Weld \WObj:=wobj0);
+        ! ----------------------------------------------------------------------
+
         TG_ReqWeldFrame;               ! R_W_F -> wobjTG_Weld.uframe + nTG_WeldStatus
         IF nTG_WeldStatus=2 GOTO abort_end;
         IF nTG_WeldStatus=1 THEN
+            ! ------------- weld-frame demonstration, part 2 -------------
+            ! Identical instruction, identical target - new frame.
+            MoveJ rtWeldDemo,v200,fine,tTG_Weld\WObj:=wobjTG_Weld;
+            TPWrite "TG DEMO: after  R_W_F, TCP ="\Pos:=CPos(\Tool:=tTG_Weld \WObj:=wobj0);
+            ! -----------------------------------------------------------
             ! Approach in the received weld frame:
             !   MoveJ pApproach,v100,z100,tTG_Weld\WObj:=wobjTG_Weld;
             !   MoveL pWeldStart,v50,fine,tTG_Weld\WObj:=wobjTG_Weld;
@@ -95,6 +130,8 @@ MODULE TD05Test_Mod
 
 abort_end:
         ! FANUC LBL[101]: both the normal exit and the abort target.
+        ConfJ\On;                      ! undo the demo's relaxed config control
+        ConfL\On;
         stTG_SubName:="none";
         TG_ReqEnd;                     ! R_E
     ENDPROC

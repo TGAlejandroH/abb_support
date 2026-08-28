@@ -177,3 +177,44 @@ module lacking the expected PROC → `TG ERROR: no PROC named ...`.
 **Pass criterion (Phase 3)**: two consecutive cycles with the module loaded
 from `HOME:/TGS/` each time (delete `HOME:\TGS\TD05Test.mod` beforehand to
 prove it is the fresh copy being run).
+
+## 7. Weld-frame demonstration (visible proof the received frame takes effect)
+
+`TD05Test.mod` moves to the **same target twice** — once before
+`TG_ReqWeldFrame` and once immediately after it — using
+`MoveJ rtWeldDemo,v200,fine,tTG_Weld\WObj:=wobjTG_Weld`. `rtWeldDemo` is
+expressed in `wobjTG_Weld`, so the identical instruction lands the robot in a
+different place once the HMI's frame has been written into the work object.
+
+With the default frame served by `abb_server.py`
+(`weld_frame_xyzwpr = [900, 80, 350, -2.5, 3.5, 90]`) and
+`rtWeldDemo` at `[1000, 0, 600]` in the work object:
+
+| | TCP in base coordinates |
+|---|---|
+| before `R_W_F` (frame reset to identity) | `[1000.00, 0.00, 600.00]` |
+| after `R_W_F` (frame received from the HMI) | `[873.83, 1114.73, 887.26]` |
+
+The two positions are **1158 mm apart** — the robot visibly swings left and up.
+Both are inside the IRB 4600-20/2.50 envelope (horizontal radius 1416 mm).
+The Operator Window prints both, so the move can be checked numerically:
+
+```
+TG DEMO: before R_W_F, TCP =[1000,0,600]
+TG: weld frame set, weld status = 1
+TG DEMO: after  R_W_F, TCP =[873.83,1114.73,887.26]
+```
+
+Change `weld_frame_xyzwpr` in `abb_server.py` and the "after" position follows
+it — that is the whole point of the frame request.
+
+Two demo-only concessions, marked as such in the module:
+
+- The weld frame is **reset to identity** right before the first move, so the
+  "before" position is identical on every cycle. `wobjTG_Weld` otherwise
+  persists between runs (exactly like FANUC `UFRAME[6]`), which would make
+  cycle 2's "before" equal to cycle 1's "after". A production .tgs program
+  must never clear a received frame.
+- `ConfJ\Off` / `ConfL\Off` around the demo (restored at the end): one stored
+  `confdata` cannot be valid for the same target evaluated in two different
+  frames, so configuration control is relaxed for the demonstration only.
