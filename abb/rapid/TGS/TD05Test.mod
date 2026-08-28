@@ -61,8 +61,9 @@ MODULE TD05Test_Mod
         stTG_SubName:="C1PGlobal_m45_3";
         TG_ReqCamFrame;                ! R_C_F -> wobjTG_Cam.uframe + nTG_DoCapture
         IF nTG_DoCapture=1 THEN
-            ! Real program: CAM_OPEN, then move to the capture point in the
-            ! just-received frame:
+            TG_CamOpen;                ! FANUC CALL CAM_OPEN
+            ! Real program: move to the capture point in the just-received
+            ! frame:
             !   MoveJ pCap1,v100,fine,tTG_Cam\WObj:=wobjTG_Cam;
             WaitTime 0.2;              ! FANUC: WAIT 0.20(sec)
             TG_ReqCapture;             ! R_C -> nTG_CaptureOK
@@ -72,6 +73,7 @@ MODULE TD05Test_Mod
         stTG_SubName:="C2PGlobal_m45_3";
         TG_ReqCamFrame;
         IF nTG_DoCapture=1 THEN
+            TG_CamOpen;                ! FANUC CALL CAM_OPEN
             WaitTime 0.2;
             TG_ReqCapture;
             IF nTG_CaptureOK=0 GOTO abort_end;
@@ -79,7 +81,8 @@ MODULE TD05Test_Mod
 
         ! --- end of captures: global localization (FANUC lines 61-63) ---
         TG_ReqGlobalCapDone;           ! R_G_C_D -> nTG_GlobalCapOK
-        ! FANUC: CAM_CLOSE / WELD_PREP - cell hardware macros, phase 4.
+        TG_CamClose;                   ! FANUC CALL CAM_CLOSE
+        ! FANUC: WELD_PREP - cell hardware macro, phase 4.
 
         ! --- weld (FANUC lines 197-226: torch UT[8], frame UFRAME[6]) ---
         nTG_ActTool:=8;
@@ -107,6 +110,7 @@ MODULE TD05Test_Mod
         ! ----------------------------------------------------------------------
 
         TG_ReqWeldFrame;               ! R_W_F -> wobjTG_Weld.uframe + nTG_WeldStatus
+        TG_CamClose;                   ! FANUC defensive CAM_CLOSE after R_W_F
         IF nTG_WeldStatus=2 GOTO abort_end;
         IF nTG_WeldStatus=1 THEN
             ! ------------- weld-frame demonstration, part 2 -------------
@@ -126,6 +130,7 @@ MODULE TD05Test_Mod
         ENDIF
 
         ! --- return home (FANUC lines 397-411) ---
+        TG_CamClose;                   ! FANUC CALL CAM_CLOSE
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
 
 abort_end:

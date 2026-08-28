@@ -218,3 +218,37 @@ Two demo-only concessions, marked as such in the module:
 - `ConfJ\Off` / `ConfL\Off` around the demo (restored at the end): one stored
   `confdata` cannot be valid for the same target evaluated in two different
   frames, so configuration control is relaxed for the demonstration only.
+
+## 8. Cell I/O macros: TG_CamOpen / TG_CamClose (FANUC CAM_OPEN / CAM_CLOSE)
+
+`abb/rapid/TG_Cell.sys` ports the FANUC utility programs that flip the camera
+flap output (the cover shielding the lens from weld spatter). The signal is a
+dummy (`doTG_Camera`) and **must exist in the I/O configuration before the
+module can pass the program check** — otherwise Apply fails with an
+unknown-symbol error on `doTG_Camera`.
+
+Create the signal (once per controller system):
+
+1. Controller tab → **Configuration → I/O System** → type **Signal** →
+   right-click → *New Signal…*
+2. Name: `doTG_Camera` · Type of Signal: **Digital Output** ·
+   **Assigned to Device: leave blank** (an unassigned signal is simulated —
+   exactly right for the VC; the real cell maps it to the flap output).
+3. OK → **restart the controller** (warm start) when prompted — I/O config
+   changes only take effect after a restart.
+
+Then load `abb/rapid/TG_Cell.sys` into `T_ROB1` the same way as `TG_Comms.sys`
+(it is resident, like TG_Comms — the .tgs programs call it via the task-wide
+global scope) and Apply.
+
+What to watch during a run:
+
+- Operator Window: `TG: camera flap open` inside each capture branch,
+  `TG: camera flap closed` after global-captures-done, after the weld frame
+  request, and before rest home — the same call sites as FANUC lines 38/50,
+  62, 201 and 409 of `TD05tRJYQd.ls`.
+- I/O window (Controller tab → Inputs/Outputs, filter `doTG_Camera`): the
+  signal toggles 1/0 live during the cycle.
+
+No wire-protocol change: these macros are controller-local, so the Python side
+and its tests are unaffected.

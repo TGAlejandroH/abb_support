@@ -189,6 +189,11 @@ late binding, socket shared via module-level data) is **sound and adopted**. But
 
 ```
 SystemModule  TG_Comms.sys      ← the "KAREL library" equivalent (resident)
+SystemModule  TG_Cell.sys       ← cell-hardware macros: FANUC's tiny .ls utility
+                                  programs (CAM_OPEN/CAM_CLOSE → TG_CamOpen/
+                                  TG_CamClose via dummy DO doTG_Camera; phase 4
+                                  adds WELD_PREP, DRY_RUN_*, …). Separate from
+                                  TG_Comms on purpose: protocol vs hardware.
 NormalModule  TG_Main.mod       ← TGMAINKL equivalent (resident; owns main())
 NormalModule  <TgsName>.mod     ← one per .tgs program (dynamically loaded from HOME:/TGS/)
 ```
@@ -226,6 +231,7 @@ NormalModule  <TgsName>.mod     ← one per .tgs program (dynamically loaded fro
 | R_W_P | `TG_ReqWeldParams` | fills `nTG_UdwpFlag`, `nTG_WeldProc`, `nTG_WireFeed`, `nTG_ArcLength`, `nTG_ArcControl`, `nTG_TravelSpeed` |
 | R_E | `TG_ReqEnd` | |
 | SET_PASS_SR / SET_SUB_ROUTINE_SR / SET_ROB_S_SR | plain `PERS string` assignment in the .tgs program (`stTG_ProgPass := "...";`) — no PROC needed | |
+| CAM_OPEN / CAM_CLOSE (.ls utilities) | `TG_CamOpen` / `TG_CamClose` in **TG_Cell.sys** — flip dummy DO `doTG_Camera` (must exist in EIO; setup doc §8). TODO: map to the real camera output | |
 | TGMAINKL | `main()` in `TG_Main.mod` | |
 
 Each PROC carries a header comment `! FANUC: R_W_F (HMI request id 4)`.
