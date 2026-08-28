@@ -17,6 +17,14 @@ MODULE TG_Comms(SYSMODULE)
     ! (request ids, prompts, 1-byte "0" acks, fixed-width scalars) EXCEPT
     ! frame/pose payloads, which travel as RAPID pose literals
     ! "[[x,y,z],[q1,q2,q3,q4]]" with a normalized quaternion (plan 4.5).
+    !
+    ! Tool/frame parameter style (plan 7.6, decided 2026-08-28): the pose-
+    ! reporting request PROCs take explicit \Tool/\WObj PERS parameters
+    ! (option b - the frame is visible at every call site, and a PERS
+    ! parameter is itself a persistent reference, so it feeds CRobT
+    ! directly). The FANUC-style modal numbers (nTG_ActTool/nTG_ActFrame)
+    ! remain as a DEPRECATED fallback for calls that omit the arguments -
+    ! kept deliberately as the back-pocket alternative; do not delete.
     !***********************************************************************
 
     ! ------------------------------------------------------------------
@@ -65,9 +73,14 @@ MODULE TG_Comms(SYSMODULE)
     PERS tooldata tTG_Cam:=[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]];
     PERS tooldata tTG_Weld:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
 
-    ! FANUC modal UTOOL_NUM/UFRAME_NUM equivalent: the .tgs program selects
-    ! the active tool/frame BY NUMBER before issuing requests; tgSendPose
-    ! resolves the number to the LIVE tooldata/wobjdata at read time.
+    ! DEPRECATED (plan 7.6, decided 2026-08-28) - FANUC modal
+    ! UTOOL_NUM/UFRAME_NUM emulation: the .tgs program selects the active
+    ! tool/frame BY NUMBER; tgSendPose resolves the number to the LIVE
+    ! tooldata/wobjdata at read time. Superseded by explicit \Tool/\WObj
+    ! PERS parameters on the request PROCs (style b), which make the frame
+    ! visible at the call site instead of hidden global state. Only used
+    ! when a request is called WITHOUT the arguments. Kept deliberately as
+    ! the back-pocket alternative; do not delete.
     ! (A PERS-to-PERS copy would go stale when a request updates the frame -
     ! the same hazard FANUC handles by re-emitting UFRAME[n]=PR[n] after
     ! every frame-PR-writing routine. Numbers need no refresh.)
@@ -75,9 +88,12 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ActFrame:=0;              ! UFRAME_NUM: 5=camera, 6=weld, else base
 
     ! Scratch persistents for CRobT: its \Tool/\WObj are PERS parameters
-    ! (a VAR or FUNC result is rejected with Argument error 123). tgSendPose
-    ! refreshes them from the live data on every call, so they cannot go
-    ! stale. Internal - never reference these in .tgs programs.
+    ! (a VAR or FUNC result is rejected with Argument error 123). Only the
+    ! DEPRECATED modal fallback needs them (tgActTool/tgActWobj are FUNCs,
+    ! their results are values); the explicit style passes the caller's
+    ! PERS parameters straight to CRobT, no scratch copy involved.
+    ! tgSendPose refreshes them from the live data on every fallback call,
+    ! so they cannot go stale. Internal - never reference in .tgs programs.
     LOCAL PERS tooldata tTG_Scratch:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
     LOCAL PERS wobjdata wobjTG_Scratch:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
@@ -229,6 +245,7 @@ MODULE TG_Comms(SYSMODULE)
     ENDFUNC
 
     LOCAL FUNC tooldata tgActTool()
+        ! DEPRECATED (plan 7.6) - modal fallback only, see nTG_ActTool.
         ! Resolve the FANUC-style active tool number to live tooldata.
         IF nTG_ActTool=2 THEN
             RETURN tTG_Cam;
@@ -237,6 +254,7 @@ MODULE TG_Comms(SYSMODULE)
     ENDFUNC
 
     LOCAL FUNC wobjdata tgActWobj()
+        ! DEPRECATED (plan 7.6) - modal fallback only, see nTG_ActFrame.
         ! Resolve the FANUC-style active frame number to live wobjdata.
         IF nTG_ActFrame=5 THEN
             RETURN wobjTG_Cam;
@@ -246,12 +264,15 @@ MODULE TG_Comms(SYSMODULE)
         RETURN wobj0;
     ENDFUNC
 
-    LOCAL PROC tgSendPose()
-        ! Robot->HMI: current pose of the ACTIVE tool in the ACTIVE frame
-        ! (resolved live, so a frame updated by a request is used by the
-        ! very next pose report - FANUC UFRAME[n]=PR[n] semantics included).
-        ! Sent as a pose literal (plan 4.5). KAREL sent Euler x,y,z,w,p,r;
+    LOCAL PROC tgSendPose(\PERS tooldata Tool,\PERS wobjdata WObj)
+        ! Robot->HMI: current pose of the given tool in the given frame,
+        ! sent as a pose literal (plan 4.5). KAREL sent Euler x,y,z,w,p,r;
         ! the Euler<->quaternion conversion now lives on the PC side.
+        ! \Tool/\WObj (pass BOTH): PERS parameters are persistent
+        ! references - handed to CRobT directly, so a frame updated by a
+        ! request is used by the very next pose report (FANUC
+        ! UFRAME[n]=PR[n] semantics included, plan 7.6 style b).
+        ! Omitted -> DEPRECATED modal fallback via nTG_ActTool/nTG_ActFrame.
         VAR robtarget rt;
         VAR pose p;
         ! Never report a pose while the servos are still converging: on the
@@ -267,9 +288,18 @@ MODULE TG_Comms(SYSMODULE)
         WaitRob \InPos;
         WaitRob \ZeroSpeed;
         IF nTG_SettleTime>0 WaitTime nTG_SettleTime;
-        tTG_Scratch:=tgActTool();
-        wobjTG_Scratch:=tgActWobj();
-        rt:=CRobT(\Tool:=tTG_Scratch \WObj:=wobjTG_Scratch);
+        IF Present(Tool) AND Present(WObj) THEN
+            rt:=CRobT(\Tool:=Tool \WObj:=WObj);
+        ELSE
+            ! DEPRECATED modal path (plan 7.6) - resolve the FANUC-style
+            ! numbers; FUNC results are values, hence the scratch copies.
+            IF Present(Tool) XOR Present(WObj) THEN
+                TPWrite "TG WARNING: tgSendPose needs BOTH Tool and WObj - using modal numbers";
+            ENDIF
+            tTG_Scratch:=tgActTool();
+            wobjTG_Scratch:=tgActWobj();
+            rt:=CRobT(\Tool:=tTG_Scratch \WObj:=wobjTG_Scratch);
+        ENDIF
         p.trans:=rt.trans;
         p.rot:=rt.rot;
         tgSendAck tgPoseToStr(p);
@@ -295,13 +325,16 @@ MODULE TG_Comms(SYSMODULE)
         TPWrite "TG: program ID = "\Num:=nTG_ProgSel;
     ENDPROC
 
-    PROC TG_ReqEnd()
+    PROC TG_ReqEnd(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_E (HMI request id 100) - program end notification.
         ! Sequence: id -> current pose -> sub-routine token.
+        ! \Tool/\WObj: report tool/frame for the pose (plan 7.6 style b);
+        ! omitted -> DEPRECATED modal fallback. The HMI ignores every R_E
+        ! pose (plan 1.4.1), so any defensible frame is acceptable here.
         ! stTG_SubName must never be empty: an empty SocketSend transmits
         ! zero bytes and the HMI recv would block forever (default "none").
         tgSendAck "100";
-        tgSendPose;
+        tgSendPose \Tool?Tool \WObj?WObj;
         tgSendAck stTG_SubName;
         TPWrite "TG: end request served";
     ENDPROC
@@ -326,14 +359,16 @@ MODULE TG_Comms(SYSMODULE)
         TPWrite "TG: prog name = "+stTG_ProgName;
     ENDPROC
 
-    PROC TG_ReqPassCheck()
+    PROC TG_ReqPassCheck(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_P_C (HMI request id 5) - password / dry-run check.
         ! Sequence: id -> pose -> sub token -> password -> recv 2 chars
         ! (char 1 = password correct, char 2 = dry run).
+        ! \Tool/\WObj: report tool/frame for the pose (plan 7.6 style b);
+        ! omitted -> DEPRECATED modal fallback.
         ! -> nTG_PassOK (R[200]), nTG_DryRun (R[199])
         VAR string reply;
         tgSendAck "5";
-        tgSendPose;
+        tgSendPose \Tool?Tool \WObj?WObj;
         tgSendAck stTG_SubName;
         tgSendAck stTG_ProgPass;
         reply:=tgPromptRecv("Give me the status");
@@ -350,34 +385,47 @@ MODULE TG_Comms(SYSMODULE)
         TPWrite "TG: dry run = "\Num:=nTG_DryRun;
     ENDPROC
 
-    PROC TG_ReqCamFrame()
+    PROC TG_ReqCamFrame(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_C_F (HMI request id 1) - request camera frame.
         ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal,
         ! plan 4.5; KAREL received 6 prompted reals) -> recv capture flag.
-        ! -> wobjTG_Cam.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197])
+        ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
+        ! the outgoing pose (which goes out in the frame's PREVIOUS value -
+        ! FANUC parity, plan 1.4.1) AND the wobj whose .uframe receives the
+        ! served frame, written through the PERS reference. Omitted ->
+        ! DEPRECATED modal fallback; the frame lands in wobjTG_Cam.
+        ! -> WObj.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197])
         VAR string reply;
         VAR pose pFrame;
         tgSendAck "1";
-        tgSendPose;
+        tgSendPose \Tool?Tool \WObj?WObj;
         tgSendAck stTG_SubName;
         reply:=tgPromptRecv("Give me the frame");
         IF tgTryStrToPose(reply,pFrame) THEN
-            wobjTG_Cam.uframe:=pFrame;
+            IF Present(WObj) THEN
+                WObj.uframe:=pFrame;
+            ELSE
+                wobjTG_Cam.uframe:=pFrame;
+            ENDIF
         ENDIF
         reply:=tgPromptRecv("Give me capture status");
         nTG_DoCapture:=tgParseReal(reply);
         TPWrite "TG: cam frame set, do capture = "\Num:=nTG_DoCapture;
     ENDPROC
 
-    PROC TG_ReqCapture()
+    PROC TG_ReqCapture(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_C (HMI request id 2) - request camera capture at the
-        ! current position. -> nTG_CaptureOK (R[196])
+        ! current position. This is the ONE pose the HMI consumes (plan
+        ! 1.4.1) - registration depends on Tool/WObj being the camera tool
+        ! and the served camera frame.
+        ! \Tool/\WObj: report tool/frame (plan 7.6 style b); omitted ->
+        ! DEPRECATED modal fallback. -> nTG_CaptureOK (R[196])
         VAR string reply;
         ! FANUC: DELAY 5 (ms) "to wait for vibrations to dampen. Adjust as
         ! needed." Increase for the real cell if captures come out blurred.
         WaitTime 0.005;
         tgSendAck "2";
-        tgSendPose;
+        tgSendPose \Tool?Tool \WObj?WObj;
         tgSendAck stTG_SubName;
         reply:=tgPromptRecv("Give me capture status");
         nTG_CaptureOK:=tgParseReal(reply);
@@ -394,19 +442,27 @@ MODULE TG_Comms(SYSMODULE)
         TPWrite "TG: global loc ok = "\Num:=nTG_GlobalCapOK;
     ENDPROC
 
-    PROC TG_ReqWeldFrame()
+    PROC TG_ReqWeldFrame(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_W_F (HMI request id 4) - request weld frame.
         ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal)
         ! -> recv weld status (0=skip, 1=weld, 2=abort program).
-        ! -> wobjTG_Weld.uframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
+        ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
+        ! the outgoing pose AND the wobj whose .uframe receives the served
+        ! frame, written through the PERS reference. Omitted -> DEPRECATED
+        ! modal fallback; the frame lands in wobjTG_Weld.
+        ! -> WObj.uframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
         VAR string reply;
         VAR pose pFrame;
         tgSendAck "4";
-        tgSendPose;
+        tgSendPose \Tool?Tool \WObj?WObj;
         tgSendAck stTG_SubName;
         reply:=tgPromptRecv("Give me the frame");
         IF tgTryStrToPose(reply,pFrame) THEN
-            wobjTG_Weld.uframe:=pFrame;
+            IF Present(WObj) THEN
+                WObj.uframe:=pFrame;
+            ELSE
+                wobjTG_Weld.uframe:=pFrame;
+            ENDIF
         ENDIF
         reply:=tgPromptRecv("Give me weld status");
         nTG_WeldStatus:=tgParseReal(reply);

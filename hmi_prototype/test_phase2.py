@@ -25,7 +25,14 @@ ROBOT_POSE_XYZWPR = [1500.0, -200.0, 1400.0, 10.0, -20.0, 30.0]
 
 
 class FakeTgsRobot(threading.Thread):
-    """Executable spec of the RAPID Phase 2 cycle (TG_Main + TD05Test)."""
+    """Executable spec of the RAPID Phase 2 cycle (TG_Main + TD05Test).
+
+    Tool/frame selection on the RAPID side switched from modal numbers to
+    explicit \Tool/\WObj PERS parameters (plan 7.6 style b, 2026-08-28).
+    The wire format is untouched - this spec models the wire only, so it is
+    valid for both styles (the pose literal here stands in for whatever
+    tool/frame CRobT resolves).
+    """
 
     def __init__(self):
         super().__init__(daemon=True)

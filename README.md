@@ -43,9 +43,13 @@ end-to-end against a RobotStudio virtual controller (2026-08-28).
 - .tgs modules are delivered to `HOME:/TGS/` (FTP on the real cell), loaded
   dynamically, called by name via late binding, and unloaded — they see the
   request PROCs and shared PERS data through RAPID's task-wide global scope.
-- Active tool/frame is selected **by number** (`nTG_ActTool`/`nTG_ActFrame`,
-  the UTOOL_NUM/UFRAME_NUM equivalent) and resolved live — never by copying
-  wobjdata, which goes stale (see plan §4.3).
+- The report tool/frame is passed **explicitly** on each request call
+  (`TG_ReqCamFrame \Tool:=tTG_Cam \WObj:=wobjTG_Cam`, plan §7.6 style b); a
+  PERS parameter is a live persistent reference, so a received frame takes
+  effect on the very next pose report. The FANUC-style modal numbers
+  (`nTG_ActTool`/`nTG_ActFrame`, the UTOOL_NUM/UFRAME_NUM equivalent) remain
+  as a deprecated fallback for argument-less calls. Never copy wobjdata —
+  it goes stale (plan §4.3).
 
 ## Out of scope for v1 (Phase 4 backlog)
 

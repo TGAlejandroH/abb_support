@@ -279,3 +279,42 @@ Measured history on this VC, request 4's pose vs the programmed demo target
 
 Cost: ~0.25 s per reported pose (5–9 per program). If that ever matters, lower
 `nTG_SettleTime`; keep the two `WaitRob` calls.
+
+## 10. Explicit \Tool/\WObj request parameters (plan §7.6, style b)
+
+The pose-touching requests (`TG_ReqPassCheck`, `TG_ReqCamFrame`, `TG_ReqCapture`,
+`TG_ReqWeldFrame`, `TG_ReqEnd`) now take explicit `\PERS tooldata Tool,\PERS
+wobjdata WObj` arguments; `TD05Test.mod` and `TG_Main` pass them on every call.
+The FANUC-style modal numbers (`nTG_ActTool`/`nTG_ActFrame`) are still present
+as a **deprecated fallback** for argument-less calls — nothing exercises them
+in a normal cycle. The wire format is unchanged, so transcripts must match the
+Phase 3 / §9 runs exactly.
+
+Setup: reload `TG_Comms.sys`, `TG_Main.mod` (the .tgs module needs nothing —
+request 10 copies the updated `abb/rapid/TGS/TD05Test.mod` from the repo into
+`HOME:/TGS/` each cycle). Run two consecutive cycles.
+
+New syntax exercised (⚠ first VC contact for these, plan §2.14): optional
+`\PERS` parameters on user PROCs, conditional argument propagation
+(`tgSendPose \Tool?Tool \WObj?WObj`), and a component write through a PERS
+parameter (`WObj.uframe:=...`).
+
+**Pass criteria:**
+
+1. RAPID program check is clean after loading (this alone validates the §2.14
+   syntax).
+2. Two consecutive cycles with the request order of §5 — transcripts identical
+   to the §9 run: request 4's pose still `[[1000.00,0.00,600.00],[0,0,1,0]]`
+   (residuals ≪ 0.1 mm fine), and the weld-frame demo still reports two
+   different TCPs before/after `R_W_F` (this is the proof that the served
+   frame written *through the PERS parameter* reaches `wobjTG_Weld`).
+3. The Operator Window shows **no**
+   `TG WARNING: tgSendPose needs BOTH Tool and WObj` line — that warning means
+   some call passed only one argument and silently fell back to the deprecated
+   modal numbers.
+
+Optional fallback check (the back-pocket path still works): in the RAPID
+watch set `nTG_ActTool:=2`, `nTG_ActFrame:=5`, then from the FlexPendant
+call `TG_ReqEnd` with no arguments during a connected cycle — the reported
+pose should be the camera TCP in the camera frame. Not part of the standard
+pass criteria.

@@ -40,7 +40,10 @@ MODULE TG_Main
             ! Camera calibration program: out of v1 scope (plan, phase 4).
             TPWrite "TG: camera calibration not implemented - ending cycle";
             stTG_SubName:="none";
-            TG_ReqEnd;
+            ! No program context here: report torch/base (HMI ignores R_E
+            ! poses, plan 1.4.1). Explicit args keep the DEPRECATED modal
+            ! fallback dormant (plan 7.6).
+            TG_ReqEnd \Tool:=tTG_Weld \WObj:=wobj0;
         ELSE
             TPWrite "TG: unknown program ID - ending cycle";
         ENDIF
@@ -84,13 +87,13 @@ MODULE TG_Main
             ! and end the cycle cleanly so the HMI is not left waiting.
             TPWrite "TG ERROR: no PROC named "+stTG_ProgName;
             stTG_SubName:="none";
-            TG_ReqEnd;
+            TG_ReqEnd \Tool:=tTG_Weld \WObj:=wobj0;
             RETURN;
         ELSEIF ERRNO=ERR_IOERROR THEN
             ! File missing/unreadable in HOME:/TGS/.
             TPWrite "TG ERROR: cannot load "+sPath;
             stTG_SubName:="none";
-            TG_ReqEnd;
+            TG_ReqEnd \Tool:=tTG_Weld \WObj:=wobj0;
             RETURN;
         ENDIF
         ! Anything else propagates to tgMainCycle, which resets the cycle.

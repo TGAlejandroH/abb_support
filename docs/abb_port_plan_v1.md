@@ -95,6 +95,25 @@ Pose sent in every "frame-ish" request = current TCP of the **currently active
 tool in the currently active user frame** (KAREL syncs `$UTOOL/$UFRAME` to the
 TP-selected ones, then `CURPOS`).
 
+### 1.4.1 Which frame does the HMI expect reported poses in? (verified 2026-08-28)
+
+**The active user frame — i.e. the frame the HMI most recently sent — NOT the
+robot base.** Verified in `RobotCell.cpp`: of all received poses, only the
+`Capture` (R_C) one is consumed (line ~2406). The scan is transformed by
+`act_pose` and *afterwards* by `bTpart` (line ~2447) — `bTpart` being exactly
+the frame the HMI sent in `RequestCaptureFrame` (line ~2196). The composition
+`bTpart · act_pose · cloud` only lands in base if `act_pose` is
+frame-relative. ⚠ The line-2411 comment "TRANSFORM POINT CLOUD TO THE ROBOT
+BASE" is misleading — that step reaches the *sent frame*; base comes from the
+later `Transform(bTpart)`. Do not "fix" the robot side to report base poses.
+
+Corollaries: (a) our `nTG_ActFrame`-resolved reporting is correct as-is,
+including R_C_F's pose going out in the *previous* frame (the HMI receives and
+ignores it — as it does every pose except R_C's); (b) the camera-calibration
+handlers (`bPf`, `bPcam_pc` in `FANUCRobot.h`) expect **base**-frame poses, so
+the Phase 4 cam-cal .tgs equivalent must set `nTG_ActFrame:=0` before those
+requests.
+
 ### 1.5 .tgs program call order (from TD05tRJYQd.ls, minus touch-sense which is out of v1 scope)
 1. Activate home frame/tool → `SET_PASS_SR(name)` → `SET_ROB_S_SR('Ok')` → `R_P_C` → abort if `R[200]=0`; dry-run handling from `R[199]`.
 2. Per capture set: activate camera frame/tool → `SET_SUB_ROUTINE_SR('C<i>PGlobal_...')` → `R_C_F` → if `R[197]=1`: refresh frame, move, `R_C`, jump to end if `R[196]=0`.
@@ -165,6 +184,15 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
     real cell. **For the prototype this is moot**: the VC's `HOME:` is a plain
     Windows folder inside the RobotStudio solution, so the Python side (or the
     user) just copies the .mod file there.
+14. **Optional `PERS` parameters + conditional argument propagation.** The style-b
+    request signatures (§7.6) use `PROC TG_Req...(\PERS tooldata Tool,\PERS
+    wobjdata WObj)` and forward with `tgSendPose \Tool?Tool \WObj?WObj;`. Both are
+    standard RAPID (`CRobT`'s own `\Tool`/`\WObj` are optional PERS parameters;
+    `\Par?Arg` is the conditional-argument form). A `PERS` parameter is a
+    persistent *reference*: legal directly in `CRobT(\Tool:= \WObj:=)` — no
+    scratch copy needed — and component writes through it (`WObj.uframe:=...`)
+    land in the caller's persistent. ⚠ per the RAPID reference; to be re-confirmed
+    by the next VC program check.
 
 ---
 
@@ -262,11 +290,14 @@ PERS wobjdata wobjTG_Weld := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,
 PERS tooldata tTG_Cam  := ...;  ! UT[2]  — DUMMY VALUES, replace with calibrated camera tool
 PERS tooldata tTG_Weld := ...;  ! UT[8]  — DUMMY VALUES, replace with calibrated torch TCP
 
-! FANUC modal UFRAME_NUM/UTOOL_NUM equivalent: the .tgs program selects the
-! active tool/frame BY NUMBER; tgSendPose resolves the number to the LIVE
-! tooldata/wobjdata at read time. (Revised 2026-08-28 after VC testing: the
-! original PERS-to-PERS "active copy" went stale when a request updated the
-! frame — RAPID assignment copies by value. Numbers need no refresh.)
+! DEPRECATED fallback (decision 7.6) — FANUC modal UFRAME_NUM/UTOOL_NUM
+! emulation: the .tgs program selects the active tool/frame BY NUMBER;
+! tgSendPose resolves the number to the LIVE tooldata/wobjdata at read time.
+! Used only when a request is called without explicit \Tool/\WObj; kept
+! deliberately as the back-pocket alternative. (Revised 2026-08-28 after VC
+! testing: the original PERS-to-PERS "active copy" went stale when a request
+! updated the frame — RAPID assignment copies by value. Numbers need no
+! refresh.)
 PERS num nTG_ActTool  := 8;   ! UTOOL_NUM:  2=camera, 8=torch
 PERS num nTG_ActFrame := 0;   ! UFRAME_NUM: 5=camera, 6=weld, else base
 ```
@@ -281,9 +312,11 @@ referenced *by name*. A PERS-to-PERS copy (the original `wobjTG_Act := wobjTG_Ca
 "active frame") is by value and goes stale when the request updates the source —
 the exact hazard behind FANUC's "re-emit `UFRAME[n]=PR[n]` after every
 frame-PR-writing routine" invariant. The exporter must therefore never emit
-frame copies; the active tool/frame is selected by number (`nTG_ActFrame`) and
-resolved live inside `tgSendPose`, which makes the FANUC re-emit ritual
-unnecessary on ABB by construction.
+frame copies; the tool/frame is either passed explicitly as `\Tool`/`\WObj`
+PERS parameters (primary since decision 7.6 — a PERS parameter is a live
+persistent reference) or selected by number (`nTG_ActFrame`, deprecated
+fallback) and resolved live inside `tgSendPose`. Both make the FANUC re-emit
+ritual unnecessary on ABB by construction.
 
 ### 4.4 Wire-protocol helpers (the "figure it out once" layer)
 
@@ -292,7 +325,7 @@ The KAREL repetition collapses into a handful of helpers in `TG_Comms`:
 ```
 PROC tgSendAck(string data)          ! WRITE + READ(cmd::1): SocketSend \Str, then SocketReceive 1-byte ack, \Time:=WAIT_MAX
 FUNC string tgPromptRecv(string prompt)  ! WRITE prompt + READ payload
-PROC tgSendPose()                    ! CRobT(\Tool:=tTG_Act \WObj:=wobjTG_Act) → pose literal (§4.5) → tgSendAck
+PROC tgSendPose(\PERS tooldata Tool,\PERS wobjdata WObj)   ! CRobT(\Tool \WObj) → pose literal (§4.5) → tgSendAck; both omitted → deprecated modal fallback (§7.6)
 FUNC string tgPoseToStr(pose p)      ! "[[x,y,z],[q1,q2,q3,q4]]" — NumToStr(trans,2) / NumToStr(quat,6), stays < 80 chars
 FUNC pose   tgStrToPose(string s)    ! StrToVal into pose + NOrient safety; error handling on parse failure
 FUNC string tgFmtReal(num v)         ! %+09.3f zero-padded formatter for scalar fields (NumToStr doesn't zero-pad)
@@ -315,7 +348,8 @@ and RAPID can parse a whole pose literal in one call (§2.11). Decision:
   `[[x,y,z],[q1,q2,q3,q4]]` — translations 2 decimals, quaternions 6 decimals
   (≈ 75 chars worst case, inside the 80-char RAPID string limit).
 - **Robot → HMI current pose** (R_C_F, R_W_F, R_P_C, R_C, R_E): one `tgSendAck`
-  of `tgPoseToStr(...)` built from `CRobT(\Tool:=tTG_Act \WObj:=wobjTG_Act)`.
+  of `tgPoseToStr(...)` built from `CRobT` on the request's explicit
+  `\Tool`/`\WObj` PERS parameters (§7.6; deprecated modal fallback when omitted).
 - **HMI → robot frame** (R_C_F, R_W_F): ONE prompt `"Give me the frame"` → one
   ≤ 80-char payload → `tgStrToPose` → assign to `wobjTG_*.uframe`. (Replaces the
   six `"Give me the frame x"…"r"` exchanges of KAREL.)
@@ -443,9 +477,15 @@ pre-loaded — transfer → `Load \Dynamic` → late-bound call → all requests
 **Phase 4 — hardening & scope growth (post-prototype).** Reconnect/error-recovery
 matrix; real file transfer via the **FTP option** (decided §7; verify option id and
 server behavior on RW6.15 when quoting the real cell); remaining requests (R_W_S,
-R_TS_*, camera calibration set); RobotWare Arc mapping for R_W_P; port of the
-Python prototype into a C++ `ABBRobot : Robot` class in TGuideWeldingHMI (small:
-`do_receive`/`do_send` identical, plus the §4.5 quaternion codec, no XML path).
+R_TS_*, camera calibration set — the cam-cal .tgs must set `nTG_ActFrame:=0`, §1.4.1
+corollary b); RobotWare Arc mapping for R_W_P; cell macros currently stubbed in
+`TG_Cell.sys` (WELD_PREP, DRY_RUN_ON/OFF); real `FSSize` free-space value in R_F_T
+(dnum, §2.6); port of the Python prototype into a C++ `ABBRobot : Robot` class in
+TGuideWeldingHMI (small: `do_receive`/`do_send` identical, plus the §4.5 quaternion
+codec, no XML path). The tool/frame parameter style is **decided** (§7.6: explicit
+`\Tool`/`\WObj` PERS parameters, style b, implemented 2026-08-28) — the exporter
+emits explicit arguments on every request call; the modal-number fallback stays
+deprecated in the back pocket.
 
 ---
 
@@ -490,3 +530,44 @@ Python prototype into a C++ `ABBRobot : Robot` class in TGuideWeldingHMI (small:
    call `TG_ReqEnd` then `RETURN` from the .tgs PROC (mirrors `LBL[101] → R_E`).
 5. **No Multitasking in v1** — socket lives in the motion task; request calls block,
    exactly like KAREL `CALL_PROG`.
+6. **Tool/frame parameter style — DECIDED 2026-08-28: (b) explicit PERS
+   parameters, with the modal path retained as a DEPRECATED fallback** (kept
+   deliberately as the back-pocket alternative — do not delete). The pose-touching
+   request PROCs take optional `\PERS tooldata Tool,\PERS wobjdata WObj`; passing
+   both is the (b) style — the parameters are persistent references, fed straight
+   to `CRobT` (no `tTG_Scratch` copies on this path), and for R_C_F/R_W_F the
+   served frame is written through `WObj.uframe`, so the request no longer
+   hardcodes data names. Omitting them falls back to the original modal-number
+   resolution (with a TPWrite warning if exactly one is passed). Mechanically this
+   is (c)'s optional-argument shape, but as policy it is (b): `TD05Test.mod`,
+   `TG_Main`, and everything the exporter emits pass explicit arguments; the modal
+   numbers are exercised by nothing. Wire format unchanged — transcripts stay
+   byte-comparable.
+
+   Pre-decision context — v1 originally emulated FANUC's modal
+   `UTOOL_NUM`/`UFRAME_NUM` with two global `PERS num`s (`nTG_ActTool`/
+   `nTG_ActFrame`) that `tgSendPose` resolved to live `tooldata`/`wobjdata` at
+   read time (§4.3), chosen for *translation parity*: one assignment per FANUC
+   modal line, .tgs line-for-line comparable with the .ls it came from. Not the
+   idiomatic RAPID form. The alternatives weighed:
+   - **(a) Keep modal numbers.** 1:1 with FANUC output; requests are callable from
+     anywhere without knowing data names. Cost: hidden global state — a request
+     issued without setting the numbers first reports a pose in the wrong frame with
+     no diagnostic (the F-2 defect class), and the number→data map lives hardcoded in
+     `tgActTool`/`tgActWobj`, so every new tool/frame (cam-cal, extra weld frames)
+     means editing `TG_Comms` rather than the generated program.
+   - **(b) Explicit PERS parameters.** `PROC TG_ReqCamFrame(PERS tooldata tool,
+     PERS wobjdata wobj)` — a `PERS` *parameter* is itself a persistent reference,
+     so it can be passed straight to `CRobT(\Tool:= \WObj:=)`; this also deletes the
+     `tTG_Scratch`/`wobjTG_Scratch` workaround of §2.10 and makes the active frame
+     visible at each call site. Cost: signatures diverge from the KAREL call list,
+     and the exporter must resolve FANUC numbers to RAPID data names at emit time.
+   - **(c) Modal default + optional override.** `\Tool`/`\WObj` optional arguments
+     that win when `Present()`, falling back to the numbers. Keeps parity, allows the
+     exporter to be explicit where it knows the answer. Cost: two paths to test.
+
+   Either way the §4.3 invariant is unconditional: **never copy** a `wobjdata`/
+   `tooldata` a request PROC may update — reference it by name, by number resolved at
+   point of use, or by `PERS` parameter. The ABB counterpart of FANUC's
+   `UFRAME[n]=PR[n]` re-emit is *nothing*, not a translation of it
+   ([rapid_validation_findings_v1.md](rapid_validation_findings_v1.md) F-2).
