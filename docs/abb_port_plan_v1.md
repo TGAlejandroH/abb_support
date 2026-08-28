@@ -496,8 +496,12 @@ corollary b); RobotWare Arc mapping for R_W_P (wire level done Phase 2;
 params are plain PERS welddata assignments, no FANUC schedule-file gymnastics;
 the KAREL's wirefeed/arclength "swap" is compensation for ArcTool's mislabeled
 $CMD_VOLTS/$CMD_WFS — map by intent on ABB; concrete welddata components are
-cell-config-dependent → §5 of that doc lists what must come from the customer;
-implementation is a separate future task); cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
+cell-config-dependent → §5 of that doc lists what must come from the customer.
+Cell power source confirmed 2026-08-28: **Fronius TPS 500i /600V/nc** — in
+scope of ABB's RI-FB inside/i manual, needs RW ≥ 6.05 + [633-4] Arc + [637-1]
+Production Screen + a fieldbus option, and the FANUC cell's Special-2-step
+mode maps to ABB characteristics/synergic mode; implementation is a separate
+future task); cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
 placeholder PROCs in `TG_Cell.sys`, called from the sample .tgs in the FANUC
 order — sample lines 13–19/63; ⚠ empty PROC bodies to confirm at the next VC
 program check); real `FSSize` free-space value in R_F_T

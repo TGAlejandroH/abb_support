@@ -1,7 +1,9 @@
 # R_W_P → RobotWare Arc weld-data research — v1 (facts, no code)
 
-Status: **research complete 2026-08-28** — Phase 4 item "RobotWare Arc mapping
-for R_W_P" of [abb_port_plan_v1.md](abb_port_plan_v1.md) §5. Wire-level
+Status: **research complete 2026-08-28**, updated the same day with the
+cell's confirmed power source (**Fronius TPS 500i /600V/nc**, §3.1) — Phase 4
+item "RobotWare Arc mapping for R_W_P" of
+[abb_port_plan_v1.md](abb_port_plan_v1.md) §5. Wire-level
 handling of the request is **already done and VC-validated** on both sides
 (Phase 2): `TG_ReqWeldParams` receives UDWP flag / travel speed / welder type /
 proc / wirefeed / arc length / arc control into `PERS` data, and the HMI side
@@ -45,9 +47,26 @@ KAREL's crossed writes land exactly right:
 | Wire Speed | `$CMD_VOLTS` | **wire feed speed** ✓ |
 | Arc Length | `$CMD_WFS` | **trim / arc length correction** ✓ |
 
-⚠ The forum evidence covers `$AWESCH` rows, not `AWE1WPxx SCH[20]`
-specifically — confirm with whoever commissioned the FANUC cell that the
-crossed writes were compensation (and that welding behaves correctly there).
+~~⚠ confirm with whoever commissioned the FANUC cell~~ — **resolved in-house
+2026-08-28**: `RobotCell.cpp` (~820-846, the read-back path that regex-parses
+the controller's schedule dump) documents the semantics per Fronius operating
+mode in a comment block:
+
+```
+// IN SPECIAL 2-STEP MODE          // IN JOB MODE
+// $CMD_VOLTS :  WIRE FEED SPEED   // $CMD_VOLTS :  JOB NUMBER
+// $CMD_WFS   :  ARC LENGHT CORRECTION (TRIM)
+// $CMD_WSPEED:  TRAVEL SPEED      // $CMD_WSPEED:  TRAVEL SPEED
+// $CMD_TIME  :  DELAY TIME        // $CMD_TIME  :  DELAY TIME
+```
+
+Two facts follow, both load-bearing for the ABB port: (a) the crossed writes
+are intentional — HMI Wire Speed really is WFS and HMI Arc Length really is
+arc-length correction/trim, exactly as the forum's mislabeling report
+predicts; (b) **the FANUC cell drives the Fronius in _Special 2-step_ mode,
+not Job mode** — in Job mode `$CMD_VOLTS` would carry a job number instead.
+The Miller branch uses byte-identical regexes, so the same crossed variables
+serve both brands and the difference is purely in welder-side interpretation.
 **Consequence for ABB: map by INTENT (wirefeed→wirefeed, arc length→arc-length
 correction), not by copying the FANUC variable names.**
 
@@ -91,24 +110,74 @@ correction), not by copying the FANUC variable names.**
 
 ## 3. Brand integrations (both welders the HMI knows)
 
-### Fronius TPS/i (welder_type 2)
+### 3.1 THIS CELL — Fronius TPS 500i /600V/nc (confirmed 2026-08-28)
 
-- Integration: **RI FB inside/i** fieldbus interface + ABB *Application
-  manual — Fronius TPS 320i/400i/500i/600i* (3HAC065012 for RW6, 3HAC089028
-  for RW7).
-- Modes: **Job mode** (recall a job stored on the power source), **Job mode
-  with correction** (needs TPS/i firmware ≥ 2.3.0), and synergic/program
-  mode. In Job-with-correction the tunables are: **Weld Speed**, **Wirefeed
-  ±20 %**, **Arc Length Correction ±10 steps in 0.1 increments** — a
-  one-to-one semantic match for the HMI's travel speed / Wire Speed / Arc
-  Length fields; Fronius's *dynamic (pulse) correction* is the natural home
-  for the HMI's Arc Control field (which FANUC never applied at all, §1).
-- ⚠ Exact RAPID component names for job number / corrections under this
-  add-in (the 3HAC065012 PDF is CID-encoded, not machine-readable here) —
-  read them from the manual in RobotStudio's built-in documentation when the
-  cell is quoted.
+**Model designation decoded** (Fronius operating instructions / product
+naming): `TPS 500i` = 500 A-class TPS/i power source; `/600V` = the
+575/600 V three-phase mains variant (North-American high-voltage); `/nc` =
+**gas-cooled, no cooling unit** (as opposed to the water-cooled build).
 
-### Miller (welder_type 1)
+What this settles:
+
+- **The ABB integration path applies verbatim.** ABB's application manual is
+  titled *Fronius TPS 320i/400i/500i/600i with RI-FB inside/i interface* —
+  the 500i is explicitly in scope (3HAC065012 for RW6, 3HAC089028 for RW7).
+- **The HMI is already configured for it**: `config.json`
+  `"WELDER_MODEL_MILLER_OR_FRONIUSTPSi": "FRONIUSTPSi"` → `GetWelderType()`
+  → `WelderType::FRONIUSTPSi` → the wire carries welder type **`02`**, which
+  is the `welder_type = 2` branch of `r_w_p.kl`. No HMI change needed for the
+  ABB cell; `nTG_WelderType` already receives 2.
+- `/nc` (gas-cooled) means **no coolant circuit** → no coolant-flow
+  interlock/error signals in the robot interface, and torch duty cycle is the
+  gas-cooled rating. Electrical-install detail, no RAPID impact.
+- `/600V` is a mains-supply variant only — no protocol or RAPID impact.
+
+**Controller prerequisites — hard requirements from 3HAC065012** (quote the
+manual's Prerequisites section):
+
+| Requirement | Note for us |
+|---|---|
+| RobotWare **6.05 or higher** | our VC runs 6.15 ✓ |
+| **[633-4] RobotWare Arc** | must be on the real key ⚠ |
+| **[637-1] Production Screen** | second option, easy to miss when quoting ⚠ |
+| **one** industrial network: [709-1] DeviceNet M/S, [841-1] EtherNet/IP Scanner/Adapter, [888-2] PROFINET Controller/Device, or [969-1] PROFIBUS Controller | choice is a cell-architecture decision ⚠ |
+
+**Procurement flag ⚠** — the Fronius-side robot interface is *robot-brand
+specific*: the existing FANUC cell uses the "TPSi RI FB/i **FANUC**" variant.
+The ABB cell needs the RI FB inside/i configured for the ABB side and the
+chosen fieldbus above. Whether an existing card can be re-configured or a
+different variant must be ordered is a Fronius question to settle at quoting
+time — do not assume the FANUC cell's hardware transfers.
+
+**Operating mode — the key design input.** The FANUC cell runs *Special
+2-step* (§1): absolute wire-feed-speed command + arc-length correction +
+travel speed. Fronius's robot-interface modes are Job mode, characteristics
+(synergic) mode, internal mode and special 2-step — the RI FB/i controls
+Special 2-step, Job Mode and Internal Mode. In **characteristics mode** the
+interface signals are *welding characteristic*, *wire feed speed command
+value* and *arc length correction* — the direct equivalent of what the HMI
+already sends, so this (not Job mode) is the natural target for the ABB port.
+Job mode would instead require the HMI's proc number to become a Fronius job
+number, changing the meaning of a field we already transmit.
+
+- *Job mode with correction* (TPS/i firmware ≥ 2.3.0) is the alternative:
+  tunables Weld Speed, Wirefeed **±20 %**, Arc Length Correction **±10 steps
+  in 0.1 increments**. Note those are *correction* ranges, whereas special
+  2-step commands wire feed **absolutely** — a real semantic difference for
+  the HMI's Wire Speed field (IPM absolute today).
+- Fronius *dynamic/pulse correction* is the natural home for the HMI's Arc
+  Control field, which FANUC never applied at all (§1, §6).
+- ⚠ **HMI range gap worth flagging**: `WidgetTouchupOffsets.cpp` lets Arc
+  Length and Arc Control run 0–9999, while Fronius corrections are ±10 steps
+  / 0.1 increments. Whatever mode is chosen, the apply-PROC (or the HMI)
+  should clamp — out-of-range corrections raise a Fronius "correction outside
+  specified range" signal.
+- ⚠ Exact RAPID component names for characteristic / wirefeed / corrections
+  under this add-in: the 3HAC065012 PDF is CID-encoded and not machine-
+  readable here — read them from the manual inside RobotStudio's
+  documentation once the controller is configured.
+
+### 3.2 Miller (welder_type 1) — not this cell, kept for completeness
 
 - Integration: ABB *Application manual — Miller Ethernet I/P Interface and
   Weld Editor* (3HAC054885, RW6): Auto-Axcess (Insight/Continuum family)
@@ -130,7 +199,11 @@ correction), not by copying the FANUC variable names.**
 | arc length / arc control | trim steps | 1:1 (already unitless trims) |
 
 ⚠ Which target unit each component expects is configuration-dependent —
-verify against the configured Arc Equipment before converting.
+verify against the configured Arc Equipment before converting. For this
+cell's TPS/i in characteristics mode the wire feed command is **m/min**
+(× 0.0254 from IPM); in a correction-based mode the same HMI field would
+instead have to become a *percentage* — one more reason the mode decision
+(§3.1) precedes any code.
 
 ## 4. Proposed ABB design (for the future implementation task)
 
@@ -156,15 +229,26 @@ verify against the configured Arc Equipment before converting.
 
 ## 5. What must come from the customer / cell (cannot be researched)
 
-1. RobotWare version + confirmation the **633-4 Arc** option is on the key.
-2. Welder brand & model (Miller Auto-Axcess/Continuum vs Fronius TPS/i) and,
-   for TPS/i Job-with-correction, firmware ≥ 2.3.0.
-3. Chosen operating mode (Job vs synergic/program) — decides whether proc
-   number means *Fronius job number* or *welddata library index*.
+1. RobotWare version + **[633-4] Arc** + **[637-1] Production Screen** +
+   **one industrial network option** on the real key — exact list and
+   minimum RW 6.05 now known (§3.1); still needs confirming against the
+   quoted controller.
+2. ~~Welder brand & model~~ **ANSWERED 2026-08-28: Fronius TPS 500i
+   /600V/nc** (§3.1); HMI already set to FRONIUSTPSi. Still needed: the
+   **TPS/i firmware version** (≥ 2.3.0 only if a correction-based mode is
+   chosen).
+3. Chosen operating mode — FANUC ran **Special 2-step** (§1), so the
+   like-for-like ABB target is **characteristics/synergic mode**. Confirm
+   the ABB cell will run the same mode, and therefore whether the HMI proc
+   number maps to a *welding characteristic/program number* (expected) or a
+   *Fronius job number* (Job mode).
 4. The configured Arc Equipment class → the **actual welddata component
    set** (flat trio vs `main_arc` substructure, and their units).
 5. The predefined procedure library: mapping of HMI proc numbers 1–99 to
-   jobs/welddata on the controller.
+   characteristics/jobs on the power source.
+6. Which fieldbus the cell will use (DeviceNet / EtherNet-IP / PROFINET /
+   PROFIBUS) and whether the Fronius-side RI FB inside/i card for ABB is
+   included in the quote (§3.1 procurement flag).
 
 ## 6. Facts that close FANUC-parity questions
 
