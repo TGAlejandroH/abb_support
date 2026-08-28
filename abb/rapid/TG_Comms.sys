@@ -1,0 +1,247 @@
+MODULE TG_Comms(SYSMODULE)
+    !***********************************************************************
+    ! TetraGen HMI request library for ABB - Phase 1 (comm core)
+    !
+    ! RAPID port of the FANUC KAREL request programs.
+    ! Design & wire protocol: docs/abb_port_plan_v1.md
+    !
+    ! Loaded resident in task T_ROB1. The .tgs program modules (loaded
+    ! dynamically by TG_Main in Phase 3) call the TG_* PROCs and read the
+    ! shared PERS data below directly - RAPID's task-wide global scope makes
+    ! every non-LOCAL symbol of a loaded module visible to all other modules.
+    !
+    ! Naming:  TG_*  = public API (called by TG_Main and .tgs programs)
+    !          tg*   = internal helpers (LOCAL)
+    !
+    ! Wire protocol: byte-compatible with the FANUC TGS HMI protocol
+    ! (request ids, prompts, 1-byte "0" acks, fixed-width scalars) EXCEPT
+    ! frame/pose payloads, which travel as RAPID pose literals
+    ! "[[x,y,z],[q1,q2,q3,q4]]" with a normalized quaternion (plan 4.5).
+    !***********************************************************************
+
+    ! ------------------------------------------------------------------
+    ! Connection config. Edit from FlexPendant/RobotStudio, no code change.
+    ! Virtual controller: keep "127.0.0.1". Real IRC5: the controller LAN IP.
+    PERS string stTG_ServerIP:="127.0.0.1";
+    PERS num nTG_Port:=2000;
+
+    ! ------------------------------------------------------------------
+    ! Shared state: FANUC register-map equivalents (plan 4.3).
+    PERS string stTG_ProgPass:="none";     ! SR[24] program name == project password
+    PERS string stTG_SubName:="none";      ! SR[25] sub-routine token
+    PERS string stTG_RobStatus:="Ok";      ! SR[23] robot status string
+    PERS string stTG_ProgName:="none";     ! prog name received by TG_ReqFileTransfer
+    PERS num nTG_ProgSel:=0;               ! R[188] 1=run .tgs program, 2=camera calibration
+    PERS num nTG_FtpStatus:=0;             ! R[189] file transfer ok
+    PERS num nTG_PassOK:=0;                ! R[200] password correct
+    PERS num nTG_DryRun:=0;                ! R[199] dry-run flag
+    PERS num nTG_DoCapture:=0;             ! R[197] do-capture flag (camera frame)
+    PERS num nTG_CaptureOK:=0;             ! R[196] capture succeeded
+    PERS num nTG_GlobalCapOK:=0;           ! R[187] global captures done status
+    PERS num nTG_WeldStatus:=0;            ! R[198] 0=skip weld, 1=weld, 2=abort program
+    PERS num nTG_UdwpFlag:=0;              ! R[170] user-defined weld params flag
+    PERS num nTG_WeldProc:=0;              ! R[171] weld procedure number
+    PERS num nTG_WireFeed:=0;              ! R[172] wire feed speed
+    PERS num nTG_ArcLength:=0;             ! R[173] arc length
+    PERS num nTG_ArcControl:=0;            ! R[174] arc control
+    PERS num nTG_TravelSpeed:=0;           ! R[175] travel speed
+
+    ! Frames received from the HMI (FANUC PR[5]/UFRAME[5], PR[6]/UFRAME[6]).
+    ! Request PROCs write .uframe; the .tgs program references these wobjs in
+    ! its move instructions - no separate "activate" step exists or is needed.
+    PERS wobjdata wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+    PERS wobjdata wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
+    ! Tools (FANUC UT[2] camera / UT[8] torch).
+    ! TODO: DUMMY VALUES - replace with the calibrated tooldata of the real cell.
+    PERS tooldata tTG_Cam:=[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]];
+    PERS tooldata tTG_Weld:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+
+    ! FANUC modal UTOOL_NUM/UFRAME_NUM equivalent: the .tgs program assigns
+    ! the currently "active" tool/frame here before issuing requests; request
+    ! PROCs report the robot pose measured with these.
+    PERS tooldata tTG_Act:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+    PERS wobjdata wobjTG_Act:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
+    ! ------------------------------------------------------------------
+    ! Socket state. Lifecycle owned by TG_Main via TG_SocketCom/TG_SocketDisc;
+    ! .tgs programs must never touch these directly.
+    LOCAL VAR socketdev tg_server_socket;
+    LOCAL VAR socketdev tg_client_socket;
+    LOCAL VAR string tg_client_ip:="";
+
+
+    !===================================================================
+    ! Socket lifecycle (FANUC: SOCKET_COM / SOCKET_DISC)
+    !===================================================================
+
+    PROC TG_SocketCom()
+        ! FANUC: SOCKET_COM - (re)start the server and wait for the HMI client.
+        ! SocketClose is safe on sockets that were never opened (RoboDK driver
+        ! uses the same close-before-create pattern on RW5/6).
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        SocketCreate tg_server_socket;
+        SocketBind tg_server_socket,stTG_ServerIP,nTG_Port;
+        SocketListen tg_server_socket;
+        TPWrite "TG: waiting for HMI on port "\Num:=nTG_Port;
+        SocketAccept tg_server_socket,tg_client_socket\ClientAddress:=tg_client_ip,\Time:=WAIT_MAX;
+        TPWrite "TG: HMI connected: "+tg_client_ip;
+    ERROR
+        IF ERRNO=ERR_SOCK_TIMEOUT THEN
+            RETRY;
+        ELSEIF ERRNO=ERR_SOCK_CLOSED THEN
+            SocketClose tg_server_socket;
+            SocketClose tg_client_socket;
+            WaitTime 2;
+            RETRY;
+        ENDIF
+    ENDPROC
+
+    PROC TG_SocketDisc()
+        ! FANUC: SOCKET_DISC - drop the HMI connection (and the listener; it is
+        ! re-created by the next TG_SocketCom). WaitTime lets the TCP stack
+        ! release the port before rebinding (RoboDK COM_End pattern).
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        WaitTime 2;
+        TPWrite "TG: socket disconnected";
+    ENDPROC
+
+
+    !===================================================================
+    ! Wire-protocol helpers (plan 4.4)
+    !===================================================================
+
+    LOCAL PROC tgSendAck(string data)
+        ! Robot->HMI message: send, then wait for the HMI 1-byte ack ("0").
+        ! KAREL: WRITE comm_file(data) ; READ comm_file(cmd::1)
+        VAR string ack;
+        SocketSend tg_client_socket,\Str:=data;
+        SocketReceive tg_client_socket,\Str:=ack,\Time:=WAIT_MAX;
+    ENDPROC
+
+    LOCAL FUNC string tgPromptRecv(string prompt)
+        ! HMI->robot value: send the sync prompt, then receive the payload.
+        ! KAREL: WRITE comm_file(prompt) ; READ comm_file(cmd::N)
+        VAR string reply;
+        SocketSend tg_client_socket,\Str:=prompt;
+        SocketReceive tg_client_socket,\Str:=reply,\Time:=WAIT_MAX;
+        RETURN reply;
+    ENDFUNC
+
+    LOCAL FUNC string tgFmtReal(num v)
+        ! FANUC fixed-width real: sign + 8 chars, 3 decimals, zero-padded.
+        ! e.g. 905.216 -> "+0905.216", -12.5 -> "-0012.500"
+        VAR string s;
+        VAR num av;
+        VAR num dotpos;
+        av:=Abs(v);
+        ! FANUC HMI rejects values >= 10000 anyway (frame limit check)
+        IF av>9999.999 av:=9999.999;
+        s:=NumToStr(av,3);
+        ! ensure exactly 3 decimals (NumToStr may drop trailing zeros)
+        dotpos:=StrFind(s,1,".");
+        IF dotpos>StrLen(s) THEN
+            s:=s+".000";
+            dotpos:=StrFind(s,1,".");
+        ENDIF
+        WHILE StrLen(s)-dotpos<3 DO
+            s:=s+"0";
+        ENDWHILE
+        ! zero-pad the integer part to a total of 8 chars
+        WHILE StrLen(s)<8 DO
+            s:="0"+s;
+        ENDWHILE
+        IF v<0 THEN
+            RETURN "-"+s;
+        ENDIF
+        RETURN "+"+s;
+    ENDFUNC
+
+    LOCAL FUNC num tgParseReal(string s)
+        ! Tolerant scalar parse; returns 0 on garbage (and reports it).
+        VAR num v:=0;
+        VAR bool ok;
+        ok:=StrToVal(s,v);
+        IF NOT ok THEN
+            TPWrite "TG ERROR: bad number payload:";
+            TPWrite s;
+            v:=0;
+        ENDIF
+        RETURN v;
+    ENDFUNC
+
+    LOCAL FUNC string tgPoseToStr(pose p)
+        ! RAPID pose literal, guaranteed <= 80 chars for |trans| < 10000 mm
+        ! (plan 4.5): translations 2 decimals, quaternions 6 decimals.
+        VAR string s;
+        s:="[["+NumToStr(p.trans.x,2)+","+NumToStr(p.trans.y,2)+","+NumToStr(p.trans.z,2)+"],[";
+        s:=s+NumToStr(p.rot.q1,6)+","+NumToStr(p.rot.q2,6)+",";
+        s:=s+NumToStr(p.rot.q3,6)+","+NumToStr(p.rot.q4,6)+"]]";
+        RETURN s;
+    ENDFUNC
+
+    LOCAL FUNC bool tgTryStrToPose(string s,INOUT pose p)
+        ! Parse "[[x,y,z],[q1,q2,q3,q4]]" into a pose; re-normalize the
+        ! quaternion defensively (non-normalized orients raise error 50076
+        ! when used in motion). Leaves p untouched on parse failure.
+        VAR pose ptmp;
+        VAR bool ok;
+        ok:=StrToVal(s,ptmp);
+        IF ok THEN
+            ptmp.rot:=NOrient(ptmp.rot);
+            p:=ptmp;
+        ELSE
+            TPWrite "TG ERROR: bad pose payload:";
+            TPWrite s;
+        ENDIF
+        RETURN ok;
+    ENDFUNC
+
+    LOCAL PROC tgSendPose()
+        ! Robot->HMI: current pose of the ACTIVE tool in the ACTIVE wobj,
+        ! sent as a pose literal (plan 4.5). KAREL sent Euler x,y,z,w,p,r;
+        ! the Euler<->quaternion conversion now lives on the PC side.
+        VAR robtarget rt;
+        VAR pose p;
+        rt:=CRobT(\Tool:=tTG_Act \WObj:=wobjTG_Act);
+        p.trans:=rt.trans;
+        p.rot:=rt.rot;
+        tgSendAck tgPoseToStr(p);
+    ENDPROC
+
+
+    !===================================================================
+    ! Request PROCs - Phase 1 subset
+    ! (Phase 2 adds: TG_ReqFileTransfer, TG_ReqPassCheck, TG_ReqCamFrame,
+    !  TG_ReqCapture, TG_ReqGlobalCapDone, TG_ReqWeldFrame, TG_ReqWeldParams)
+    !===================================================================
+
+    PROC TG_ReqProgSel()
+        ! FANUC: REQ_PROG_SEL - receive the mode/program selection from the
+        ! HMI right after it connects. -> nTG_ProgSel (R[188])
+        VAR string reply;
+        VAR bool ok;
+        reply:=tgPromptRecv("Give me the program ID");
+        ok:=StrToVal(reply,nTG_ProgSel);
+        IF NOT ok THEN
+            nTG_ProgSel:=0;
+            TPWrite "TG ERROR: bad program ID:";
+            TPWrite reply;
+        ENDIF
+        TPWrite "TG: program ID = "\Num:=nTG_ProgSel;
+    ENDPROC
+
+    PROC TG_ReqEnd()
+        ! FANUC: R_E (HMI request id 100) - program end notification.
+        ! Sequence: id -> current pose -> sub-routine token.
+        ! stTG_SubName must never be empty: an empty SocketSend transmits
+        ! zero bytes and the HMI recv would block forever (default "none").
+        tgSendAck "100";
+        tgSendPose;
+        tgSendAck stTG_SubName;
+        TPWrite "TG: end request served";
+    ENDPROC
+
+ENDMODULE
