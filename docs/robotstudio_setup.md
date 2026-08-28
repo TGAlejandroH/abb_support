@@ -282,6 +282,19 @@ Cost: ~0.25 s per reported pose (5–9 per program). If that ever matters, lower
 
 ## 10. Explicit \Tool/\WObj request parameters (plan §7.6, style b)
 
+*Status 2026-08-28: **all criteria met** — program check clean, two
+consecutive cycles, no fallback warning, every reported pose verified
+numerically at the 0.01 mm wire-quantization floor. Frame persistence through
+the parameter path confirmed: after the frames had been served once, the
+first `R_C_F` of every later cycle (including across a program restart)
+reported the predicted persisted value `[[1186.89,-91.53,1051.11],...]`.
+Note: reloading `TG_Comms.sys` resets the PERS frames to identity, so the
+very first post-reload `R_C_F` pose is in base — expected. Note for
+transcript diffing: `CRobT` may return the sign-flipped equivalent quaternion
+(one run's `R_W_F` gave `[0,-0,1,0]`, the next `[0,0,-1,0]` — same rotation)
+and signed zeros; compare poses numerically with q ≡ −q equivalence, never
+byte-wise on quaternion strings.*
+
 The pose-touching requests (`TG_ReqPassCheck`, `TG_ReqCamFrame`, `TG_ReqCapture`,
 `TG_ReqWeldFrame`, `TG_ReqEnd`) now take explicit `\PERS tooldata Tool,\PERS
 wobjdata WObj` arguments; `TD05Test.mod` and `TG_Main` pass them on every call.

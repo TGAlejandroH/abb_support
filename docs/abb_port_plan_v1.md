@@ -191,8 +191,9 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
     `\Par?Arg` is the conditional-argument form). A `PERS` parameter is a
     persistent *reference*: legal directly in `CRobT(\Tool:= \WObj:=)` — no
     scratch copy needed — and component writes through it (`WObj.uframe:=...`)
-    land in the caller's persistent. ⚠ per the RAPID reference; to be re-confirmed
-    by the next VC program check.
+    land in the caller's persistent. **Verified on the VC 2026-08-28**: program
+    check clean, and all three forms exercised in a numerically validated cycle
+    (the write-through frame reached the capture-pose report to 0.01 mm).
 
 ---
 
@@ -346,7 +347,11 @@ and RAPID can parse a whole pose literal in one call (§2.11). Decision:
 
 - **Wire format (both directions)**: one message containing the RAPID pose literal
   `[[x,y,z],[q1,q2,q3,q4]]` — translations 2 decimals, quaternions 6 decimals
-  (≈ 75 chars worst case, inside the 80-char RAPID string limit).
+  (≈ 75 chars worst case, inside the 80-char RAPID string limit). The quaternion
+  representative is NOT canonical: `CRobT` may return q or −q for the same
+  rotation (observed on the VC 2026-08-28), plus signed zeros. Consumers and
+  transcript diffs must compare rotations with q ≡ −q equivalence, never as
+  strings; the Euler conversion on the PC side is naturally sign-insensitive.
 - **Robot → HMI current pose** (R_C_F, R_W_F, R_P_C, R_C, R_E): one `tgSendAck`
   of `tgPoseToStr(...)` built from `CRobT` on the request's explicit
   `\Tool`/`\WObj` PERS parameters (§7.6; deprecated modal fallback when omitted).
@@ -542,7 +547,13 @@ deprecated in the back pocket.
    is (c)'s optional-argument shape, but as policy it is (b): `TD05Test.mod`,
    `TG_Main`, and everything the exporter emits pass explicit arguments; the modal
    numbers are exercised by nothing. Wire format unchanged — transcripts stay
-   byte-comparable.
+   byte-comparable. **Validated on the VC 2026-08-28**: two consecutive cycles,
+   no fallback warning, every reported pose arithmetically consistent with the
+   served frames — capture pose = cam-frame transform of the base pose
+   (0.008 mm / 0.000°), R_E pose = weld-frame transform of the home pose
+   (0.007 mm / 0.000°), R_W_F demo pose exact — and frames persist across cycles
+   and program restarts through the parameter path (first `R_C_F` of a later
+   cycle reported the predicted persisted-frame value exactly).
 
    Pre-decision context — v1 originally emulated FANUC's modal
    `UTOOL_NUM`/`UFRAME_NUM` with two global `PERS num`s (`nTG_ActTool`/
