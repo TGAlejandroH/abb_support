@@ -480,7 +480,13 @@ pre-loaded — transfer → `Load \Dynamic` → late-bound call → all requests
 `UnLoad` → `R_E` → disconnect → repeat. This completes the v1 prototype scope.*
 
 **Phase 4 — hardening & scope growth (post-prototype).** Reconnect/error-recovery
-matrix; real file transfer via the **FTP option** (decided §7; verify option id and
+matrix (→ [abb_error_recovery_matrix_v1.md](abb_error_recovery_matrix_v1.md):
+5 findings; **I1 ResetRetryCount, I4 malformed-frame-forces-skip/abort, and
+I2/I3 stale-module fix implemented 2026-08-28** — the last surfaced F-E:
+RAPID error-handler fall-through is an implicit RETURN, so mid-.tgs errors
+were silently swallowed until the explicit RAISE; I5 receive timeout deferred
+for FANUC parity, I6 counters declined; VC validation of I1/I4 + I2/I3
+pending, robotstudio_setup §11–§12); real file transfer via the **FTP option** (decided §7; verify option id and
 server behavior on RW6.15 when quoting the real cell); remaining requests (R_W_S,
 R_TS_*, camera calibration set — the cam-cal .tgs must set `nTG_ActFrame:=0`, §1.4.1
 corollary b); RobotWare Arc mapping for R_W_P; cell macros currently stubbed in

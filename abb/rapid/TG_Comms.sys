@@ -122,12 +122,20 @@ MODULE TG_Comms(SYSMODULE)
         SocketAccept tg_server_socket,tg_client_socket\ClientAddress:=tg_client_ip,\Time:=WAIT_MAX;
         TPWrite "TG: HMI connected: "+tg_client_ip;
     ERROR
+        ! Error matrix F-A/I1: RAPID's retry counter is bounded by the
+        ! system parameter "No Of Retry" (default 4) - without
+        ! ResetRetryCount a handful of consecutive failures would stop the
+        ! whole server loop. Resetting makes this reconnect loop indefinite
+        ! (same idiom as the RoboDK driver). Pacing comes from WaitTime /
+        ! the blocking SocketAccept, so this cannot busy-loop.
         IF ERRNO=ERR_SOCK_TIMEOUT THEN
+            ResetRetryCount;
             RETRY;
         ELSEIF ERRNO=ERR_SOCK_CLOSED THEN
             SocketClose tg_server_socket;
             SocketClose tg_client_socket;
             WaitTime 2;
+            ResetRetryCount;
             RETRY;
         ENDIF
     ENDPROC
@@ -397,19 +405,30 @@ MODULE TG_Comms(SYSMODULE)
         ! -> WObj.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197])
         VAR string reply;
         VAR pose pFrame;
+        VAR bool frame_ok;
         tgSendAck "1";
         tgSendPose \Tool?Tool \WObj?WObj;
         tgSendAck stTG_SubName;
         reply:=tgPromptRecv("Give me the frame");
-        IF tgTryStrToPose(reply,pFrame) THEN
+        frame_ok:=tgTryStrToPose(reply,pFrame);
+        IF frame_ok THEN
             IF Present(WObj) THEN
                 WObj.uframe:=pFrame;
             ELSE
                 wobjTG_Cam.uframe:=pFrame;
             ENDIF
         ENDIF
+        ! The capture-status exchange must ALWAYS complete: the HMI's R_C_F
+        ! handler serves the full sequence and would desync if cut short.
         reply:=tgPromptRecv("Give me capture status");
         nTG_DoCapture:=tgParseReal(reply);
+        IF NOT frame_ok THEN
+            ! Error matrix F-C/I4: never capture against a stale frame. A
+            ! malformed frame payload forces the skip path the HMI already
+            ! understands (as if it had sent do_capture=0).
+            nTG_DoCapture:=0;
+            TPWrite "TG ERROR: bad cam frame payload - capture skipped";
+        ENDIF
         TPWrite "TG: cam frame set, do capture = "\Num:=nTG_DoCapture;
     ENDPROC
 
@@ -453,19 +472,31 @@ MODULE TG_Comms(SYSMODULE)
         ! -> WObj.uframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
         VAR string reply;
         VAR pose pFrame;
+        VAR bool frame_ok;
         tgSendAck "4";
         tgSendPose \Tool?Tool \WObj?WObj;
         tgSendAck stTG_SubName;
         reply:=tgPromptRecv("Give me the frame");
-        IF tgTryStrToPose(reply,pFrame) THEN
+        frame_ok:=tgTryStrToPose(reply,pFrame);
+        IF frame_ok THEN
             IF Present(WObj) THEN
                 WObj.uframe:=pFrame;
             ELSE
                 wobjTG_Weld.uframe:=pFrame;
             ENDIF
         ENDIF
+        ! The weld-status exchange must ALWAYS complete: the HMI's R_W_F
+        ! handler serves the full sequence and would desync if cut short.
         reply:=tgPromptRecv("Give me weld status");
         nTG_WeldStatus:=tgParseReal(reply);
+        IF NOT frame_ok THEN
+            ! Error matrix F-C/I4: never weld against a stale frame. A
+            ! malformed frame payload forces the abort path (decision:
+            ! abort program, not skip weld - safer for welding). The .tgs
+            ! program sees nTG_WeldStatus=2 -> R_E, FANUC LBL[101] parity.
+            nTG_WeldStatus:=2;
+            TPWrite "TG ERROR: bad weld frame payload - aborting program";
+        ENDIF
         TPWrite "TG: weld frame set, weld status = "\Num:=nTG_WeldStatus;
     ENDPROC
 

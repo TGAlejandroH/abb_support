@@ -14,6 +14,7 @@ import socket
 import threading
 import unittest
 
+import abb_server
 from abb_server import (
     ACK,
     AbbTgsHmi,
@@ -57,6 +58,14 @@ class FakeTgsRobot(threading.Thread):
     def _send_pose(self, conn):                              # tgSendPose
         self._send_ack(conn, xyzwpr_to_pose_literal(ROBOT_POSE_XYZWPR))
 
+    @staticmethod
+    def _pose_parses(literal):                               # tgTryStrToPose
+        try:
+            pose_literal_to_xyzwpr(literal)
+            return True
+        except (ValueError, IndexError):
+            return False
+
     # -- the cycle, mirroring the RAPID control flow --------------------------
 
     def run(self):
@@ -98,9 +107,12 @@ class FakeTgsRobot(threading.Thread):
             self._send_ack(conn, "1")
             self._send_pose(conn)
             self._send_ack(conn, sub)
-            self.received[f"cam_frame_{i}"] = self._prompt(conn, "Give me the frame")
+            frame_raw = self._prompt(conn, "Give me the frame")
+            self.received[f"cam_frame_{i}"] = frame_raw
             do_cap = self._prompt(conn, "Give me capture status")
             self.received[f"do_capture_{i}"] = do_cap
+            if not self._pose_parses(frame_raw):
+                do_cap = "0"  # RAPID I4: malformed frame forces the skip path
             if do_cap == "1":
                 # TG_ReqCapture
                 self._send_ack(conn, "2")
@@ -118,9 +130,12 @@ class FakeTgsRobot(threading.Thread):
         self._send_ack(conn, "4")
         self._send_pose(conn)
         self._send_ack(conn, "PWeld2")
-        self.received["weld_frame"] = self._prompt(conn, "Give me the frame")
+        weld_frame_raw = self._prompt(conn, "Give me the frame")
+        self.received["weld_frame"] = weld_frame_raw
         weld_status = self._prompt(conn, "Give me weld status")
         self.received["weld_status"] = weld_status
+        if not self._pose_parses(weld_frame_raw):
+            weld_status = "2"  # RAPID I4: malformed frame forces program abort
         if weld_status == "2":
             self._end_req(conn)  # GOTO abort_end
             return
@@ -240,6 +255,28 @@ class TestBranchScenarios(unittest.TestCase):
         robot, hmi = run_one_cycle({"weld_status": 2})
         self.assertEqual(hmi.request_log,
                          ["10", "5", "1", "2", "1", "2", "11", "4", "100"])
+
+    def test_corrupt_cam_frame_forces_capture_skip(self):
+        # Error matrix I4: a malformed camera frame payload must skip the
+        # capture (robot overrides the HMI's do_capture=1) but complete the
+        # R_C_F choreography and the rest of the program normally.
+        robot, hmi = run_one_cycle({"corrupt_cam_frame": True})
+        self.assertEqual(hmi.request_log,
+                         ["10", "5", "1", "1", "11", "4", "14", "100"])
+        # the HMI did say "capture" - the skip came from the robot side
+        self.assertEqual(robot.received["do_capture_0"], "1")
+        self.assertEqual(robot.received["cam_frame_0"],
+                         abb_server.CORRUPT_FRAME_PAYLOAD)
+
+    def test_corrupt_weld_frame_aborts_program(self):
+        # Error matrix I4 (decision: abort, not skip): a malformed weld
+        # frame payload must abort to R_E without serving weld params.
+        robot, hmi = run_one_cycle({"corrupt_weld_frame": True})
+        self.assertEqual(hmi.request_log,
+                         ["10", "5", "1", "2", "1", "2", "11", "4", "100"])
+        # the HMI did say "weld" - the abort came from the robot side
+        self.assertEqual(robot.received["weld_status"], "1")
+        self.assertNotIn("udwp", robot.received)
 
     def test_predefined_schedule_sends_only_flag_and_speed(self):
         robot, hmi = run_one_cycle({"udwp_flag": 0})

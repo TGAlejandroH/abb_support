@@ -116,6 +116,12 @@ def fmt_real(value):
 # The HMI prototype
 # ---------------------------------------------------------------------------
 
+# A realistically broken frame payload: truncated mid-number, the way a cut
+# TCP stream would look. RAPID StrToVal and pose_literal_to_xyzwpr both
+# reject it.
+CORRUPT_FRAME_PAYLOAD = "[[850.00,-120.00,4"
+
+
 class AbbTgsHmi:
     """Application-level request server / transport-level TCP client."""
 
@@ -143,6 +149,11 @@ class AbbTgsHmi:
         self.dry_run = 0                   # R_P_C
         self.cam_frame_xyzwpr = [850.0, -120.0, 400.0, 5.0, -10.0, 45.0]
         self.do_capture = 1                # R_C_F: 1 = perform the capture
+        # Fault injection (error matrix I4 checks): send a malformed frame
+        # payload instead of the pose literal. The robot must force the
+        # skip (cam) / abort (weld) path and keep the choreography intact.
+        self.corrupt_cam_frame = False
+        self.corrupt_weld_frame = False
         self.capture_ok = 1                # R_C: 1 = capture succeeded
         self.global_ok = 1                 # R_G_C_D
         self.weld_frame_xyzwpr = [900.0, 80.0, 350.0, -2.5, 3.5, 90.0]
@@ -244,7 +255,10 @@ class AbbTgsHmi:
         the prototype sends the canned ``cam_frame_xyzwpr``.
         """
         self._recv_pose_and_sub()
-        self.do_send(xyzwpr_to_pose_literal(self.cam_frame_xyzwpr))
+        if self.corrupt_cam_frame:
+            self.do_send(CORRUPT_FRAME_PAYLOAD)
+        else:
+            self.do_send(xyzwpr_to_pose_literal(self.cam_frame_xyzwpr))
         self.do_send(str(self.do_capture))
 
     def handle_capture_req(self):
@@ -255,7 +269,10 @@ class AbbTgsHmi:
     def handle_weld_frame_req(self):
         """FANUC R_W_F (id 4): pose + sub in; weld frame + weld status out."""
         self._recv_pose_and_sub()
-        self.do_send(xyzwpr_to_pose_literal(self.weld_frame_xyzwpr))
+        if self.corrupt_weld_frame:
+            self.do_send(CORRUPT_FRAME_PAYLOAD)
+        else:
+            self.do_send(xyzwpr_to_pose_literal(self.weld_frame_xyzwpr))
         self.do_send(str(self.weld_status))
 
     def handle_pass_check_req(self):
@@ -346,7 +363,15 @@ def main(argv):
     port = int(argv[2]) if len(argv) > 2 else 2000
     cycles = int(argv[3]) if len(argv) > 3 else 2
     vc_home_dir = argv[4] if len(argv) > 4 else None
+    fault = argv[5] if len(argv) > 5 else None
     hmi = AbbTgsHmi(host=host, port=port, vc_home_dir=vc_home_dir)
+    if fault == "corrupt-cam":
+        hmi.corrupt_cam_frame = True
+    elif fault == "corrupt-weld":
+        hmi.corrupt_weld_frame = True
+    elif fault is not None:
+        raise SystemExit(f"unknown fault flag {fault!r} "
+                         "(use corrupt-cam or corrupt-weld)")
     for i in range(cycles):
         print(f"--- cycle {i + 1}/{cycles} ---", flush=True)
         hmi.serve_cycle()
