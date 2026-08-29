@@ -1,3 +1,4 @@
 ABB IRB 4600-20/2.5
 RobotWare 6.15.08.0
 IRC5 Controller
+Welding Power Supply: Fronius TPS 500i/600V/nc

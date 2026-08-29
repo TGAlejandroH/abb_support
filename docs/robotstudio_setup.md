@@ -334,12 +334,23 @@ pass criteria.
 
 ## 11. Error-recovery fixes I1 + I4 (error matrix)
 
+*Status 2026-08-28: check 1 covered by the §12 clean-cycle runs. Check 3
+(corrupt-weld) **validated**: request order `10,5,1,2,1,2,11,4,100` with no
+14, both error lines + `weld status = 2`, "before" demo TPWrite only, and the
+R_E pose matched the predicted `[[1000.00,0.00,600.00],[0,0,±1,0]]` exactly.
+Check 2 (corrupt-cam) **pending re-run**: the cam behavior was revised the
+same day from skip to ABORT (team decision) — expectations below already
+describe the revised build; reload `TG_Comms.sys` first (TD05Test recopies
+itself).*
+
 I1: `ResetRetryCount` in `TG_SocketCom`'s reconnect retries (the RAPID retry
 counter is bounded by system parameter *No Of Retry*, default 4 — without the
 reset a run of consecutive connect failures halts the server loop). I4: a
-malformed frame payload now forces the skip path (R_C_F → `do capture = 0`)
-or the abort path (R_W_F → `weld status = 2` → `R_E`) instead of proceeding
-against the stale frame. Happy-path behavior and transcripts are unchanged.
+malformed frame payload now ABORTS the program (R_C_F → `do capture = 2`,
+a robot-side sentinel the wire never carries; R_W_F → `weld status = 2`;
+both → clean `R_E`) instead of proceeding against the stale frame — the cam
+case was revised 2026-08-28 from skip to abort to match the weld policy.
+Happy-path behavior and transcripts are unchanged.
 
 Setup: reload `TG_Comms.sys` only. Note the reload resets the PERS frames to
 identity, so first-cycle `R_C_F` poses are in base (expected, see §10).
@@ -354,12 +365,14 @@ identical to §10 (no new lines, no behavior change).
 python abb_server.py 127.0.0.1 2000 1 "<...>\HOME" corrupt-cam
 ```
 
-Expected: request order `10, 5, 1, 1, 11, 4, 14, 100` — both R_C_F served,
-**no request 2** despite the HMI sending `do capture = 1`. Operator Window per
-R_C_F: `TG ERROR: bad pose payload:` + `[[850.00,-120.00,4` +
-`TG ERROR: bad cam frame payload - capture skipped` +
-`TG: cam frame set, do capture = 0`. The weld section then runs normally
-(demo TPWrites, request 14) and `R_E` completes the cycle.
+Expected (revised abort behavior): request order `10, 5, 1, 100` — the
+first R_C_F completes its full choreography (frame + capture-status
+exchanges, keeping the HMI in sync), then the program aborts. Operator
+Window: `TG ERROR: bad pose payload:` + `[[850.00,-120.00,4` +
+`TG ERROR: bad cam frame payload - aborting program` +
+`TG: cam frame set, do capture = 2`, then `R_E` — no captures, no weld
+section (no demo TPWrites). The R_E pose (reported from the first capture
+position in the persisted weld frame) is ignored by the HMI as always.
 
 **Check 3 — corrupt weld frame.**
 
@@ -386,6 +399,25 @@ with I2/I3; program check plus code review covers it until then.
 
 ## 12. Stale-module fix I2 + I3 (error matrix F-B, F-E)
 
+*Status 2026-08-28: checks 1 and 3 validated on the VC. Check 3 confirmed the
+bounded fallback, variant (b), and settled a fact: **modules loaded via
+RobotStudio cannot be `UnLoad`-ed** — the full expected cascade appeared,
+the cycle ran clean, and the expected second `could not unload` appeared
+after "program finished". Check 2 (attempt 2) **halted the program at the
+failing `SocketReceive`** (events 41595/40228/10020/10126, no handler
+output) — this exposed matrix finding **F-F**: unhandled errors do not
+propagate through the late-binding `%%` call. Fixed the same day by **I7**
+(`tgCycleAbort`/`ExitCycle` in the wire helpers). **Check 2 rev 3 PASSED
+2026-08-28**: kill mid-.tgs → `TG: cycle error, ERRNO = 1095` + `TG: wire
+lost - restarting cycle` + `TG: main started` + accept loop, simulation kept
+running and served the next session untouched. The next cycle showed the I2
+variant: `module already loaded - reloading from file` once, then a clean
+reload — i.e. **ExitCycle does not drop \Dynamic modules** and the I2 path
+covered it (I2 thereby validated in its primary stale-module role). Step 4
+(mid-prog-sel kill regression) remains optional — same mechanism, shallower
+depth. Check 1's transcripts also exercised the §13 cell-macro placeholders
+end-to-end.*
+
 An aborted cycle used to leave the .tgs module loaded in the task; the next
 cycle's `Load` hit `ERR_LOADED` and silently ran the **old in-memory copy**
 even though a fresh file had just been transferred. Fix (all marked with
@@ -401,20 +433,33 @@ Setup: reload `TG_Main.mod` only. Happy-path transcripts are unchanged.
 **Check 1 — program check + clean run.** Program check clean; one normal cycle
 identical to §10.
 
-**Check 2 — aborted cycle cleans up (F-B core + F-E).**
+**Check 2 (rev 3, for the I7 build) — mid-.tgs wire loss recovers via
+ExitCycle (F-F).**
 
+0. Cleanup first: the manually loaded module from check 3 is still in the
+   task (RobotStudio-loaded modules survive PP-to-main — the attempt-2 log's
+   warn cascade proves it). Remove it in RobotStudio (RAPID browser →
+   T_ROB1 → right-click `TD05Test_Mod` → delete), reload `TG_Comms.sys` +
+   `TG_Main.mod` (both changed by I7), then run one clean cycle — expected:
+   **no** WARN lines, transcript matches §10.
 1. Start `python abb_server.py 127.0.0.1 2000 1 "<...>\HOME"` and press
-   **Ctrl+C in the Python console** once a mid-program request is being served
-   (e.g. when `serving request 1` appears).
-2. Expected Operator Window — the F-E behavior change makes the abort visible
-   for the first time:
-   `TG: cycle error, ERRNO = …` (NEW — was silently absent before the fix),
-   then `TG: socket disconnected` / `TG: waiting for HMI on port 2000`.
-   No unload warning: the module was Load-ed by us, so the cleanup unload
-   succeeds silently.
-3. Run one normal cycle. Expected: `TG: loading HOME:/TGS/TD05Test.mod` with
-   **no** `TG WARN: module already loaded` — the abort left nothing behind.
-   Transcript matches §10.
+   **Ctrl+C in the Python console** once a mid-program request is being
+   served (e.g. when `serving request 1` appears).
+2. **Wait ~10 s watching the Operator Window without touching RobotStudio.**
+   Expected: `TG: cycle error, ERRNO = …` + `TG: wire lost - restarting
+   cycle`, then — because ExitCycle restarts main — `TG: main started` /
+   `TG: socket disconnected` / `TG: waiting for HMI on port 2000`. The
+   simulation must KEEP RUNNING (Play stays active). If it stops again,
+   record the event log — that would mean ExitCycle is also blocked from an
+   error handler at depth (matrix F-F ⚠).
+3. **Without touching RobotStudio**, run one normal cycle. Expected: clean
+   transcript matching §10. Note whether `TG WARN: module already loaded -
+   reloading from file` appears: absent = the PP move dropped the \Dynamic
+   module (expected); present once with a clean reload = the I2 path picked
+   it up. Both pass; record which.
+4. Regression: repeat the kill during `Give me the program ID` (the Phase-1
+   path). Expected: same recovery lines as step 2 (the wire helpers now
+   catch this before `tgMainCycle`'s handler does).
 
 **Check 3 — fallback path still works (Phase-2 style manual load).** Load
 `TD05Test.mod` into T_ROB1 manually via RobotStudio, then run one cycle.
@@ -446,3 +491,7 @@ Setup: reload `TG_Cell.sys` (TD05Test recopies itself on request 10).
 **Pass criteria:** (1) RAPID program check clean — this confirms the ⚠ that
 an empty PROC body is accepted; (2) one normal cycle with wire transcript and
 Operator Window identical to §10 (the placeholders are silent no-ops).
+
+*Status 2026-08-28: **validated** — the §12 check-1 run (two full cycles)
+executed the placeholder calls end-to-end with program check clean and
+transcripts identical to §10. Empty PROC bodies confirmed legal on RW 6.15.*

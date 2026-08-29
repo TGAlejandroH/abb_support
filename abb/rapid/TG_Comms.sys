@@ -50,7 +50,7 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_FtpStatus:=0;             ! R[189] file transfer ok
     PERS num nTG_PassOK:=0;                ! R[200] password correct
     PERS num nTG_DryRun:=0;                ! R[199] dry-run flag
-    PERS num nTG_DoCapture:=0;             ! R[197] do-capture flag (camera frame)
+    PERS num nTG_DoCapture:=0;             ! R[197] do-capture flag; 2 = robot-side abort sentinel (matrix I4)
     PERS num nTG_CaptureOK:=0;             ! R[196] capture succeeded
     PERS num nTG_GlobalCapOK:=0;           ! R[187] global captures done status
     PERS num nTG_WeldStatus:=0;            ! R[198] 0=skip weld, 1=weld, 2=abort program
@@ -155,12 +155,40 @@ MODULE TG_Comms(SYSMODULE)
     ! Wire-protocol helpers (plan 4.4)
     !===================================================================
 
+    LOCAL PROC tgCycleAbort()
+        ! FIX 2026-08-28 (error-recovery matrix F-F): bottom-level recovery
+        ! for wire errors. VC evidence (kill test, RW 6.15): an unhandled
+        ! error does NOT propagate through the late-binding call
+        ! (%stTG_ProgName%) - the program STOPPED at the failing
+        ! SocketReceive (events 41595/40228), so the tgRunTgsProgram /
+        ! tgMainCycle handlers can never see a wire error raised inside a
+        ! .tgs run. Recover where the error is born instead: log, drop the
+        ! sockets, ExitCycle. PP moves to the start of main, which begins
+        ! with TG_SocketDisc and loops back to accept - no propagation
+        ! involved, works from any call depth (VC-validated 2026-08-28).
+        ! VC-observed: ExitCycle's PP move does NOT drop \Dynamic modules
+        ! (unlike a FlexPendant/RobotStudio PP-to-main) - the leftover is
+        ! handled next cycle by the ERR_LOADED reload path (matrix I2),
+        ! also VC-validated in exactly this scenario.
+        ! Called ONLY from the wire helpers' ERROR handlers below.
+        TPWrite "TG: cycle error, ERRNO = "\Num:=ERRNO;
+        TPWrite "TG: wire lost - restarting cycle";
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        ExitCycle;
+    ENDPROC
+
     LOCAL PROC tgSendAck(string data)
         ! Robot->HMI message: send, then wait for the HMI 1-byte ack ("0").
         ! KAREL: WRITE comm_file(data) ; READ comm_file(cmd::1)
         VAR string ack;
         SocketSend tg_client_socket,\Str:=data;
         SocketReceive tg_client_socket,\Str:=ack,\Time:=WAIT_MAX;
+    ERROR
+        ! FIX 2026-08-28 (F-F): catch-all - any error on the wire aborts
+        ! the cycle from here (see tgCycleAbort; propagation upward cannot
+        ! be relied on inside a late-bound .tgs run).
+        tgCycleAbort;
     ENDPROC
 
     LOCAL FUNC string tgPromptRecv(string prompt)
@@ -170,6 +198,9 @@ MODULE TG_Comms(SYSMODULE)
         SocketSend tg_client_socket,\Str:=prompt;
         SocketReceive tg_client_socket,\Str:=reply,\Time:=WAIT_MAX;
         RETURN reply;
+    ERROR
+        ! FIX 2026-08-28 (F-F): catch-all - see tgSendAck.
+        tgCycleAbort;
     ENDFUNC
 
     LOCAL FUNC string tgFmtReal(num v)
@@ -402,7 +433,8 @@ MODULE TG_Comms(SYSMODULE)
         ! FANUC parity, plan 1.4.1) AND the wobj whose .uframe receives the
         ! served frame, written through the PERS reference. Omitted ->
         ! DEPRECATED modal fallback; the frame lands in wobjTG_Cam.
-        ! -> WObj.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197])
+        ! -> WObj.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197]; forced
+        ! to 2 = abort sentinel on a bad frame payload, matrix I4)
         VAR string reply;
         VAR pose pFrame;
         VAR bool frame_ok;
@@ -423,11 +455,13 @@ MODULE TG_Comms(SYSMODULE)
         reply:=tgPromptRecv("Give me capture status");
         nTG_DoCapture:=tgParseReal(reply);
         IF NOT frame_ok THEN
-            ! Error matrix F-C/I4: never capture against a stale frame. A
-            ! malformed frame payload forces the skip path the HMI already
-            ! understands (as if it had sent do_capture=0).
-            nTG_DoCapture:=0;
-            TPWrite "TG ERROR: bad cam frame payload - capture skipped";
+            ! Error matrix F-C/I4 (revised 2026-08-28: ABORT, not skip -
+            ! same policy as the weld case): never proceed against a stale
+            ! frame. 2 is a robot-side sentinel the HMI never sends (the
+            ! wire carries only 0/1); the .tgs program checks it and aborts
+            ! to R_E (FANUC LBL[101] parity).
+            nTG_DoCapture:=2;
+            TPWrite "TG ERROR: bad cam frame payload - aborting program";
         ENDIF
         TPWrite "TG: cam frame set, do capture = "\Num:=nTG_DoCapture;
     ENDPROC
