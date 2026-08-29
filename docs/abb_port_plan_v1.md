@@ -153,7 +153,9 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
    dynamically loaded modules.
 8. **`Load \Dynamic, "HOME:/TGS/" + name + ".mod"` / `UnLoad`**: dynamic modules are
    dropped automatically when PP is moved to `main` — acceptable, since `TG_Main`
-   reloads on demand each cycle. Module must not redeclare global symbols that are
+   reloads on demand each cycle. (Nuance, VC 2026-08-28: an `ExitCycle` PP move
+   does NOT drop them — only a FlexPendant/RobotStudio PP-to-main does; the
+   ERR_LOADED reload path covers ExitCycle recoveries.) Module must not redeclare global symbols that are
    already loaded (each .tgs module gets unloaded right after its run, so
    consecutive .tgs programs can't collide).
 9. **No `GLOBAL` keyword and no `TRY/ENDTRY` in RAPID** — the pre-assessment's
@@ -482,12 +484,18 @@ pre-loaded — transfer → `Load \Dynamic` → late-bound call → all requests
 
 **Phase 4 — hardening & scope growth (post-prototype).** Reconnect/error-recovery
 matrix (→ [abb_error_recovery_matrix_v1.md](abb_error_recovery_matrix_v1.md):
-5 findings; **I1 ResetRetryCount, I4 malformed-frame-forces-skip/abort, and
-I2/I3 stale-module fix implemented 2026-08-28** — the last surfaced F-E:
-RAPID error-handler fall-through is an implicit RETURN, so mid-.tgs errors
-were silently swallowed until the explicit RAISE; I5 receive timeout deferred
-for FANUC parity, I6 counters declined; VC validation of I1/I4 + I2/I3
-pending, robotstudio_setup §11–§12); real file transfer via the **FTP option** (decided §7; verify option id and
+6 findings; **I1 ResetRetryCount, I4 malformed-frame-forces-abort (cam
+revised from skip to abort, robot-side sentinel `nTG_DoCapture=2`), I2/I3
+stale-module fix, and I7 wire-error ExitCycle recovery implemented and
+VC-validated 2026-08-28** — the kill test exposed F-F: unhandled errors do not propagate
+through the late-binding `%%` call (program halts at the failing
+instruction), so wire errors are now recovered at the source in the
+`tgSendAck`/`tgPromptRecv` helpers via `tgCycleAbort`/`ExitCycle`; also F-E:
+error-handler fall-through is an implicit RETURN. I5 receive timeout deferred
+for FANUC parity, I6 counters declined; VC: §11 and §12 fully validated
+2026-08-28 — incl. the F-F kill test (ExitCycle recovery works; its PP move
+does NOT drop \Dynamic modules, the I2 reload path covers it) and both
+corrupt-frame aborts, all poses checked numerically); real file transfer via the **FTP option** (decided §7; verify option id and
 server behavior on RW6.15 when quoting the real cell); remaining requests (R_W_S,
 R_TS_*, camera calibration set — the cam-cal .tgs must set `nTG_ActFrame:=0`, §1.4.1
 corollary b); RobotWare Arc mapping for R_W_P (wire level done Phase 2;
@@ -503,8 +511,9 @@ Production Screen + a fieldbus option, and the FANUC cell's Special-2-step
 mode maps to ABB characteristics/synergic mode; implementation is a separate
 future task); cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
 placeholder PROCs in `TG_Cell.sys`, called from the sample .tgs in the FANUC
-order — sample lines 13–19/63; ⚠ empty PROC bodies to confirm at the next VC
-program check); real `FSSize` free-space value in R_F_T
+order — sample lines 13–19/63; empty PROC bodies **confirmed on the VC
+2026-08-28**, two full cycles through the placeholder calls); real `FSSize`
+free-space value in R_F_T
 (dnum, §2.6); port of the Python prototype into a C++ `ABBRobot : Robot` class in
 TGuideWeldingHMI (small: `do_receive`/`do_send` identical, plus the §4.5 quaternion
 codec, no XML path). The tool/frame parameter style is **decided** (§7.6: explicit

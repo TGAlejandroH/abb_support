@@ -112,7 +112,10 @@ class FakeTgsRobot(threading.Thread):
             do_cap = self._prompt(conn, "Give me capture status")
             self.received[f"do_capture_{i}"] = do_cap
             if not self._pose_parses(frame_raw):
-                do_cap = "0"  # RAPID I4: malformed frame forces the skip path
+                # RAPID I4 (revised): malformed frame -> nTG_DoCapture=2
+                # -> GOTO abort_end (same abort policy as the weld case)
+                self._end_req(conn)
+                return
             if do_cap == "1":
                 # TG_ReqCapture
                 self._send_ack(conn, "2")
@@ -256,14 +259,13 @@ class TestBranchScenarios(unittest.TestCase):
         self.assertEqual(hmi.request_log,
                          ["10", "5", "1", "2", "1", "2", "11", "4", "100"])
 
-    def test_corrupt_cam_frame_forces_capture_skip(self):
-        # Error matrix I4: a malformed camera frame payload must skip the
-        # capture (robot overrides the HMI's do_capture=1) but complete the
-        # R_C_F choreography and the rest of the program normally.
+    def test_corrupt_cam_frame_aborts_program(self):
+        # Error matrix I4 (revised 2026-08-28: abort, not skip): a malformed
+        # camera frame payload must complete the R_C_F choreography, then
+        # abort straight to R_E - no capture, no second set, no weld.
         robot, hmi = run_one_cycle({"corrupt_cam_frame": True})
-        self.assertEqual(hmi.request_log,
-                         ["10", "5", "1", "1", "11", "4", "14", "100"])
-        # the HMI did say "capture" - the skip came from the robot side
+        self.assertEqual(hmi.request_log, ["10", "5", "1", "100"])
+        # the HMI did say "capture" - the abort came from the robot side
         self.assertEqual(robot.received["do_capture_0"], "1")
         self.assertEqual(robot.received["cam_frame_0"],
                          abb_server.CORRUPT_FRAME_PAYLOAD)

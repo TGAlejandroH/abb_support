@@ -22,6 +22,12 @@ MODULE TG_Main
 
     PROC main()
         TPWrite "TG: main started";
+        ! FIX 2026-08-28 (F-F): main is also the ExitCycle recovery target
+        ! (tgCycleAbort in TG_Comms). VC-observed: ExitCycle does NOT drop
+        ! \Dynamic modules, so a stale module may still be loaded here; the
+        ! flag still resets - the ERR_LOADED reload path (tgRunTgsProgram)
+        ! handles the leftover on the next Load, VC-validated 2026-08-28.
+        tg_module_loaded:=FALSE;
         ! Always start from a clean socket state (TGMAINKL line: SOCKET_DISC)
         TG_SocketDisc;
         WHILE TRUE DO
@@ -148,13 +154,16 @@ MODULE TG_Main
             RETURN;
         ENDIF
         ! FIX 2026-08-28 (error-recovery matrix F-B/I3, F-E). Any other
-        ! error (HMI died mid-run, error inside the .tgs program, ...):
+        ! error IN THIS PROC's OWN FRAME (Load/UnLoad/the %% call itself):
         ! unload the module before abandoning the cycle, then RAISE so
         ! tgMainCycle's handler logs it and resets the sockets. The RAISE
         ! must be explicit - a RAPID error handler that runs to its end
-        ! acts as RETURN, not RAISE, so the pre-fix comment ("propagates
-        ! to tgMainCycle") described propagation that never happened: the
-        ! error was silently swallowed and the module stayed loaded.
+        ! acts as RETURN, not RAISE (F-E).
+        ! NOTE (F-F, VC-observed 2026-08-28): wire errors raised INSIDE the
+        ! late-bound .tgs run never reach this handler - unhandled errors
+        ! do not propagate through the %% call; the program would stop at
+        ! the failing instruction. Those are recovered at the source by
+        ! tgCycleAbort in TG_Comms (ExitCycle to main).
         tgTryUnload sPath;
         RAISE;
     ENDPROC

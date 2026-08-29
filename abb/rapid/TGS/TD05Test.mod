@@ -71,6 +71,8 @@ MODULE TD05Test_Mod
         MoveAbsJ jtCap1,v100,fine,tTG_Cam;
         stTG_SubName:="C1PGlobal_m45_3";
         TG_ReqCamFrame \Tool:=tTG_Cam \WObj:=wobjTG_Cam;   ! R_C_F -> wobjTG_Cam.uframe + nTG_DoCapture
+        ! 2 = robot-side abort sentinel: bad frame payload (matrix I4)
+        IF nTG_DoCapture=2 GOTO abort_end;
         IF nTG_DoCapture=1 THEN
             TG_CamOpen;                ! FANUC CALL CAM_OPEN
             ! Real program: move to the capture point in the just-received
@@ -83,6 +85,7 @@ MODULE TD05Test_Mod
         MoveAbsJ jtCap2,v100,fine,tTG_Cam;
         stTG_SubName:="C2PGlobal_m45_3";
         TG_ReqCamFrame \Tool:=tTG_Cam \WObj:=wobjTG_Cam;
+        IF nTG_DoCapture=2 GOTO abort_end;
         IF nTG_DoCapture=1 THEN
             TG_CamOpen;                ! FANUC CALL CAM_OPEN
             WaitTime 0.2;
