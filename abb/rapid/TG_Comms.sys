@@ -171,6 +171,10 @@ MODULE TG_Comms(SYSMODULE)
         ! handled next cycle by the ERR_LOADED reload path (matrix I2),
         ! also VC-validated in exactly this scenario.
         ! Called ONLY from the wire helpers' ERROR handlers below.
+        ! To stop instead of recovering, replace ExitCycle below with:
+        !   EXIT             - terminates execution (FANUC abort)
+        !   Stop             - halts, resumable with Start (FANUC pause)
+        !   Stop; ExitCycle; - halt for the operator, clean restart on Start
         TPWrite "TG: cycle error, ERRNO = "\Num:=ERRNO;
         TPWrite "TG: wire lost - restarting cycle";
         SocketClose tg_server_socket;

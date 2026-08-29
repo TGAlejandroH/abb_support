@@ -334,14 +334,18 @@ pass criteria.
 
 ## 11. Error-recovery fixes I1 + I4 (error matrix)
 
-*Status 2026-08-28: check 1 covered by the §12 clean-cycle runs. Check 3
-(corrupt-weld) **validated**: request order `10,5,1,2,1,2,11,4,100` with no
-14, both error lines + `weld status = 2`, "before" demo TPWrite only, and the
-R_E pose matched the predicted `[[1000.00,0.00,600.00],[0,0,±1,0]]` exactly.
-Check 2 (corrupt-cam) **pending re-run**: the cam behavior was revised the
-same day from skip to ABORT (team decision) — expectations below already
-describe the revised build; reload `TG_Comms.sys` first (TD05Test recopies
-itself).*
+*Status 2026-08-28: **all checks validated**. Check 1 covered by the §12
+clean-cycle runs. Check 3 (corrupt-weld): request order `10,5,1,2,1,2,11,4,100`
+with no 14, both error lines + `weld status = 2`, "before" demo TPWrite only,
+R_E pose exactly the predicted `[[1000.00,0.00,600.00],[0,0,±1,0]]`. Check 2
+(corrupt-cam, revised abort build): request order `10,5,1,100`, error lines +
+`do capture = 2`, no capture / no camera-flap / no demo lines, clean R_E.
+Its R_E pose was verified arithmetically — `[[1752.16,469.49,1565.17],…]` is
+the **torch** TCP at the capture-1 joint position, i.e. the camera-tool pose
+of the same cycle's R_C_F displaced 100 mm along the tool z axis (the
+tTG_Cam→tTG_Weld tframe offset), matching to **0.007 mm** with identical
+orientation. That confirms the abort path reports through its explicit
+\Tool/\WObj arguments (plan 7.6 style b) rather than any stale selection.*
 
 I1: `ResetRetryCount` in `TG_SocketCom`'s reconnect retries (the RAPID retry
 counter is bounded by system parameter *No Of Retry*, default 4 — without the

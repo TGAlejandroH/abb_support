@@ -485,17 +485,17 @@ pre-loaded — transfer → `Load \Dynamic` → late-bound call → all requests
 **Phase 4 — hardening & scope growth (post-prototype).** Reconnect/error-recovery
 matrix (→ [abb_error_recovery_matrix_v1.md](abb_error_recovery_matrix_v1.md):
 6 findings; **I1 ResetRetryCount, I4 malformed-frame-forces-abort (cam
-revised from skip to abort, robot-side sentinel `nTG_DoCapture=2`; weld side
-VC-validated), I2/I3 stale-module fix, and I7 wire-error ExitCycle recovery
-implemented 2026-08-28** — the kill test exposed F-F: unhandled errors do not propagate
+revised from skip to abort, robot-side sentinel `nTG_DoCapture=2`), I2/I3
+stale-module fix, and I7 wire-error ExitCycle recovery implemented and
+VC-validated 2026-08-28** — the kill test exposed F-F: unhandled errors do not propagate
 through the late-binding `%%` call (program halts at the failing
 instruction), so wire errors are now recovered at the source in the
 `tgSendAck`/`tgPromptRecv` helpers via `tgCycleAbort`/`ExitCycle`; also F-E:
 error-handler fall-through is an implicit RETURN. I5 receive timeout deferred
-for FANUC parity, I6 counters declined; VC: §12 fully validated 2026-08-28
-incl. the F-F kill test — ExitCycle recovery works, and its PP move does NOT
-drop \Dynamic modules, the I2 reload path covers it; §11 corrupt-frame runs
-still pending); real file transfer via the **FTP option** (decided §7; verify option id and
+for FANUC parity, I6 counters declined; VC: §11 and §12 fully validated
+2026-08-28 — incl. the F-F kill test (ExitCycle recovery works; its PP move
+does NOT drop \Dynamic modules, the I2 reload path covers it) and both
+corrupt-frame aborts, all poses checked numerically); real file transfer via the **FTP option** (decided §7; verify option id and
 server behavior on RW6.15 when quoting the real cell); remaining requests (R_W_S,
 R_TS_*, camera calibration set — the cam-cal .tgs must set `nTG_ActFrame:=0`, §1.4.1
 corollary b); RobotWare Arc mapping for R_W_P (wire level done Phase 2;
