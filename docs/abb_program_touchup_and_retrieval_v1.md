@@ -1,6 +1,25 @@
 # Operator touch-ups and program retrieval — ABB vs FANUC — v1 (PLAN, no code yet)
 
-Status: **research complete 2026-08-31, nothing implemented.** Opened because the
+Status: **implemented 2026-08-31 (Phase 5), VC validation pending.** Research
+and decisions same day (§9). Code: `TG_Main.mod` `tgUnloadKeepEdits` +
+`tgSaveEditedModule` (trigger A), `TG_Comms.sys` `nTG_ProgEdited`,
+`hmi_prototype/rws_client.py` (stdlib RWS client, digest auth),
+`hmi_prototype/tg_retrieve.py` (the Retrieve-button stand-in: fetch → validate
+→ backup → adopt → cleanup), RWS transfer in `abb_server.py` **next to the
+kept copy fallback**. 22 new tests green (63 total), incl. a
+digest-authenticated fake RWS server as the executable spec of §4's endpoints.
+VC procedure for T1–T5: [robotstudio_setup.md](robotstudio_setup.md) §16.
+**VC-validated 2026-08-31** (§16.7): no-edit regression, RWS transfer leg
+(PUT verified byte-identical on disk), **T1** (pendant ModPos works inside the
+`\Dynamic` module), **T3a** (`ERR_NOTSAVED` fired AND the unload was refused —
+the subsequent `Save` serialized the still-loaded module), and **T5** (full
+round trip: staged file retrieved over live RWS, exactly one changed
+declaration matching the robot's actual stop point to 2e-6 interpolation
+spread, staged file deleted, `nTG_ProgEdited` cleared by `set_symbol` without
+explicit mastership, idempotent rerun). Still open: T2/T4 (§16.5, separate
+stopped cycle) and optional T3b. Also learned: **F-4** (RobotStudio-editor
+Apply drops the `\Dynamic` module — see §8 T1 note).
+Opened because the
 `Load \Dynamic` lifecycle in
 [abb_weld_motion_and_data_design_v1.md](abb_weld_motion_and_data_design_v1.md) §3.1
 collides with a production workflow that repo never modelled: *operators touch up
@@ -96,7 +115,7 @@ would be strictly worse than one.
 
 ---
 
-## 3. Three ways to trigger the save. Pick one.
+## 3. Three ways to trigger the save — decided: A + B (§9)
 
 | # | Trigger | Pros | Cons |
 |---|---|---|---|
@@ -104,7 +123,7 @@ would be strictly worse than one.
 | **B** | **HMI does it over RWS**: `POST /rw/rapid/modules/<mod>?action=save` with `path`/`name`, then `GET /fileservice/...` | Save happens only when the operator presses Retrieve — exact parity with the FANUC button. One transport for everything | Needs RAPID **mastership**; the FlexPendant holds mastership in manual mode, which is exactly the mode the operator just used. ⚠ Highest-risk unknown (§8 T2) |
 | **C** | **Operator does it**: pendant *Program Editor → Modules → File → Save Module As…* into `HOME:/TGS/`, then presses Retrieve on the HMI | Zero controller-side code; documented pendant function (3HAC050941 §5.3.2) | Extra operator step, and "Save Module As" makes them choose the path — save to the wrong folder and the retrieve silently returns the stale file |
 
-**Recommendation: A + B, with `\ErrIfChanged` as the gate.** Replace the bare `UnLoad`
+**Decision (user, 2026-08-31): A + B, with `\ErrIfChanged` as the gate.** Replace the bare `UnLoad`
 with `UnLoad \ErrIfChanged`; on `ERR_NOTSAVED` (module modified since it was loaded)
 `Save` it to a retrieval staging path and raise a flag the HMI can see. That way:
 
@@ -163,6 +182,12 @@ over unchanged; only the URL and auth mode differ.
 the 614-1 dependency from the plan entirely, and the HMI then needs one transport, one
 credential, one failure mode. `SCWrite`/socket messaging (616-1) stays as-is for the
 request protocol — RWS does not touch it.
+
+**Prototype note (user decision, 2026-08-31):** when RWS transfer lands in
+`hmi_prototype/abb_server.py`, the existing mechanism — direct file copy into the VC's
+`HOME:/TGS/` folder, which is a plain Windows directory inside the RobotStudio solution —
+**stays in the script as a selectable fallback**, not deleted, in case the VC loop needs
+to run without RWS.
 
 ---
 
@@ -243,13 +268,20 @@ Retrieving and adopting an unvalidated `.mod` would put a program on the master 
 ## 8. VC verification (⚠ = blocks the design if it fails)
 
 Setup: the Phase 3/4 VC from [robotstudio_setup.md](robotstudio_setup.md), manual mode,
-`TD05Test` loaded through `TG_Main`.
+`TD05Test` loaded through `TG_Main`. **Step-by-step procedures with expected
+transcripts: [robotstudio_setup.md](robotstudio_setup.md) §16** (16.2 no-edit
+regression, 16.3 = T1+T3a, 16.4 = T3b, 16.5 = T2+T4, 16.6 = T5).
 
 **T1 — does the pendant offer Modify Position inside a `\Dynamic` module?**
 Run one cycle, stop inside the `.tgs`, Program Editor → select `jtCap1` → *Debug → Modify
 Position*. *Expect:* the button is enabled and the confirm dialog appears.
 *Pass:* position modified in the editor. *If it fails,* only option C is viable, and only
 for resident modules.
+⚠ *VC 2026-08-31 (finding F-4 in
+[rapid_validation_findings_v1.md](rapid_validation_findings_v1.md)): the
+RobotStudio-RAPID-editor + Apply shortcut is NOT a valid stand-in — Apply on a module
+with PP inside it forces a PP reset, which drops the `\Dynamic` module (§1.138) before
+the unload path can see the edit. T1 must go through the pendant.*
 
 **T2 — ⚠ can RWS save a module while the pendant is in manual mode?**
 `POST /rw/mastership?action=request`, then
@@ -260,6 +292,12 @@ primary trigger — fall back to A (`\ErrIfChanged` + `Save`), which runs inside
 needs no mastership. Also record the VC's RWS port (80, or the configured 888x).
 
 **T3 — does `\ErrIfChanged` fire for a ModPos edit, and for a PERS change?**
+✔ *(a) VC-validated 2026-08-31: fired, and the manual's ambiguity is resolved — the
+unload was REFUSED (the module stayed loaded; the staging `Save` that followed
+serialized it successfully). Bonus observation from the retrieved file: `Save` kept
+every unmodified line's original text verbatim (`9E9` stayed `9E9`) and re-serialized
+only the ModPos'd declaration (`9E+9`, full-precision floats) — good sign for T4's
+byte-stability.*
 Two runs: (a) ModPos a target, then `UnLoad \ErrIfChanged`; (b) no edit, but a PERS in a
 resident module changed, then the same unload. *Expect:* (a) `ERRNO = ERR_NOTSAVED`;
 (b) ⚠ unknown — the manual defers PERS init-value updates to save time, so the changed flag
@@ -277,19 +315,26 @@ nothing else.
 
 ---
 
-## 9. Open questions
+## 9. Decisions (user, 2026-08-31)
 
-1. **Which programs get touched up** — the HMI-generated `.tgs` weld programs, or resident
-   utility/service programs? This doc assumes the former (matching the FANUC button). If it
-   is the latter, the answer is much simpler: keep them resident and out of the dynamic-load
-   path entirely.
-2. **Trigger choice** — A + `\ErrIfChanged` (recommended), B, or C-only for now?
-3. **Does the send path move to RWS too** (dropping 614-1 from the plan), or stay FTP with
-   the option purchased?
-4. Terminology: the HMI already uses "touch-up" for the per-weld offset widget
-   (`WidgetTouchupOffsets.cpp`, `onTouchUpButtonClick` at `GUIMainWindow.cpp:1858`). This
-   doc means *pendant position touch-ups*. Worth naming them apart in the UI before both
-   exist for ABB.
+1. **What gets touched up: the generated `.tgs` programs, and it is positional data.**
+   Weld data is *not* pendant-tuned — when it needs changing it is sent from the HMI's
+   "custom" weld-parameters mode (the UDWP path: `nTG_UdwpFlag = 1` → per-weld `R_W_P`
+   values, [abb_weld_motion_and_data_design_v1.md](abb_weld_motion_and_data_design_v1.md)
+   §3.1). Consequences: retrieval only has to cover the `.tgs` module; no operator-facing
+   controller-side weld-data save path is needed; test T3(b) stays informational; §6.1's
+   "no PERS in the `.tgs`" invariant has no workflow pushing against it.
+2. **Trigger: A + B as recommended** — `UnLoad \ErrIfChanged` + `Save` to the staging path
+   in `TG_Main`, HMI Retrieve = plain `GET /fileservice/...`, pendant *Save Module As…* as
+   the manual fallback.
+3. **Retrieval is RWS. Sending may also move to RWS.** In `hmi_prototype/abb_server.py`
+   the current transfer mechanism (direct copy into the VC's `HOME:`) is **kept as a
+   fallback**, not removed, so the VC loop can still run without RWS.
+
+Still open (minor): terminology — the HMI already uses "touch-up" for the per-weld offset
+widget (`WidgetTouchupOffsets.cpp`, `onTouchUpButtonClick` at `GUIMainWindow.cpp:1858`);
+this doc means *pendant position touch-ups*. Name them apart in the UI before both exist
+for ABB.
 
 ---
 

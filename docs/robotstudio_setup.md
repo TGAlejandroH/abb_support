@@ -719,3 +719,170 @@ TG WELD: applied, UDWP=0
 Skip/abort branches (`weld_status` 0 / 2) are covered by the fake-robot
 tests; on the VC they behave as in phase 2 (skip: no R_W_P; abort: straight
 to R_E).
+
+## 16. Phase 5: touch-up staging & retrieval (touch-up doc T1-T5)
+
+Code under test: `TG_Main.mod` (`tgUnloadKeepEdits` + `tgSaveEditedModule`),
+`TG_Comms.sys` (`nTG_ProgEdited`), `hmi_prototype/rws_client.py` /
+`tg_retrieve.py`, and the RWS transfer in `abb_server.py`. Python side is
+covered by `test_phase5_retrieval.py` (22 tests, incl. a digest-authenticated
+fake RWS server); this section is the RAPID/VC half. Design + rationale:
+[abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md).
+
+### 16.1 Setup
+
+1. Reload **both** `TG_Comms.sys` (new PERS `nTG_ProgEdited`) and
+   `TG_Main.mod` into `T_ROB1`. Reload resets the PERS frames to identity
+   (known, section 4).
+2. `HOME:/TGS/edited/` does **not** need to exist - `tgSaveEditedModule`
+   creates it (`MakeDir`, ERR_FILEACC swallowed once it exists).
+
+⚠ **Caution for every test here: after editing, do NOT move PP to main.**
+That unloads a `\Dynamic` module instantly (manual 3HAC050917 section 1.138)
+and the edit is gone before our code can see it. Stop -> edit -> Play
+(resume) is the whole dance; it is also the operating procedure the real
+cell's operators need.
+
+### 16.2 No-edit regression (must come first)
+
+Run the phase-3 loop unchanged:
+
+    python hmi_prototype/abb_server.py 127.0.0.1 2000 2 "<VC HOME dir>"
+
+**Expect:** transcript identical to section 7 (phase 3) - the operator
+window shows NO new lines. `UnLoad \ErrIfChanged` on an unmodified module
+behaves exactly like the old plain `UnLoad`, `HOME:/TGS/edited/` is not
+created, `nTG_ProgEdited` stays 0.
+**Pass:** two clean cycles, no `TG: touch-up detected` line, no `edited/`
+folder.
+
+### 16.3 The touch-up cycle (T1 + T3a)
+
+1. Start one cycle: `python hmi_prototype/abb_server.py 127.0.0.1 2000 1
+   "<VC HOME dir>"`, start RAPID from main in auto.
+2. While the .tgs moves (after `TG: calling program TD05Test`), stop RAPID
+   execution with the virtual FlexPendant's Stop (or RAPID tab -> Stop).
+   The Python client just blocks; the socket survives. Do NOT use anything
+   that resets the program pointer - a PP reset drops the `\Dynamic` module
+   on the spot (finding F-4).
+3. **T1**, on the virtual FlexPendant in manual mode: Program Editor ->
+   Modules. *Expect:* `TD05Test_Mod` is in the list (a `\Dynamic` module is
+   an ordinary program-memory module). Open it, jog the virtual robot
+   slightly (RobotStudio Freehand jog works - ModPos records the current
+   position however it was reached), select the `jtCap1` argument in a
+   `MoveAbsJ` line, Debug -> **Modify Position**. *Expect:* the button is
+   enabled and the confirm dialog appears; confirm.
+
+   ⚠ Do NOT edit the module in RobotStudio's RAPID editor + Apply as a
+   shortcut - VC-observed 2026-08-31, finding **F-4** in
+   [rapid_validation_findings_v1.md](rapid_validation_findings_v1.md):
+   Apply on a module with PP inside it forces a PP reset, the `\Dynamic`
+   module is dropped instantly, and RobotStudio pops "The module no longer
+   exists on the controller. Save to file?" (answer No). The touch-up never
+   reaches `tgUnloadKeepEdits` - only FlexPendant edits are representative
+   of an operator touch-up.
+4. Auto -> Play (resume). The cycle finishes normally.
+
+**Expected operator-window lines, in order, after `TG: program TD05Test
+finished`:**
+
+    TG: touch-up detected in TD05Test
+    TG: edited module saved for retrieval
+
+**Pass (T3a):** both lines appear; `<VC HOME dir>/TGS/edited/TD05Test.mod`
+exists and contains the modified literal (open it - the jointtarget value
+differs from `abb/rapid/TGS/TD05Test.mod`); data view shows
+`nTG_ProgEdited = 1`; the next cycle loads fresh (no ERR_LOADED warning,
+i.e. the unload after staging really happened).
+**If ERR_NOTSAVED had unloaded the module anyway** (manual ambiguity, doc
+T3), the `Save` would fail and print `TG WARN: could not save edited
+module` instead - record that outcome, it flips the design to
+Save-before-UnLoad.
+
+### 16.4 T3b (optional, informational): PERS-only change
+
+`TD05Test.mod` has no PERS on purpose (doc section 6.1). To answer T3b, add
+a scratch line `LOCAL PERS num nT3b:=0;` to the module and `nT3b:=1;` at
+the top of its PROC, transfer, run one cycle **without any manual edit**.
+Whichever way it goes, no action is needed - record whether the touch-up
+lines appear (= PERS assignment sets the changed flag) or not (= flag is
+ModPos/text-edit only). Remove the scratch lines afterwards.
+
+### 16.5 RWS probe, T2 and T4
+
+1. Probe the VC's RWS endpoint (port 80 unless the VC was configured
+   otherwise; `curl.exe` ships with Windows):
+
+       curl --digest -u "Default User:robotics" "http://localhost/rw/system?json=1"
+
+   *Expect:* a JSON system description. Connection refused -> check the
+   VC's configured listening port (RobotStudio forum: multi-VC setups use
+   e.g. 8880/8881) and substitute it everywhere below.
+2. **T2** - with the pendant in MANUAL mode and the program stopped.
+   ⚠ Run this on its OWN stopped cycle, NOT on the 16.3 touch-up cycle:
+   whether a Save clears the module's changed-since-load flag is exactly the
+   T3 unknown, so a pre-unload save could suppress the staging that 16.3 is
+   trying to observe. (T2/T4 need no edit at all - they save the unmodified
+   module.)
+
+       curl --digest -u "Default User:robotics" -X POST -d "" "http://localhost/rw/mastership?action=request"
+       curl --digest -u "Default User:robotics" -X POST -d 'path=$home/TGS/edited&name=T2probe.mod' "http://localhost/rw/rapid/modules/TD05Test_Mod?action=save&task=T_ROB1"
+       curl --digest -u "Default User:robotics" -X POST -d "" "http://localhost/rw/mastership?action=release"
+
+   (single-quote the -d body: PowerShell would expand "$home" inside
+   double quotes; RWS must receive the literal alias)
+
+   (Run while a cycle is stopped inside the .tgs so the module is loaded.)
+   *Pass:* HTTP 200/204s and `TGS/edited/T2probe.mod` appears in HOME.
+   *If mastership/save is refused in manual:* record it - trigger A does not
+   depend on it (doc section 3), only the optional HMI-driven save does.
+3. **T4** - run the save twice into two names (`T4a.mod`, `T4b.mod`) with no
+   edit in between, then:
+
+       fc /b "<HOME>\TGS\edited\T4a.mod" "<HOME>\TGS\edited\T4b.mod"
+
+   *Pass:* `FC: no differences encountered` - the controller's serialization
+   is byte-stable and the HMI's byte-compare survives round trips
+   (doc section 6.2). *If not:* the compare in the C++ port must normalize.
+
+### 16.6 T5: the full round trip
+
+After a successful 16.3 run (staged file exists, flag = 1):
+
+    python hmi_prototype/tg_retrieve.py TD05Test --rws http://localhost:80 --dest "<scratch dir>"
+
+(or `--vc-home "<VC HOME dir>"` to exercise the kept copy fallback - it
+cannot clear the flag, it says so.)
+
+**Expected output** (RWS variant):
+
+    retrieving TD05Test from RWS at http://localhost:80
+    backed up current master to <scratch>\retrieved_backups\TD05Test_<ts>.mod
+    adopted retrieved program as master: <scratch>\TD05Test.mod
+
+**Pass:**
+1. `fc` (or git diff) between the adopted file and `abb/rapid/TGS/
+   TD05Test.mod` shows EXACTLY one changed declaration - the touched-up
+   target, numerically matching where you jogged (doc T5).
+2. `HOME:/TGS/edited/TD05Test.mod` is gone and the data view shows
+   `nTG_ProgEdited = 0` (RWS variant).
+3. Re-running the same command prints `no edited program staged ... nothing
+   to retrieve` and leaves the scratch dir untouched.
+4. RWS transfer leg: rerun 16.2 with the URL instead of the HOME dir -
+   `python hmi_prototype/abb_server.py 127.0.0.1 2000 2 http://localhost:80`
+   - same clean transcript, module delivered by
+   `PUT /fileservice/$home/TGS/TD05Test.mod` this time.
+
+### 16.7 VC results (2026-08-31)
+
+| Check | Result |
+|---|---|
+| 16.2 no-edit regression (copy transfer) | ✔ 2 clean cycles, no touch-up lines, no `edited/` created; cam-frame transform re-checked to 0.006 mm |
+| RWS probe | ✔ RWS on `http://localhost:80`, RW 6.15.8029; live option list confirms **no 614-1** (and no 637-1) |
+| 16.6 item 4, RWS transfer leg | ✔ 2 clean cycles via `PUT /fileservice`; file on the VC disk byte-identical to the repo master, mtime postdates controller start |
+| 16.3 / T1 | ✔ pendant Modify Position enabled and accepted inside the `\Dynamic` module (first attempt via RobotStudio-editor Apply produced finding **F-4** instead — see the warning above) |
+| 16.3 / T3a | ✔ `TG: touch-up detected` + `TG: edited module saved for retrieval`; ERR_NOTSAVED **refused** the unload (module still loaded — the staging Save serialized it) |
+| 16.6 / T5 | ✔ retrieved over live RWS; diff = exactly the one ModPos'd declaration; staged joints = the mid-move stop point (interpolation fraction 0.576302 identical on all four moved axes, spread 2e-6); staged file deleted; `nTG_ProgEdited` → 0 (symbol write needed no explicit mastership); rerun → "nothing to retrieve" |
+| Serialization observation | `Save` re-serialized ONLY the modified declaration (`9E+9`, full precision); unmodified lines kept verbatim (`9E9`) — favorable for T4 |
+| 16.5 / T2 + T4 | ⏳ pending (run on a separate stopped cycle) |
+| 16.4 / T3b | ⏳ optional, pending |

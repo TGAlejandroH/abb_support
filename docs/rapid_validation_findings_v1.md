@@ -12,6 +12,9 @@ found in the first run that got that far, and F-3 was introduced by F-2's fix.
 
 Inline cross-references live next to the affected design decisions in
 [abb_port_plan_v1.md](abb_port_plan_v1.md) §2.10, §4.1 and §4.3.
+F-4 was added 2026-08-31 during Phase 5 (touch-up staging) validation; its
+inline notes live in [robotstudio_setup.md](robotstudio_setup.md) §16.3 and
+[abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md) §8.
 
 ---
 
@@ -164,6 +167,39 @@ use — never pass a `VAR` or a function result to `CRobT`, `CPos`, or a motion
 instruction.
 
 ---
+
+## F-4 — RobotStudio's RAPID-editor Apply kills a `\Dynamic` module (and the touch-up with it)
+
+**Symptom** (VC, Phase 5 test §16.3, 2026-08-31): RAPID execution was stopped
+*inside* the dynamically loaded `TD05Test_Mod`, the `jtCap1` literal was edited
+in RobotStudio's RAPID editor, and **Apply** was clicked. The module vanished
+from the loaded-modules list and RobotStudio popped:
+
+```
+T_ROB1/TD05Test_Mod
+The module no longer exists on the controller. Save to file?  YES / NO
+```
+
+**What happened.** Applying an edit replaces the module on the controller, and
+a module with the program pointer inside it cannot be replaced without
+resetting the PP. The PP reset is the documented `\Dynamic` killer
+(3HAC050917 §1.138: *Set PP to main → Unloaded*): the module is dropped the
+instant the PP moves, the pending replacement then targets a module that no
+longer exists, and the edit survives only in the orphaned editor buffer —
+hence the save-to-file offer (answer No; nothing of value is in the buffer).
+`tgUnloadKeepEdits` never ran: the drop is a controller-side unload, not an
+`UnLoad` instruction, so `\ErrIfChanged` is never consulted and nothing is
+staged. Verified afterwards: `HOME:/TGS/TD05Test.mod` untouched, no
+`HOME:/TGS/edited/` created.
+
+**The rule.** On a `\Dynamic` module, only **FlexPendant edits** (Modify
+Position, instruction-argument edits) are representative of an operator
+touch-up — they modify the module in place without a PP reset. RobotStudio's
+RAPID editor is NOT a valid stand-in in tests, and on the real cell anything
+that moves the PP (PP-to-main, module replacement, opening a new program)
+destroys an unsaved touch-up before Phase 5's staging can see it. Operator
+rule for the touch-up workflow: stop → edit on the pendant → resume; never
+PP-to-main in between.
 
 ## Related observation (not a defect) — FIXED 2026-08-28
 

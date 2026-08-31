@@ -1,0 +1,44 @@
+PROGRAM R_W_S
+    -- Request Welding Stats
+
+VAR
+    entry:               INTEGER
+    comm_file:           FILE
+    status:              INTEGER
+    cmd:                 STRING[254]
+    out:                 STRING[254]
+    resp:                STRING[254]
+    dist:                REAL
+    tim:                 INTEGER
+    succ_ae:             INTEGER
+
+BEGIN
+
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+    
+    -- Sending request ID
+    resp = '13' -- request id
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+   
+    -- Get last welding stats
+    GET_VAR(entry,'*SYSTEM*','$AWEWELDSTAT[1].$WELD_DIST', dist, status)
+    CNV_REAL_STR(dist, 8, 3, out)
+    resp =  out
+    
+    GET_VAR(entry,'*SYSTEM*','$AWEWELDSTAT[1].$ARC_ON_TIME', tim, status)
+    CNV_REAL_STR(tim, 8, 3, out)
+    resp = resp + ',' + out
+    
+    GET_VAR(entry,'*SYSTEM*','$AWEWELDSTAT[1].$SUCC_AE',  succ_ae, status)
+    CNV_REAL_STR(succ_ae, 8, 3, out)
+    resp = resp + ',' + out
+
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)    
+
+    CLOSE FILE comm_file
+
+END R_W_S

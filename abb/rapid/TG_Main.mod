@@ -9,6 +9,9 @@ MODULE TG_Main
     !                 end request -> disconnect -> repeat.
     ! Phase 3 will insert: TG_ReqFileTransfer + Load \Dynamic of the .tgs
     ! module from HOME:/TGS/ + late-bound call (%stTG_ProgName%) + UnLoad.
+    ! Phase 5 adds: edit-preserving unload - operator ModPos touch-ups are
+    ! staged in HOME:/TGS/edited/ for HMI retrieval instead of being
+    ! silently dropped (docs/abb_program_touchup_and_retrieval_v1.md).
     !
     ! Requires TG_Comms.sys loaded in the same task (T_ROB1).
     ! Design: docs/abb_port_plan_v1.md section 4.6.
@@ -88,6 +91,60 @@ MODULE TG_Main
         TRYNEXT;
     ENDPROC
 
+    LOCAL PROC tgUnloadKeepEdits(string sPath)
+        ! Phase 5 (touch-up/retrieval doc sections 3-4): normal end-of-run
+        ! unload that does not silently discard operator edits. UnLoad
+        ! \ErrIfChanged refuses with ERR_NOTSAVED when the module changed
+        ! since Load (e.g. a FlexPendant Modify Position); the handler then
+        ! parks a copy in HOME:/TGS/edited/ for the HMI's "Retrieve robot
+        ! program from controller" and unloads for real.
+        ! NOTE: recovery-path unloads (tgTryUnload callers) stay PLAIN on
+        ! purpose - an aborted cycle still discards edits, only the normal
+        ! cycle end preserves them (doc section 4). Do not call this from
+        ! an ERROR handler: it re-raises ERR_UNLOAD.
+        UnLoad \ErrIfChanged,sPath;
+        tg_module_loaded:=FALSE;
+    ERROR
+        IF ERRNO=ERR_NOTSAVED THEN
+            ! Module modified and still loaded (ERR_NOTSAVED = the unload
+            ! was refused, VC check T3). Stage it, then best-effort unload
+            ! (tgTryUnload is self-contained and clears the flag, so no
+            ! error can escape this handler through it).
+            TPWrite "TG: touch-up detected in "+stTG_ProgName;
+            tgSaveEditedModule;
+            tgTryUnload sPath;
+            RETURN;
+        ENDIF
+        ! Anything else (ERR_UNLOAD etc.): propagate to the caller so
+        ! tgRunTgsProgram's handler keeps its established containment.
+        RAISE;
+    ENDPROC
+
+    LOCAL PROC tgSaveEditedModule()
+        ! Phase 5: park the operator-edited module on disk for retrieval.
+        ! Naming contract (plan 4.1): MODULE name = <prog>+"_Mod", file
+        ! name = <prog>.mod. Save serializes the module from program
+        ! memory, so the staged file carries the ModPos edits; the HMI
+        ! fetches it via RWS GET /fileservice/$home/TGS/edited/<prog>.mod
+        ! (tg_retrieve.py), adopts it as the project master, then clears
+        ! nTG_ProgEdited and deletes the staged file.
+        MakeDir "HOME:/TGS/edited";
+        Save stTG_ProgName+"_Mod"\FilePath:="HOME:/TGS/edited/"+stTG_ProgName+".mod";
+        nTG_ProgEdited:=1;
+        TPWrite "TG: edited module saved for retrieval";
+    ERROR
+        IF ERRNO=ERR_FILEACC THEN
+            ! MakeDir: HOME:/TGS/edited already exists - the normal case
+            ! after the first save. (If the directory truly cannot be
+            ! created, the Save below fails and is warned about instead.)
+            TRYNEXT;
+        ENDIF
+        ! Save failed (ERR_MODULE/ERR_IOERROR/ERR_PATH): the touch-up
+        ! cannot be preserved, but the cycle must go on - warn loudly and
+        ! leave nTG_ProgEdited untouched. Fall-through acts as RETURN (F-E).
+        TPWrite "TG WARN: could not save edited module, ERRNO = "\Num:=ERRNO;
+    ENDPROC
+
     LOCAL PROC tgRunTgsProgram()
         ! Run the .tgs program named by the HMI (FANUC: CALL_PROG(prog_name)).
         ! The HMI put the module file into HOME:/TGS/ during
@@ -105,8 +162,11 @@ MODULE TG_Main
         TPWrite "TG: calling program "+stTG_ProgName;
         %stTG_ProgName%;
         TPWrite "TG: program "+stTG_ProgName+" finished";
-        UnLoad sPath;
-        tg_module_loaded:=FALSE;
+        ! Phase 5: the end-of-run unload preserves operator ModPos edits
+        ! (touch-up/retrieval doc section 3-4). Errors it cannot handle
+        ! (ERR_UNLOAD) are re-raised and land in THIS handler, keeping the
+        ! pre-Phase-5 TRYNEXT containment below.
+        tgUnloadKeepEdits sPath;
     ERROR
         IF ERRNO=ERR_LOADED THEN
             IF bRetriedLoad THEN
@@ -133,8 +193,11 @@ MODULE TG_Main
             ENDIF
         ELSEIF ERRNO=ERR_UNLOAD THEN
             ! The end-of-run unload failed (module was the manually loaded
-            ! one): keep going.
+            ! one): keep going. Phase 5 moved the unload into
+            ! tgUnloadKeepEdits, so clear the flag here explicitly - before,
+            ! TRYNEXT fell onto the tg_module_loaded:=FALSE line itself.
             TPWrite "TG WARN: could not unload "+sPath;
+            tg_module_loaded:=FALSE;
             TRYNEXT;
         ELSEIF ERRNO=ERR_REFUNKPRC THEN
             ! Module loaded but no PROC of that name / name wrong: report

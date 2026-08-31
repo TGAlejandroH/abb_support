@@ -186,15 +186,16 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
     real cell. **For the prototype this is moot**: the VC's `HOME:` is a plain
     Windows folder inside the RobotStudio solution, so the Python side (or the
     user) just copies the .mod file there.
-    ⚠ **Amendment 2026-08-31 — this decision needs re-making.** The option is
-    **FTP & SFTP Client [614-1]**: an FTP/SFTP/NFS *client* that lets the
-    controller read a share on our PC, **not** a server the HMI can pull from
-    (Product specification 3HAC050945 §10.1). It is also absent from the cell's
-    installed option list. **Robot Web Services is base RobotWare-OS** (same spec
-    §3.10, no option) and covers both directions —
-    `PUT`/`GET /fileservice/$HOME/TGS/<name>.mod` over HTTP digest, which the
-    HMI's existing libcurl already speaks. Rationale, endpoints and the retrieval
-    workflow that forced the question:
+    **Amendment 2026-08-31 — re-decided.** The option is **FTP & SFTP Client
+    [614-1]**: an FTP/SFTP/NFS *client* that lets the controller read a share on
+    our PC, **not** a server the HMI can pull from (Product specification
+    3HAC050945 §10.1). It is also absent from the cell's installed option list.
+    **Robot Web Services is base RobotWare-OS** (same spec §3.10, no option) and
+    covers both directions — `PUT`/`GET /fileservice/$HOME/TGS/<name>.mod` over
+    HTTP digest, which the HMI's existing libcurl already speaks. **Decision:
+    program retrieval uses RWS; sending may also move to RWS; the prototype's
+    direct copy into the VC's `HOME:` stays available as a fallback in
+    `abb_server.py`.** Rationale, endpoints and the retrieval workflow:
     [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md).
 14. **Optional `PERS` parameters + conditional argument propagation.** The style-b
     request signatures (§7.6) use `PROC TG_Req...(\PERS tooldata Tool,\PERS
@@ -534,6 +535,33 @@ codec, no XML path). The tool/frame parameter style is **decided** (§7.6: expli
 emits explicit arguments on every request call; the modal-number fallback stays
 deprecated in the back pocket.
 
+**Phase 5 — operator touch-ups & program retrieval.** The FANUC workflow
+(pendant position touch-ups + the HMI's "Retrieve robot program from
+controller") has no 1:1 ABB port: pendant edits live in program memory, not the
+file, and an IRC5 has no FTP server to pull from — full analysis and decisions
+in [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md)
+(614-1 is a *client*; RWS is base RobotWare-OS and carries both directions).
+*Status 2026-08-31: implemented — `TG_Main` end-of-run unload is now
+`UnLoad \ErrIfChanged` (`tgUnloadKeepEdits`): a modified module is staged in
+`HOME:/TGS/edited/` (`tgSaveEditedModule`, `Save` of `<prog>_Mod`) and flagged
+via new PERS `nTG_ProgEdited` before the real unload; recovery-path unloads
+stay plain on purpose (aborted cycles still discard edits). Python:
+`rws_client.py` (stdlib urllib + digest — GET/PUT/DELETE `/fileservice`,
+module `action=save` with mastership, symbol get/set), `tg_retrieve.py`
+(fetch staged → validate the `MODULE <prog>_Mod` / `PROC <prog>` naming
+contract → timestamped backup → adopt as master → delete staged + clear flag;
+`--rws` or `--vc-home`), and `abb_server.py` request 10 can now deliver via
+RWS PUT when given a URL — the direct-copy fallback is KEPT (decision §9 of
+the touch-up doc). 22 new tests against a digest-authenticated fake RWS
+server (63 total green). **VC validation 2026-08-31**
+([robotstudio_setup.md](robotstudio_setup.md) §16.7): no-edit regression, RWS
+transfer leg (PUT verified on disk), T1 (pendant ModPos in the \Dynamic
+module), T3a (ERR_NOTSAVED refuses the unload; staging works) and T5 (full
+retrieve round trip over live RWS, one-declaration diff matching the actual
+stop point) all green; T2/T4 + optional T3b remain. New finding **F-4**
+(RobotStudio-editor Apply drops a \Dynamic module via PP reset —
+[rapid_validation_findings_v1.md](rapid_validation_findings_v1.md)).*
+
 ---
 
 ## 6. Assumptions & recommended defaults (speak up if wrong)
@@ -573,9 +601,10 @@ deprecated in the back pocket.
 2. **Port 2000**, held in an easily changed config variable (`PERS`), not a literal.
 3. **File transfer to the real cell: FTP option** on the controller. Prototype uses
    direct copy into the VC's `HOME:` folder either way.
-   ⚠ **Reopened 2026-08-31** — 614-1 is an FTP *client*, not a server; RWS
-   (`/fileservice`, base RobotWare-OS) is the candidate replacement in both
-   directions. See item 13's amendment and
+   **Re-decided 2026-08-31** — 614-1 is an FTP *client*, not a server. Program
+   retrieval uses **RWS** (`/fileservice`, base RobotWare-OS); sending may also
+   move to RWS; `abb_server.py` keeps the direct-copy transfer as a VC fallback.
+   See item 13's amendment and
    [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md).
 4. **Abort semantics confirmed**: `nTG_WeldStatus = 2` / `nTG_CaptureOK = 0` →
    call `TG_ReqEnd` then `RETURN` from the .tgs PROC (mirrors `LBL[101] → R_E`).

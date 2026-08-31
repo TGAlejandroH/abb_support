@@ -14,10 +14,12 @@ end-to-end against a RobotStudio virtual controller (2026-08-28).
 |---|---|
 | `abb/rapid/TG_Comms.sys` | Request library: socket lifecycle, protocol helpers, all TG_Req* PROCs, shared PERS state (the FANUC register-map equivalent) |
 | `abb/rapid/TG_Cell.sys` | Cell-hardware macros (FANUC's utility .ls programs): `TG_CamOpen`/`TG_CamClose` drive the camera flap on a dummy DO `doTG_Camera` |
-| `abb/rapid/TG_Main.mod` | Main loop (TGMainKL equivalent): accept HMI → prog-sel → file transfer → `Load \Dynamic` + late-bound call of the .tgs program + `UnLoad` |
+| `abb/rapid/TG_Main.mod` | Main loop (TGMainKL equivalent): accept HMI → prog-sel → file transfer → `Load \Dynamic` + late-bound call of the .tgs program + edit-preserving `UnLoad` (operator touch-ups are staged in `HOME:/TGS/edited/` for retrieval) |
 | `abb/rapid/TGS/TD05Test.mod` | Sample .tgs program (mirrors the FANUC TD05tRJYQd call order) |
-| `hmi_prototype/abb_server.py` | Python HMI prototype: serves all robot-initiated requests with dummy data; Euler↔quaternion pose codec; copies the .tgs module into the VC's `HOME:/TGS/` (FTP stand-in) |
-| `hmi_prototype/test_phase*.py` | 27 automated tests incl. fake-robot executable specs of the RAPID choreography |
+| `hmi_prototype/abb_server.py` | Python HMI prototype: serves all robot-initiated requests with dummy data; Euler↔quaternion pose codec; delivers the .tgs module to `HOME:/TGS/` by direct copy (VC fallback, kept) or RWS upload |
+| `hmi_prototype/rws_client.py` | Minimal Robot Web Services client (stdlib, digest auth): fileservice GET/PUT/DELETE, module save, PERS read/write |
+| `hmi_prototype/tg_retrieve.py` | "Retrieve robot program from controller" stand-in: fetch the staged touch-up → validate → backup → adopt as master → cleanup |
+| `hmi_prototype/test_phase*.py` | 63 automated tests incl. fake-robot and fake-RWS executable specs of the RAPID choreography and retrieval flow |
 | `docs/abb_port_plan_v1.md` | **The** design doc: extracted FANUC protocol, ABB architecture, decisions log, RAPID gotchas learned on the controller |
 | `docs/rapid_validation_findings_v1.md` | The three defects found during VC validation — root causes and the rules they imply for the production port |
 | `docs/robotstudio_setup.md` | How to build the VC and run each phase's smoke test |
