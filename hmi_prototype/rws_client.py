@@ -103,23 +103,42 @@ class RwsClient:
     def release_mastership(self):
         self._post_form("/rw/mastership", {"action": "release"}, {})
 
-    def save_module(self, module, save_dir, filename, task=DEFAULT_TASK,
-                    with_mastership=True):
-        """Serialize ``module`` from program memory to ``save_dir/filename``.
+    def create_directory(self, parent, name):
+        """Create directory ``name`` under ``parent`` (e.g. "$home/TGS", "edited").
+
+        ``save_module`` does NOT create its target directory (VC-observed
+        2026-08-31: missing directory fails the save with org_code -530).
+        """
+        self._post_form("/fileservice/" + parent.strip("/") + "/", None,
+                        {"fs-newname": name, "fs-action": "create"})
+
+    def save_module(self, module, save_dir, file_basename, task=DEFAULT_TASK,
+                    with_mastership=False):
+        """Serialize ``module`` from program memory to ``save_dir/<file_basename>.mod``.
 
         POST /rw/rapid/modules/<module>?action=save with the documented
-        ``path``/``name`` parameters. Edit operations need RAPID mastership;
-        it is requested/released around the call unless the caller manages it
-        (VC check T2 in robotstudio_setup.md decides whether this works while
-        the FlexPendant is in manual mode - trigger A in the touch-up doc does
-        not depend on it).
+        ``path``/``name`` parameters. VC-validated 2026-08-31 (RW6.15.08,
+        robotstudio_setup.md 16.5/16.7):
+          * the controller APPENDS ".mod" to ``name`` - pass the base name
+            only, or you get "X.mod.mod";
+          * ``save_dir`` accepts both "$home/..." and "HOME:/..." spellings;
+          * the target directory must already exist (create_directory);
+          * mastership is taken internally in AUTO - no explicit request
+            needed; in MANUAL the FlexPendant holds RAPID mastership locally
+            and the save is refused (0xc004841a) with or without an explicit
+            request, so this can never run mid-touch-up (trigger A in the
+            touch-up doc covers that case).
+        ``with_mastership=True`` wraps the call in an explicit
+        request/release anyway, for callers that want the reservation.
         """
+        if file_basename.lower().endswith(".mod"):
+            file_basename = file_basename[:-len(".mod")]
         if with_mastership:
             self.request_mastership()
         try:
             self._post_form(f"/rw/rapid/modules/{module}",
                             {"action": "save", "task": task},
-                            {"path": save_dir, "name": filename})
+                            {"path": save_dir, "name": file_basename})
         finally:
             if with_mastership:
                 try:

@@ -16,9 +16,12 @@ the subsequent `Save` serialized the still-loaded module), and **T5** (full
 round trip: staged file retrieved over live RWS, exactly one changed
 declaration matching the robot's actual stop point to 2e-6 interpolation
 spread, staged file deleted, `nTG_ProgEdited` cleared by `set_symbol` without
-explicit mastership, idempotent rerun). Still open: T2/T4 (§16.5, separate
-stopped cycle) and optional T3b. Also learned: **F-4** (RobotStudio-editor
-Apply drops the `\Dynamic` module — see §8 T1 note).
+explicit mastership, idempotent rerun), **T2** (answered: manual mode refuses
+RWS mastership/save — the pendant holds RAPID mastership locally; option B is
+auto-only, trigger A unaffected) and **T4** (two RWS saves byte-identical;
+saves write CRLF but are character-stable — §8). **Only optional T3b remains.**
+Also learned: **F-4** (RobotStudio-editor Apply drops the `\Dynamic` module —
+see §8 T1 note).
 Opened because the
 `Load \Dynamic` lifecycle in
 [abb_weld_motion_and_data_design_v1.md](abb_weld_motion_and_data_design_v1.md) §3.1
@@ -290,6 +293,12 @@ the unload path can see the edit. T1 must go through the pendant.*
 the modified target. *If mastership is refused in manual mode,* option B cannot be the
 primary trigger — fall back to A (`\ErrIfChanged` + `Save`), which runs inside RAPID and
 needs no mastership. Also record the VC's RWS port (80, or the configured 888x).
+✘→✔ *VC-answered 2026-08-31: refused in manual, exactly this branch. The pendant holds
+RAPID mastership locally (`/rw/mastership/rapid` → `mastership:"local"`, holder
+`FlexPendant`); both the explicit request and `action=save` fail with 0xc004841a. In
+short: the HMI can never drive a module save while an operator is mid-touch-up — trigger
+A (validated) is the primary, and B is an auto-mode-only optimization. RWS port on the
+VC: 80.*
 
 **T3 — does `\ErrIfChanged` fire for a ModPos edit, and for a PERS change?**
 ✔ *(a) VC-validated 2026-08-31: fired, and the manual's ambiguity is resolved — the
@@ -307,6 +316,16 @@ PERS by design (§6.1).
 **T4 — ⚠ is the controller's module serialization byte-stable?**
 `Save` the same unmodified module twice to two paths; `cmp` them. *Expect:* identical.
 *Pass:* byte-identical, twice in a row. *If not,* §6.2's normalization is mandatory.
+✔ *VC-validated 2026-08-31: two RWS `action=save` calls in auto produced byte-identical
+files. Measured facts: saves normalize line endings to **CRLF** (both the RAPID `Save`
+path and RWS — our LF sources gain 1 byte/line on first save) but are character-identical
+otherwise; so the first save of a freshly pushed program differs from the HMI master by
+line endings alone (harmless — first-run compare is supposed to differ), and once the
+master is a retrieved controller serialization, round trips are byte-exact. C++ port:
+normalize line endings in the compare anyway, as cheap insurance. RWS quirks for option
+B: `name` gets `.mod` appended by the controller, the target directory is not created by
+the save, mastership is internal in auto — all encoded in `rws_client.save_module` /
+`create_directory`.*
 
 **T5 — full round trip.** ModPos → `UnLoad \ErrIfChanged` → save → `GET /fileservice/...` →
 compare against the pre-edit file. *Expect:* exactly one changed declaration, the touched-up

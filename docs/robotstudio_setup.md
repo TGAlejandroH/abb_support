@@ -825,25 +825,35 @@ ModPos/text-edit only). Remove the scratch lines afterwards.
    trying to observe. (T2/T4 need no edit at all - they save the unmodified
    module.)
 
-       curl --digest -u "Default User:robotics" -X POST -d "" "http://localhost/rw/mastership?action=request"
-       curl --digest -u "Default User:robotics" -X POST -d 'path=$home/TGS/edited&name=T2probe.mod' "http://localhost/rw/rapid/modules/TD05Test_Mod?action=save&task=T_ROB1"
-       curl --digest -u "Default User:robotics" -X POST -d "" "http://localhost/rw/mastership?action=release"
+       curl --digest -u "Default User:robotics" -X POST -d "" "http://localhost/rw/mastership/rapid?action=request"
 
-   (single-quote the -d body: PowerShell would expand "$home" inside
-   double quotes; RWS must receive the literal alias)
+   ✔ ANSWERED 2026-08-31: in manual the FlexPendant holds RAPID mastership
+   locally (`GET /rw/mastership/rapid` -> `mastership:"local"`, holder
+   `FlexPendant`); the request is refused ("held by someone else",
+   0xc004841a) and `action=save` fails on the same code with or without an
+   explicit request. **Option B is auto-only; trigger A is unaffected.**
+   RW6 mastership domain resources are `cfg`/`motion`/`rapid` (no `edit`).
+3. **T4** - switch to AUTO (program still stopped inside the .tgs; module
+   loaded), then save twice with no edit in between and compare:
 
-   (Run while a cycle is stopped inside the .tgs so the module is loaded.)
-   *Pass:* HTTP 200/204s and `TGS/edited/T2probe.mod` appears in HOME.
-   *If mastership/save is refused in manual:* record it - trigger A does not
-   depend on it (doc section 3), only the optional HMI-driven save does.
-3. **T4** - run the save twice into two names (`T4a.mod`, `T4b.mod`) with no
-   edit in between, then:
-
+       curl --digest -u "Default User:robotics" -X POST -d "fs-newname=edited&fs-action=create" "http://localhost/fileservice/$home/TGS/"
+       curl --digest -u "Default User:robotics" -X POST -d 'path=$home/TGS/edited&name=T4a' "http://localhost/rw/rapid/modules/TD05Test_Mod?action=save&task=T_ROB1"
+       curl --digest -u "Default User:robotics" -X POST -d 'path=$home/TGS/edited&name=T4b' "http://localhost/rw/rapid/modules/TD05Test_Mod?action=save&task=T_ROB1"
        fc /b "<HOME>\TGS\edited\T4a.mod" "<HOME>\TGS\edited\T4b.mod"
 
-   *Pass:* `FC: no differences encountered` - the controller's serialization
-   is byte-stable and the HMI's byte-compare survives round trips
-   (doc section 6.2). *If not:* the compare in the C++ port must normalize.
+   (Quoting: single-quote the -d bodies in PowerShell so "$home" stays
+   literal; in a cmd/conda prompt use DOUBLE quotes - cmd treats ' as data
+   and the & splits the command. Always curl.exe/fc.exe in PowerShell.)
+   API quirks, VC-observed 2026-08-31: the controller APPENDS `.mod` to
+   `name` (pass the base name only), the save does NOT create the target
+   directory (org_code -530 without the fileservice create), no explicit
+   mastership is needed in auto (taken internally), and `path` accepts both
+   `$home/...` and `HOME:/...` spellings.
+   ✔ PASSED 2026-08-31: the two saves are byte-identical. Serialization
+   facts: the save writes CRLF line endings throughout (repo sources are
+   LF, so +1 byte/line vs the master) but is otherwise character-identical
+   for unmodified content; a previously adopted controller serialization
+   round-trips byte-exact (doc section 6.2).
 
 ### 16.6 T5: the full round trip
 
@@ -883,6 +893,7 @@ cannot clear the flag, it says so.)
 | 16.3 / T1 | ✔ pendant Modify Position enabled and accepted inside the `\Dynamic` module (first attempt via RobotStudio-editor Apply produced finding **F-4** instead — see the warning above) |
 | 16.3 / T3a | ✔ `TG: touch-up detected` + `TG: edited module saved for retrieval`; ERR_NOTSAVED **refused** the unload (module still loaded — the staging Save serialized it) |
 | 16.6 / T5 | ✔ retrieved over live RWS; diff = exactly the one ModPos'd declaration; staged joints = the mid-move stop point (interpolation fraction 0.576302 identical on all four moved axes, spread 2e-6); staged file deleted; `nTG_ProgEdited` → 0 (symbol write needed no explicit mastership); rerun → "nothing to retrieve" |
-| Serialization observation | `Save` re-serialized ONLY the modified declaration (`9E+9`, full precision); unmodified lines kept verbatim (`9E9`) — favorable for T4 |
-| 16.5 / T2 + T4 | ⏳ pending (run on a separate stopped cycle) |
+| Serialization observation | `Save` re-serialized ONLY the modified declaration (`9E+9`, full precision); unmodified lines kept character-verbatim (`9E9`) — but line endings are normalized to CRLF on every save (both RAPID `Save` and RWS `action=save`; measured 162 CR on 162 lines). After one retrieve the master is a controller serialization and round-trips byte-exact |
+| 16.5 / T2 | ✔ ANSWERED (negative in manual, as designed for): with the FP in manual, `/rw/mastership/rapid` reports `mastership:"local"`, holder `FlexPendant`; the RWS request is refused ("held by someone else", 0xc004841a) and `action=save` fails on the same code — **option B cannot save in manual mode**; trigger A is unaffected (validated). RWS module list labels the loaded module `DynMod` — usable by the HMI to detect a still-loaded module |
+| 16.5 / T4 | ✔ two RWS saves in AUTO byte-identical (`cmp`); quirks: `name` gets `.mod` appended, target dir not auto-created (-530), no explicit mastership needed in auto, `$home`/`HOME:` both accepted |
 | 16.4 / T3b | ⏳ optional, pending |

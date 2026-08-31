@@ -203,11 +203,18 @@ class _FakeRwsHandler(BaseHTTPRequestHandler):
                 if content is None:
                     self._reply(400)
                     return
-                # The controller serializes program memory to path/name.
-                key = fields["path"].rstrip("/") + "/" + fields["name"]
+                # The controller serializes program memory to path/name and
+                # APPENDS ".mod" to the name (VC-observed 2026-08-31 - a name
+                # of "T4a.mod" produced "T4a.mod.mod" on the real RW6).
+                key = fields["path"].rstrip("/") + "/" + fields["name"] + ".mod"
                 # RWS paths use $home aliases in fileservice keys.
                 server.files[key] = content
             self._reply(200)
+            return
+
+        if path.startswith("/fileservice/") and fields.get("fs-action") == "create":
+            # directory creation - modeled as a no-op (the store is flat)
+            self._reply(201)
             return
 
         if path.startswith("/rw/rapid/symbol/data/") and action == "set":
@@ -309,7 +316,10 @@ class TestRwsClient(unittest.TestCase):
             client.put_file("$home/a.txt", b"1")
             self.assertEqual(client.get_file("$home/a.txt"), b"1")
 
-    def test_save_module_writes_file_and_uses_mastership(self):
+    def test_save_module_writes_file_no_explicit_mastership(self):
+        """Default: no explicit mastership (RW6 takes it internally in AUTO,
+        VC-validated), and a ".mod" passed in the basename is stripped so the
+        controller's own append does not produce "X.mod.mod"."""
         with FakeRwsServer() as server:
             server.module_memory["TD05Test_Mod"] = edited_module_bytes()
             client = RwsClient(server.base_url)
@@ -319,7 +329,20 @@ class TestRwsClient(unittest.TestCase):
                              edited_module_bytes())
             self.assertEqual(server.module_saves[0]["module"], "TD05Test_Mod")
             self.assertEqual(server.module_saves[0]["task"], "T_ROB1")
+            self.assertEqual(server.module_saves[0]["name"], "TD05Test")
+            self.assertEqual(server.mastership_log, [])
+
+    def test_save_module_with_explicit_mastership(self):
+        with FakeRwsServer() as server:
+            server.module_memory["TD05Test_Mod"] = edited_module_bytes()
+            client = RwsClient(server.base_url)
+            client.save_module("TD05Test_Mod", "$home/TGS/edited", "TD05Test",
+                               with_mastership=True)
             self.assertEqual(server.mastership_log, ["request", "release"])
+
+    def test_create_directory(self):
+        with FakeRwsServer() as server:
+            RwsClient(server.base_url).create_directory("$home/TGS", "edited")
 
     def test_symbol_set_and_get(self):
         with FakeRwsServer() as server:
@@ -478,8 +501,7 @@ class TestRetrieveViaRws(unittest.TestCase):
                 tempfile.TemporaryDirectory() as dest:
             server.module_memory["TD05Test_Mod"] = edited_module_bytes()
             client = RwsClient(server.base_url)
-            client.save_module("TD05Test_Mod", "$home/TGS/edited",
-                               "TD05Test.mod")
+            client.save_module("TD05Test_Mod", "$home/TGS/edited", "TD05Test")
             result = retrieve_program("TD05Test", RwsSource(client), dest,
                                       log=_quiet)
             with open(result, "rb") as f:
