@@ -1,8 +1,10 @@
 # ABB weld motion + weld data: investigation & recommended design (v1)
 
-Status: **research complete 2026-08-28; IMPLEMENTED 2026-08-31** (TG_Weld.sys +
-TGS/TD05Weld.mod + weld-demo server mode + test_phase4_weld.py, 41/41 tests
-green - awaiting VC validation per robotstudio_setup.md section 15). Originally
+Status: **research complete 2026-08-28; IMPLEMENTED 2026-08-31; VC-VALIDATED
+2026-08-31** (TG_Weld.sys + TGS/TD05Weld.mod + weld-demo server mode +
+test_phase4_weld.py, 41/41 tests green; weld-demo ran 2 full cycles on the VC
+meeting all section-15 pass criteria of robotstudio_setup.md: 8.89/220.133/
+clamp-49-to-10 on weld 1, 12.7 + library zeros on weld 2). Originally
 the design recommendation
 for the top-priority Phase 4 item: real welds with motion in the .tgs program
 (mirroring `TD05tRJYQd.ls`, touch-sense excluded), weld data, and on-the-fly
@@ -367,9 +369,19 @@ the controller:
 1. **HMI mode makes .tgs-resident values dead data.** Parameters arrive over the
    wire per weld (R_W_P) at runtime; the program needs only a *reference*.
 2. **Dynamic-load lifecycle**: a `PERS` in a `Load \Dynamic` module loses its
-   runtime updates on `UnLoad` (never written back to the .mod). FlexPendant
-   tuning during a run would silently vanish. Controller-resident `.sys` data
-   survives and is saved with the system.
+   runtime updates on a *plain* `UnLoad` — silently, since nothing warns.
+   FlexPendant tuning during a run would vanish at end of cycle, while
+   controller-resident `.sys` data survives and is saved with the system.
+   *(Corrected 2026-08-31: the earlier "never written back to the .mod" was too
+   strong. `UnLoad \Save` and `Save` do write back, and PERS current values are
+   folded into their declarations on any module save. The narrow true statement
+   is the one above — plain `UnLoad` discards. Full analysis, and what it means
+   for operator touch-ups, in
+   [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md).)*
+   Retrieval adds a second, harder reason to keep PERS out of the .tgs: a saved
+   module serializes current PERS values, so a PERS-carrying .tgs would produce a
+   different byte image on every save and the HMI's byte-compare would re-push the
+   program every run (that doc §6.1).
 3. **The instruction demands PERS anyway** (§2.4c) — and the natural home for a
    long-lived `PERS` that the pendant's tuning UI also edits is a system module,
    not a module that is unloaded after every cycle.

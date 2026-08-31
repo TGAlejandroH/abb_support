@@ -186,6 +186,16 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
     real cell. **For the prototype this is moot**: the VC's `HOME:` is a plain
     Windows folder inside the RobotStudio solution, so the Python side (or the
     user) just copies the .mod file there.
+    ⚠ **Amendment 2026-08-31 — this decision needs re-making.** The option is
+    **FTP & SFTP Client [614-1]**: an FTP/SFTP/NFS *client* that lets the
+    controller read a share on our PC, **not** a server the HMI can pull from
+    (Product specification 3HAC050945 §10.1). It is also absent from the cell's
+    installed option list. **Robot Web Services is base RobotWare-OS** (same spec
+    §3.10, no option) and covers both directions —
+    `PUT`/`GET /fileservice/$HOME/TGS/<name>.mod` over HTTP digest, which the
+    HMI's existing libcurl already speaks. Rationale, endpoints and the retrieval
+    workflow that forced the question:
+    [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md).
 14. **Optional `PERS` parameters + conditional argument propagation.** The style-b
     request signatures (§7.6) use `PROC TG_Req...(\PERS tooldata Tool,\PERS
     wobjdata WObj)` and forward with `tgSendPose \Tool?Tool \WObj?WObj;`. Both are
@@ -512,7 +522,7 @@ mode maps to ABB characteristics/synergic mode; implementation is a separate
 future task — SHIPPED 2026-08-31: TG_Weld.sys (TG_ApplyWeldParams + recipe
 library) and TGS/TD05Weld.mod (two Arc welds), after TGArcCheck.mod measured
 welddata.weld_speed governing the weld at 0.07% error on the Arc-equipped VC;
-see abb_weld_motion_and_data_design_v1.md and setup doc sections 14-15); cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
+see abb_weld_motion_and_data_design_v1.md and setup doc sections 14-15) - **VC-VALIDATED 2026-08-31**: weld-demo ran 2 full cycles, all section-15 pass criteria met (8.89/220.133/clamp on weld 1; 12.7 + library zeros on weld 2); cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
 placeholder PROCs in `TG_Cell.sys`, called from the sample .tgs in the FANUC
 order — sample lines 13–19/63; empty PROC bodies **confirmed on the VC
 2026-08-28**, two full cycles through the placeholder calls); real `FSSize`
@@ -563,6 +573,10 @@ deprecated in the back pocket.
 2. **Port 2000**, held in an easily changed config variable (`PERS`), not a literal.
 3. **File transfer to the real cell: FTP option** on the controller. Prototype uses
    direct copy into the VC's `HOME:` folder either way.
+   ⚠ **Reopened 2026-08-31** — 614-1 is an FTP *client*, not a server; RWS
+   (`/fileservice`, base RobotWare-OS) is the candidate replacement in both
+   directions. See item 13's amendment and
+   [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md).
 4. **Abort semantics confirmed**: `nTG_WeldStatus = 2` / `nTG_CaptureOK = 0` →
    call `TG_ReqEnd` then `RETURN` from the .tgs PROC (mirrors `LBL[101] → R_E`).
 5. **No Multitasking in v1** — socket lives in the motion task; request calls block,

@@ -633,6 +633,12 @@ A/B/C/D lines printed.
 
 ## 15. Phase 4 weld implementation: TG_Weld.sys + TD05Weld.mod (two real welds)
 
+> **VC-VALIDATED 2026-08-31** - weld-demo ran 2 full cycles; all pass criteria
+> in 15.4 met (clamp warning + 8.89/220.133/10/0 on weld 1; UDWP=0 + 12.7 +
+> library zeros on weld 2; R_E served both cycles). Note: the clamp warning
+> printed "was49" without a space - fixed in TG_Weld.sys after this run
+> (cosmetic only, no re-run needed).
+
 What ships (2026-08-31, after the §14 measurements came back conclusive):
 
 - `abb/rapid/TG_Weld.sys` — `PERS seamdata sdTG_Weld`, `PERS welddata

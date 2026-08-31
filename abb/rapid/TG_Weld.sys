@@ -99,11 +99,11 @@ MODULE TG_Weld(SYSMODULE)
     !=======================================================================
     LOCAL FUNC num tgClampCorr(num nVal,string stField)
         IF nVal>nTG_CorrMax THEN
-            TPWrite "TG WELD: "+stField+" clamped high, was"\Num:=nVal;
+            TPWrite "TG WELD: "+stField+" clamped high, was "\Num:=nVal;
             RETURN nTG_CorrMax;
         ENDIF
         IF nVal<nTG_CorrMin THEN
-            TPWrite "TG WELD: "+stField+" clamped low, was"\Num:=nVal;
+            TPWrite "TG WELD: "+stField+" clamped low, was "\Num:=nVal;
             RETURN nTG_CorrMin;
         ENDIF
         RETURN nVal;
