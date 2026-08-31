@@ -509,7 +509,10 @@ Cell power source confirmed 2026-08-28: **Fronius TPS 500i /600V/nc** — in
 scope of ABB's RI-FB inside/i manual, needs RW ≥ 6.05 + [633-4] Arc + [637-1]
 Production Screen + a fieldbus option, and the FANUC cell's Special-2-step
 mode maps to ABB characteristics/synergic mode; implementation is a separate
-future task); cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
+future task — SHIPPED 2026-08-31: TG_Weld.sys (TG_ApplyWeldParams + recipe
+library) and TGS/TD05Weld.mod (two Arc welds), after TGArcCheck.mod measured
+welddata.weld_speed governing the weld at 0.07% error on the Arc-equipped VC;
+see abb_weld_motion_and_data_design_v1.md and setup doc sections 14-15); cell macros **done 2026-08-28** (TG_WeldPrep/TG_CamPrep/TG_DryRunOn/Off as empty
 placeholder PROCs in `TG_Cell.sys`, called from the sample .tgs in the FANUC
 order — sample lines 13–19/63; empty PROC bodies **confirmed on the VC
 2026-08-28**, two full cycles through the placeholder calls); real `FSSize`
