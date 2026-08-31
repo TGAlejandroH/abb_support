@@ -122,6 +122,41 @@ def fmt_real(value):
 CORRUPT_FRAME_PAYLOAD = "[[850.00,-120.00,4"
 
 
+# --- weld-demo script (see main(), mode "weld-demo") ----------------------
+#
+# Values are the HMI's own native-.tgs seed defaults (WeldLibrary.cpp):
+# proc 1, wire feed 520 IPM, travel 21 IPM, arc length 49.0, arc control 0.0
+# - except arc length, which is deliberately left at 49.0 to prove
+# TG_ApplyWeldParams CLAMPS it (Fronius corrections are about +/-10 steps).
+#
+# Weld 1 = user-defined (UDWP 1), weld 2 = predefined (UDWP 0), so a single
+# run covers both branches of TG_ApplyWeldParams.
+WELD_DEMO_SEQUENCE = [
+    {
+        "udwp_flag": 1,
+        "welder_type": 2,        # FRONIUSTPSi, matching the cell's config.json
+        "weld_proc": 1,
+        "travel_speed": 21.0,    # IPM -> expect weld_speed 8.890 mm/s in RAPID
+        "wire_feed_speed": 520.0,  # IPM -> expect wirefeed 220.133 mm/s
+        "arc_length": 49.0,      # out of range -> expect CLAMP to 10
+        "arc_control": 0.0,      # HMI hides this field and always sends 0.0
+    },
+    {
+        "udwp_flag": 0,          # predefined: only travel speed is sent
+        "travel_speed": 30.0,    # IPM -> expect weld_speed 12.700 mm/s
+    },
+]
+
+# The mm/s values the RAPID side should report for the sequence above, so the
+# expectation lives next to the input rather than only in the docs.
+IPM_TO_MM_S = 25.4 / 60.0
+WELD_DEMO_EXPECTED_MM_S = [
+    {"weld_speed": 21.0 * IPM_TO_MM_S, "wirefeed": 520.0 * IPM_TO_MM_S,
+     "arc_length_clamped": 10.0, "arc_control": 0.0},
+    {"weld_speed": 30.0 * IPM_TO_MM_S},
+]
+
+
 class AbbTgsHmi:
     """Application-level request server / transport-level TCP client."""
 
@@ -165,6 +200,14 @@ class AbbTgsHmi:
         self.wire_feed_speed = 250.0       # R_W_P
         self.arc_length = 2.5              # R_W_P
         self.arc_control = 0.0             # R_W_P
+
+        # Optional per-call script for R_W_P, so ONE run can exercise both
+        # branches of TG_ApplyWeldParams (user-defined, then predefined).
+        # Each entry is a dict of any of the R_W_P fields above and is
+        # applied before that call is served. None = the single fixed set
+        # above, which is what phases 1-3 and their tests rely on.
+        self.weld_param_sequence = None
+        self._weld_param_calls = 0
 
         # ---- last-received data, for tests / future HMI logic
         self.last_pose_xyzwpr = None
@@ -319,7 +362,22 @@ class AbbTgsHmi:
     def handle_weld_params_req(self):
         """FANUC R_W_P (id 14): UDWP flag + travel speed, then (if the flag
         is set) welder type, procedure and the schedule values - all in the
-        FANUC fixed-width formats."""
+        FANUC fixed-width formats.
+
+        Wire format is unchanged from phase 2. The only addition is
+        `weld_param_sequence`: when set, entry N is applied before the Nth
+        call of this cycle, which lets a two-weld program be served with
+        different parameters per weld (e.g. user-defined then predefined).
+        """
+        if self.weld_param_sequence:
+            idx = min(self._weld_param_calls, len(self.weld_param_sequence) - 1)
+            for key, value in self.weld_param_sequence[idx].items():
+                if not hasattr(self, key):
+                    raise AttributeError(
+                        f"weld_param_sequence[{idx}] has unknown field {key!r}")
+                setattr(self, key, value)
+        self._weld_param_calls += 1
+
         self.do_send(str(self.udwp_flag))
         self.do_send(fmt_real(self.travel_speed))
         if self.udwp_flag == 1:
@@ -336,6 +394,7 @@ class AbbTgsHmi:
         the robot disconnects (which it does right after request 100)."""
         self.connect()
         self.request_log = []
+        self._weld_param_calls = 0
         try:
             self.serve_program_selection()
             while True:
@@ -363,15 +422,21 @@ def main(argv):
     port = int(argv[2]) if len(argv) > 2 else 2000
     cycles = int(argv[3]) if len(argv) > 3 else 2
     vc_home_dir = argv[4] if len(argv) > 4 else None
-    fault = argv[5] if len(argv) > 5 else None
+    mode = argv[5] if len(argv) > 5 else None
     hmi = AbbTgsHmi(host=host, port=port, vc_home_dir=vc_home_dir)
-    if fault == "corrupt-cam":
+    if mode == "corrupt-cam":
         hmi.corrupt_cam_frame = True
-    elif fault == "corrupt-weld":
+    elif mode == "corrupt-weld":
         hmi.corrupt_weld_frame = True
-    elif fault is not None:
-        raise SystemExit(f"unknown fault flag {fault!r} "
-                         "(use corrupt-cam or corrupt-weld)")
+    elif mode == "weld-demo":
+        # Serve the two-weld arc program instead of the comms regression
+        # program, with DIFFERENT parameters per weld so one run exercises
+        # both branches of TG_ApplyWeldParams.
+        hmi.prog_name = "TD05Weld"
+        hmi.weld_param_sequence = WELD_DEMO_SEQUENCE
+    elif mode is not None:
+        raise SystemExit(f"unknown mode {mode!r} (use corrupt-cam, "
+                         "corrupt-weld or weld-demo)")
     for i in range(cycles):
         print(f"--- cycle {i + 1}/{cycles} ---", flush=True)
         hmi.serve_cycle()

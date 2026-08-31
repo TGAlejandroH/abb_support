@@ -499,3 +499,223 @@ Operator Window identical to §10 (the placeholders are silent no-ops).
 *Status 2026-08-28: **validated** — the §12 check-1 run (two full cycles)
 executed the placeholder calls end-to-end with program check clean and
 transcripts identical to §10. Empty PROC bodies confirmed legal on RW 6.15.*
+
+## 14. Arc readiness check (`TGArcCheck.mod`) — before any weld code
+
+Standalone diagnostic proving the controller can hold our weld data and run our
+weld motions. **No TG_* dependency** — `tool0`/`wobj0`, no socket. Design
+rationale in
+[abb_weld_motion_and_data_design_v1.md](abb_weld_motion_and_data_design_v1.md)
+§2.4 / §4.
+
+### 14.0 What the first run already established (2026-08-31 07:10)
+
+**Step 1 PASSED**, which settles the biggest open question: the `welddata` and
+`seamdata` literals compile and read back on *this* controller, so the component
+set is confirmed first-hand, not just descriptor-derived:
+
+```
+welddata := [ weld_speed, org_weld_speed, main_arc, org_arc ]
+arcdata  := [ sched, mode, voltage, wirefeed, control, current,
+              voltage2, wirefeed2, control2 ]
+```
+
+`weld_speed`, `main_arc.wirefeed` and `main_arc.voltage` — the three paths
+`TG_ApplyWeldParams` will write — all exist and accept assignment.
+
+**Step 2 executed without an arc error**, which is real evidence: `ArcLStart` /
+`ArcLEnd` run on this system with no welder attached. The likely reason is in the
+equipment config — `autoinhib_on = TRUE` (see the arc log), i.e. the process
+self-inhibits when the equipment is unavailable, so the arc instructions degrade
+to pure motion. That is effectively the "blocked weld" the ABB forums allude to,
+obtained for free.
+
+Two things the first run did **not** establish, both fixed in v2 of the module:
+
+| Gap | Why v1 could not answer it |
+|---|---|
+| Does `welddata.weld_speed` actually govern the weld speed? | The log has no timestamps, and the pass criterion was "watch it take ~34 s". Unverified. |
+| Which optional components exist? | The step-3 message printed identically whether or not the probes were uncommented, so the log carried no information. |
+
+### 14.1 Which welder is configured — read the arc log, not the option list
+
+The controller writes its own answer to
+`<VC>\INTERNAL\arcLog_T_ROB1.log` on every start. Current content:
+
+```
+Found ARC1 WelderType: FronTPSInt EquipmentClass: EIP_awEqFrTPS4K5K
+Loaded: RELEASE:/options/arc/WeldEquip/Code/EIP_awEqFrTPS4K5K.mod
+  GetCfgDataStr: units = SI_UNITS
+```
+
+That is **TPS 4000/5000 over EtherNet/IP**, selected by "Fronius TPS **Integrated**"
+(`FronTPSInt`) — *not* TPS/i. Confirming evidence: `HOME\Arc\ConfigTemplates\`
+holds `Fronius_EIP` and `FroniusTPS4K5K` but **no `FroniusTPSi`**, and the TPS/i
+installer would have created that folder.
+
+To get TPS/i: select the TPS/i power source **and clear "Fronius TPS Integrated"**
+— that key overrides the selection to `FRON_EIP` (`FronIntegr1` in
+`install_PWS.cmd`). Then re-check the log for
+`WelderType: FroniusTPS/i` / `EquipmentClass: awEqFrTPSi`.
+
+| Check | Wrong (current) | Right for this cell |
+|---|---|---|
+| arc log `EquipmentClass` | `EIP_awEqFrTPS4K5K` | `awEqFrTPSi` |
+| `ConfigTemplates\` folder | `Fronius_EIP` | `FroniusTPSi` |
+| `FeedReference` signal | `aoFr1Power` | `aoFr1WFSpeed` |
+
+### 14.2 Units — a config choice, not a fixed conversion
+
+The log line `units = SI_UNITS` refers to `PROC/ARC_UNITS`, which RobotWare ships
+in three flavours (`arcbase\config\proc\pARC_UNITS.cfg`):
+
+| ARC_UNITS | arc_length | arc_velocity (weld_speed) | arc_feed (wirefeed) |
+|---|---|---|---|
+| `SI_UNITS` *(active now)* | mm | **mm_s** | **mm_s** |
+| `US_UNITS` | inch | **ipm** | **ipm** |
+| `WELD_UNITS` | mm | mm_s | m_min |
+
+`US_UNITS` matches the HMI exactly — it sends travel speed and wire speed both in
+IPM. Selecting it would let both values pass through with **zero conversion**.
+That is a design decision, not just a setting; step 2 of the module measures
+which system is actually in force.
+
+### 14.3 Re-run with v2 of the module
+
+Reload `abb/rapid/TGArcCheck.mod` (v2) and run all three routines.
+
+**Step 1** — expect the same six values as before (unchanged):
+
+```
+  weld_speed        =8.89
+  main_arc.wirefeed =520
+  main_arc.voltage  =4.9
+  seam purge_time   =0.2
+  seam postflow_time=0.05
+```
+
+**Step 2 (`TGArcMoveCheck`) — this is the one that matters now.** It times two
+runs over the *same* 300.0 mm line and prints both:
+
+```
+  A REF  MoveL 300mm v100, sec =<x>
+  B WELD 300mm ArcL,     sec =<y>
+```
+
+Read them in this order:
+
+1. **A validates the method.** Expect **≈3.0 s** (300 mm ÷ 100 mm/s). If A reads
+   ≈0, RAPID lookahead outran the stopwatch and **B means nothing** — report that
+   rather than interpreting B.
+2. **B answers the design question.** B includes a 141 mm approach at v200
+   (≈0.7 s), so subtract that:
+
+| B (minus ~0.7 s) | Conclusion |
+|---|---|
+| **≈34 s** | `weld_speed` governs, interpreted as **mm/s** → SI_UNITS confirmed, conversion ×0.42333 is correct |
+| **≈80 s** | `weld_speed` governs but is read as **IPM** → US_UNITS in force; send HMI values verbatim |
+| **≈1.5 s** | **the `v200` argument governs and `weld_speed` does not** — this would invalidate the core assumption of the weld design; report it, do not work around it |
+
+**Step 3 (`TGArcProbeOptional`)** — probes are now **pairs** of lines
+(assignment + read-back). Uncomment one pair, run a program check, then run the
+routine. Distinctive values (1.5 / 7 / 2) so they cannot be confused with step 1:
+
+| Probe | Component | Buys us |
+|---|---|---|
+| A | `main_arc.control` | Fronius `aoFr1Dynamic` = the HMI's Arc Control, which FANUC never applied |
+| B | `main_arc.sched` | Fronius `JobPort` — job-mode operation only |
+| C | `main_arc.mode` | Fronius `ModePort` — explicit mode only |
+| D | `org_weld_speed` | read-only probe; production must never write it |
+
+A component that does not exist makes the **whole module** fail to compile — that
+failure is the answer for that probe. Re-comment it and continue. Report which
+A/B/C/D lines printed.
+
+## 15. Phase 4 weld implementation: TG_Weld.sys + TD05Weld.mod (two real welds)
+
+> **VC-VALIDATED 2026-08-31** - weld-demo ran 2 full cycles; all pass criteria
+> in 15.4 met (clamp warning + 8.89/220.133/10/0 on weld 1; UDWP=0 + 12.7 +
+> library zeros on weld 2; R_E served both cycles). Note: the clamp warning
+> printed "was49" without a space - fixed in TG_Weld.sys after this run
+> (cosmetic only, no re-run needed).
+
+What ships (2026-08-31, after the §14 measurements came back conclusive):
+
+- `abb/rapid/TG_Weld.sys` — `PERS seamdata sdTG_Weld`, `PERS welddata
+  wdTG_Weld` (the SCH[20] analogue), a 10-slot recipe library `wdTG_Lib{n}`
+  (the AWE1WPnn analogue, placeholder values), and `TG_ApplyWeldParams` —
+  the ONE place wire values become weld data (IPM→mm/s, Fronius-range
+  clamping, org_* kept in step for pendant tune-reset).
+- `abb/rapid/TGS/TD05Weld.mod` — the two-weld .tgs program mirroring
+  Weld2/Weld3 of `TD05tRJYQd.ls` (capture set trimmed; touch-sense and
+  R_W_S out of scope). Kept separate from `TD05Test.mod`, which remains the
+  non-Arc comms regression program.
+- `hmi_prototype/abb_server.py` — new `weld-demo` mode: serves `TD05Weld`
+  with **different parameters per weld** (weld 1 UDWP=1, weld 2 UDWP=0) so
+  one run covers both branches. Wire format untouched.
+- `hmi_prototype/test_phase4_weld.py` — 14 tests (41 total green):
+  `FakeWeldRobot` is the executable spec of the TD05Weld choreography, plus
+  the conversion arithmetic the RAPID side must reproduce.
+
+### 15.1 Load
+
+Copy/load `TG_Weld.sys` resident into T_ROB1 (like TG_Comms/TG_Cell; needs
+633-4 Arc). `TD05Weld.mod` is NOT pre-loaded — the server transfers it into
+`HOME:/TGS/` during request 10, exactly like TD05Test in phase 3.
+
+### 15.2 Run
+
+```
+python hmi_prototype\abb_server.py 127.0.0.1 2000 2 "D:\ABB\ABB-IRB-4600-20-2-50\Virtual Controllers\Controller1\HOME" weld-demo
+```
+
+then start `TG_Main` main (AUTO, PP to main) as usual.
+
+### 15.3 Expected Operator-Window output (per cycle, weld section)
+
+Weld 1 — HMI sends UDWP=1, proc 1, travel 21 IPM, WFS 520 IPM, arc length
+49.0, arc control 0.0 (the HMI's own native-.tgs defaults):
+
+```
+TG: weld params, UDWP = 1
+TG WELD: arc length clamped high, was 49
+TG WELD: applied, UDWP=1
+  weld_speed mm/s   =8.89
+  wirefeed          =220.133
+  arc length (volt) =10
+  arc control       =0
+```
+
+Weld 2 — HMI sends UDWP=0, travel 30 IPM only:
+
+```
+TG: weld params, UDWP = 0
+TG WELD: applied, UDWP=0
+  weld_speed mm/s   =12.7
+  wirefeed          =0
+  arc length (volt) =0
+  arc control       =0
+```
+
+### 15.4 Pass criteria
+
+1. Full choreography twice (2 cycles), each cycle serving **two** complete
+   R_W_F + R_W_P rounds (`PWeld2`, `PWeld3`), ending in R_E — Python side
+   prints both welds' requests in order.
+2. The numeric block above, exactly: 8.89 = 21×0.42333, 220.133 = 520×0.42333,
+   12.7 = 30×0.42333 (±0.005 for TPWrite rounding).
+3. The **clamp warning appears** for weld 1 — this is deliberate: the HMI's
+   default arc length (49.0) is out of Fronius range, so the clamp is
+   exercised on the very first weld, not hidden until the real cell.
+4. Weld 2's wirefeed/arc values are the `wdTG_Lib{2}` placeholders (zeros) —
+   proof the predefined branch reads the library, with only `weld_speed`
+   overridden (FANUC `$CMD_WSPEED` parity).
+5. All four arc segments execute as motion (autoinhib, §14); optional
+   visual check: weld 1 runs its 200 mm seams at ~8.9 mm/s (≈22 s), weld 2
+   at ~12.7 mm/s (≈16 s).
+6. Both welds run in the frame served by R_W_F (targets are in
+   `wobjTG_Weld`) — same mechanism TD05Test already demonstrated.
+
+Skip/abort branches (`weld_status` 0 / 2) are covered by the fake-robot
+tests; on the VC they behave as in phase 2 (skip: no R_W_P; abort: straight
+to R_E).
