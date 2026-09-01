@@ -12,14 +12,18 @@ VC procedure for T1–T5: [robotstudio_setup.md](robotstudio_setup.md) §16.
 **VC-validated 2026-08-31** (§16.7): no-edit regression, RWS transfer leg
 (PUT verified byte-identical on disk), **T1** (pendant ModPos works inside the
 `\Dynamic` module), **T3a** (`ERR_NOTSAVED` fired AND the unload was refused —
-the subsequent `Save` serialized the still-loaded module), and **T5** (full
+the subsequent `Save` serialized the still-loaded module; ⚠ with the cycle
+resumed in AUTO — manual-mode execution of the save is T6, untested), and **T5** (full
 round trip: staged file retrieved over live RWS, exactly one changed
 declaration matching the robot's actual stop point to 2e-6 interpolation
 spread, staged file deleted, `nTG_ProgEdited` cleared by `set_symbol` without
 explicit mastership, idempotent rerun), **T2** (answered: manual mode refuses
 RWS mastership/save — the pendant holds RAPID mastership locally; option B is
 auto-only, trigger A unaffected) and **T4** (two RWS saves byte-identical;
-saves write CRLF but are character-stable — §8). **Only optional T3b remains.**
+saves write CRLF but are character-stable — §8). **T6** (trigger A's save works with the cycle run/resumed in MANUAL — the
+operators' actual habit; staged value verified kinematically). **Only the
+optional, informational T3b remains — the workflow itself is fully validated
+in both operating modes.**
 Also learned: **F-4** (RobotStudio-editor Apply drops the `\Dynamic` module —
 see §8 T1 note).
 Opened because the
@@ -312,6 +316,23 @@ resident module changed, then the same unload. *Expect:* (a) `ERRNO = ERR_NOTSAV
 (b) ⚠ unknown — the manual defers PERS init-value updates to save time, so the changed flag
 may not be set. *Pass:* (a) trips. (b) is information, not a blocker — the `.tgs` carries no
 PERS by design (§6.1).
+
+**T6 — does trigger A's `Save` work when the cycle RUNS in manual?** (added
+2026-08-31 — T3a validated the save with the cycle resumed in *auto*.) Operators
+typically verify a touch-up in manual reduced speed first, so this path matters.
+Unlike T2, mastership is not in play: it gates remote clients, and a `Save` executed by
+the RAPID program is the controller itself; §1.229 lists no mode restriction, so PASS is
+expected. Two manual-specific hazards to watch: releasing the enabling device during the
+save is a program stop (§1.229: may cause a guard stop, `20025`), and "avoid ongoing
+robot movements during the saving" — satisfied here only because the sample ends on a
+`fine` point, which makes **"a generated .tgs must end on a fine point"** an exporter
+rule. Procedure: [robotstudio_setup.md](robotstudio_setup.md) §16.8.
+✔ *VC-validated 2026-08-31 in `MANR`: staging works identically in manual — the RAPID
+`Save` is not a mastership client, confirming why trigger A (and not option B) is the
+mechanism that preserves touch-ups. No guard stop; the sample's closing `fine` point had
+the robot stationary. Numeric proof the staged value is the jogged one: the reported
+capture pose moved by a pure base rotation, radius/z preserved to 5 µm and the azimuth
+delta matching the staged joint-1 delta to 1e-5°.*
 
 **T4 — ⚠ is the controller's module serialization byte-stable?**
 `Save` the same unmodified module twice to two paths; `cmp` them. *Expect:* identical.

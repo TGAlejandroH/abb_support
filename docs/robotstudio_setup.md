@@ -891,9 +891,62 @@ cannot clear the flag, it says so.)
 | RWS probe | ✔ RWS on `http://localhost:80`, RW 6.15.8029; live option list confirms **no 614-1** (and no 637-1) |
 | 16.6 item 4, RWS transfer leg | ✔ 2 clean cycles via `PUT /fileservice`; file on the VC disk byte-identical to the repo master, mtime postdates controller start |
 | 16.3 / T1 | ✔ pendant Modify Position enabled and accepted inside the `\Dynamic` module (first attempt via RobotStudio-editor Apply produced finding **F-4** instead — see the warning above) |
-| 16.3 / T3a | ✔ `TG: touch-up detected` + `TG: edited module saved for retrieval`; ERR_NOTSAVED **refused** the unload (module still loaded — the staging Save serialized it) |
+| 16.3 / T3a | ✔ `TG: touch-up detected` + `TG: edited module saved for retrieval`; ERR_NOTSAVED **refused** the unload (module still loaded — the staging Save serialized it). ⚠ Scope: the edit was made in manual but the cycle was **resumed in AUTO**, so the RAPID `Save` executed in auto. Manual-mode execution of the save is **T6**, untested |
 | 16.6 / T5 | ✔ retrieved over live RWS; diff = exactly the one ModPos'd declaration; staged joints = the mid-move stop point (interpolation fraction 0.576302 identical on all four moved axes, spread 2e-6); staged file deleted; `nTG_ProgEdited` → 0 (symbol write needed no explicit mastership); rerun → "nothing to retrieve" |
 | Serialization observation | `Save` re-serialized ONLY the modified declaration (`9E+9`, full precision); unmodified lines kept character-verbatim (`9E9`) — but line endings are normalized to CRLF on every save (both RAPID `Save` and RWS `action=save`; measured 162 CR on 162 lines). After one retrieve the master is a controller serialization and round-trips byte-exact |
 | 16.5 / T2 | ✔ ANSWERED (negative in manual, as designed for): with the FP in manual, `/rw/mastership/rapid` reports `mastership:"local"`, holder `FlexPendant`; the RWS request is refused ("held by someone else", 0xc004841a) and `action=save` fails on the same code — **option B cannot save in manual mode**; trigger A is unaffected (validated). RWS module list labels the loaded module `DynMod` — usable by the HMI to detect a still-loaded module |
 | 16.5 / T4 | ✔ two RWS saves in AUTO byte-identical (`cmp`); quirks: `name` gets `.mod` appended, target dir not auto-created (-530), no explicit mastership needed in auto, `$home`/`HOME:` both accepted |
 | 16.4 / T3b | ⏳ optional, pending |
+| 16.8 / T6 (trigger A in manual) | ✔ PASSED 2026-08-31 in **MANR**: full cycle run and resumed in manual after a ModPos of `jtCap2`; both staging lines appeared, staged file carries the edit, no `20025` guard stop, no save warning. Cross-check: the reported C2 capture pose moved by a **pure base rotation** — radius and z preserved to 5 µm, and the TCP azimuth delta (19.72511°) matches the staged joint-1 delta (19.72512°) to 1e-5°. This run also re-exercised the RWS transfer leg (module delivered by PUT) |
+
+## 16.8 T6: does the RAPID-side save work when the cycle RUNS in manual?
+
+Why this is a separate test: §16.3 made the edit in manual but resumed the
+cycle in **auto**, so `tgSaveEditedModule`'s `Save` executed in auto. The real
+operator habit is to verify a touch-up in manual reduced speed *before* going
+to auto — that path has never been exercised. It is a different question from
+T2: T2 failed because RWS **mastership** is held by the FlexPendant in manual,
+and mastership gates *remote clients*; a `Save` executed by the RAPID program
+is the controller itself and is not a mastership client. The `Save`
+Limitations (3HAC050917 §1.229) list no operating-mode restriction, so the
+expectation is PASS — but expectation is not validation.
+
+**Procedure** (Claude cannot drive this: manual-mode execution needs the
+enabling device held on the virtual FlexPendant).
+
+1. `python hmi_prototype/abb_server.py 127.0.0.1 2000 1 "<VC HOME dir>"`.
+2. Switch to **manual**, motors on, and run the whole cycle from the virtual
+   FlexPendant with the enabling device held (Play). Stop mid-.tgs, ModPos a
+   `jointtarget` as in §16.3, then **resume in manual** and let the cycle
+   run to its end — do NOT switch to auto.
+3. **Keep the enabling device held until the operator window is quiet.**
+   The save runs *after* `TG: program TD05Test finished`; releasing the
+   enabling device is a program stop, and 3HAC050917 §1.229 warns that "a
+   program stop during execution of the `Save` instruction can result in a
+   guard stop with motors off" (`20025 Stop order timeout`).
+
+**Expect:** the same two lines as §16.3 (`TG: touch-up detected` /
+`TG: edited module saved for retrieval`) and the staged file in
+`HOME:/TGS/edited/`.
+✔ **PASSED 2026-08-31** (opmode `MANR`): trigger A's `Save` works in manual
+exactly as in auto — mastership never enters the picture for a `Save`
+executed by the RAPID program itself, which is the whole reason trigger A was
+chosen over the HMI-driven option B (refused in manual, T2). No guard stop
+occurred: the `fine` point at the end of the .tgs had already brought the
+robot to a standstill before the save.
+**Pass:** staged file present and carrying the edit; no `TG WARN: could not
+save edited module`; no 20025.
+**If it fails:** the touch-up is *lost* on that cycle (the handler warns, then
+unloads). Fix would be to save before attempting the unload, or to defer the
+save to the next auto cycle — record the ERRNO from the warning line, it
+names which.
+
+**Related check while you are there — motion must be finished before the
+save.** The same Limitations say "avoid ongoing robot movements during the
+saving". Our sample ends with `MoveAbsJ jtHome,v100,fine,tTG_Weld` and a
+`fine` zone synchronizes the program with the motion, so the robot is
+stationary by the time the save runs. This is a property of the *program*,
+not of `TG_Main`: **a generated .tgs must end on a fine point** (or
+`TG_Main` must add a `WaitRob \ZeroSpeed` before the save). Manual reduced
+speed makes moves longer and is the most likely place to expose it — an
+exporter rule worth carrying into the Weld Planner.

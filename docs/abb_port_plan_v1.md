@@ -561,7 +561,9 @@ retrieve round trip over live RWS, one-declaration diff matching the actual
 stop point) all green; T2 answered (manual mode: the pendant holds RAPID
 mastership locally, RWS save refused — option B is auto-only, trigger A
 unaffected); T4 green (two RWS saves byte-identical; saves write CRLF but are
-otherwise character-stable). Only optional T3b remains. New finding **F-4**
+otherwise character-stable); T6 green (the RAPID-side save also works with the
+cycle run in MANUAL — the operators' actual habit). Only the optional,
+informational T3b remains. New finding **F-4**
 (RobotStudio-editor Apply drops a \Dynamic module via PP reset —
 [rapid_validation_findings_v1.md](rapid_validation_findings_v1.md)).*
 
