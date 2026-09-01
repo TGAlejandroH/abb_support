@@ -227,6 +227,11 @@ class AbbTgsHmi:
         self.last_password = None
         self.last_free_bytes = None
         self.request_log = []
+        # R_W_S: raw (mm, s, flag) of the last stats message, and the rows the
+        # real HMI would have written to the analytics DB this cycle - see
+        # handle_weld_stats_req.
+        self.last_weld_stats = None
+        self.weld_stats_entries = []
 
         self.handlers = {
             "1": self.handle_cam_frame_req,             # R_C_F
@@ -235,6 +240,7 @@ class AbbTgsHmi:
             "5": self.handle_pass_check_req,            # R_P_C
             "10": self.handle_file_transfer_req,        # R_F_T
             "11": self.handle_global_captures_done_req, # R_G_C_D
+            "13": self.handle_weld_stats_req,           # R_W_S
             "14": self.handle_weld_params_req,          # R_W_P
             "100": self.handle_end_req,                 # R_E
         }
@@ -383,6 +389,42 @@ class AbbTgsHmi:
         """FANUC R_G_C_D (id 11): global localization status out."""
         self.do_send(str(self.global_ok))
 
+    def handle_weld_stats_req(self):
+        """FANUC R_W_S (id 13): one CSV message in - no pose, no sub token.
+
+        Payload is "dist_mm,arc_on_s,succ_ae". Mirrors the real HMI
+        (FANUCRobot::ReceiveWeldingStats + RobotCell.cpp case
+        RequestWeldingStats): parse three reals, convert the distance to
+        inches, and record an analytics row ONLY when succ_ae == 1 - that
+        flag is what tells the HMI the arc actually ran, so a dry run (or a
+        weld that never ignited) is received and then deliberately dropped.
+
+        `weld_stats_entries` stands in for AnalyticsManager::InsertWeldEntry,
+        whose signature is (double length_in, double arc_on_sec) - inches and
+        seconds, hence the /25.4 here and not on the robot side.
+
+        The C++ parse is std::stringstream >> double, which tolerates the
+        blank padding FANUC's CNV_REAL_STR emits AND the leading "+" of the
+        RAPID tgFmtReal form; float() tolerates both the same way, so this
+        handler is valid against either robot brand.
+        """
+        payload = self.do_receive()
+        fields = payload.split(",")
+        if len(fields) != 3:
+            raise ValueError(
+                f"R_W_S needs 3 comma-separated reals, got {payload!r}")
+        dist_mm, arc_on_sec, succ_ae = (float(f) for f in fields)
+        self.last_weld_stats = (dist_mm, arc_on_sec, succ_ae)
+        length_in = dist_mm / 25.4
+        if succ_ae == 1.0:
+            self.weld_stats_entries.append((length_in, arc_on_sec))
+            recorded = "recorded"
+        else:
+            recorded = "NOT recorded (succ_ae != 1)"
+        self._log(f"  weld stats: {dist_mm:.3f} mm ({length_in:.3f} in), "
+                  f"arc on {arc_on_sec:.3f} s, succ_ae={succ_ae:g} -> "
+                  f"{recorded}")
+
     def handle_weld_params_req(self):
         """FANUC R_W_P (id 14): UDWP flag + travel speed, then (if the flag
         is set) welder type, procedure and the schedule values - all in the
@@ -419,6 +461,9 @@ class AbbTgsHmi:
         self.connect()
         self.request_log = []
         self._weld_param_calls = 0
+        # One analytics "session" per cycle, like the real HMI (it opens a
+        # weld session per run and inserts a row per successful weld).
+        self.weld_stats_entries = []
         try:
             self.serve_program_selection()
             while True:
@@ -466,12 +511,23 @@ def main(argv):
         # both branches of TG_ApplyWeldParams.
         hmi.prog_name = "TD05Weld"
         hmi.weld_param_sequence = WELD_DEMO_SEQUENCE
+    elif mode == "dry-run":
+        # Welding inhibited. The robot still serves every request, R_W_S
+        # included, but reports succ_ae = 0 (nTG_SuccArcEnd := 1-nTG_DryRun),
+        # so no weld may be recorded - see handle_weld_stats_req.
+        hmi.dry_run = 1
     elif mode is not None:
         raise SystemExit(f"unknown mode {mode!r} (use corrupt-cam, "
-                         "corrupt-weld or weld-demo)")
+                         "corrupt-weld, weld-demo or dry-run)")
     for i in range(cycles):
         print(f"--- cycle {i + 1}/{cycles} ---", flush=True)
         hmi.serve_cycle()
+        # The weld rows the real HMI would have written to its analytics DB
+        # this cycle (R_W_S with succ_ae = 1). Printed per cycle because the
+        # list is reset per cycle, like the HMI's per-run weld session.
+        print(f"    weld rows recorded: "
+              f"{[(round(l, 3), round(t, 3)) for l, t in hmi.weld_stats_entries]}",
+              flush=True)
     print("all cycles complete", flush=True)
 
 

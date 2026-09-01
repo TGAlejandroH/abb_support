@@ -62,6 +62,23 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ArcControl:=0;            ! R[174] arc control
     PERS num nTG_TravelSpeed:=0;           ! R[175] travel speed
 
+    ! Phase 6: R_W_S weld statistics. No FANUC register equivalent - KAREL
+    ! read the ArcTool record $AWEWELDSTAT[1] directly (R_W_S.kl). An IRC5
+    ! has no drop-in equivalent of that record, so the .tgs program writes
+    ! these three PERS just before calling TG_ReqWeldStats.
+    ! TODO: DUMMY VALUES - the .tgs programs currently write fixed numbers to
+    ! mimic the sensing. Producing REAL values is its own task; the candidate
+    ! sources are listed in docs/abb_weld_stats_port_v1.md section 6. Only the
+    ! source of the numbers changes then - the wire below is final.
+    ! Units are fixed by the HMI, not by us: distance in mm (it divides by
+    ! 25.4 for its analytics, which take inches) and time in seconds.
+    PERS num nTG_WeldDist:=0;              ! $WELD_DIST   welded distance, mm
+    PERS num nTG_ArcOnTime:=0;             ! $ARC_ON_TIME arc-on time, s
+    ! 1 = the arc really ran. The HMI tests this for equality with 1, so it is
+    ! a FLAG here, never a count - see the doc's 1.4 for why that distinction
+    ! is not merely theoretical on the FANUC side.
+    PERS num nTG_SuccArcEnd:=0;            ! $SUCC_AE
+
     ! Phase 5 (touch-up/retrieval doc section 4): 1 = an operator-edited
     ! .tgs module was detected at unload and staged in HOME:/TGS/edited/
     ! for the HMI's "Retrieve robot program from controller". No FANUC
@@ -581,6 +598,37 @@ MODULE TG_Comms(SYSMODULE)
             nTG_ArcControl:=0;
         ENDIF
         TPWrite "TG: weld params, UDWP = "\Num:=nTG_UdwpFlag;
+    ENDPROC
+
+    PROC TG_ReqWeldStats()
+        ! FANUC: R_W_S (HMI request id 13) - welding stats, called once per
+        ! weld right after WELD END (sample TD05tRJYQd.ls lines 223 / 392).
+        ! Sequence: id -> "dist,arc_on_time,succ_ae" as ONE message. No pose,
+        ! no sub token - the simplest request in the family.
+        !
+        ! The three values are read from the PERS above (set by the .tgs
+        ! program just before the call), mirroring KAREL's three GET_VARs of
+        ! $AWEWELDSTAT[1].
+        !
+        ! Number format: tgFmtReal ("+0200.000") - the signed zero-padded
+        ! field every other scalar on this wire already uses. KAREL used
+        ! CNV_REAL_STR(v,8,3), which blank-pads to a MINIMUM width with at
+        ! least one leading blank (" 200.000") and emits no "+". Deliberate
+        ! deviation, safe in both consumers: the HMI parses this CSV with
+        ! std::stringstream >> double (FANUCRobot::ReceiveWeldingStats),
+        ! which skips leading whitespace and accepts a leading "+", and so
+        ! does Python float(). Keeping one real format across the port is
+        ! worth more than byte parity on a field nobody compares bytewise.
+        !
+        ! What the HMI does with it (RobotCell.cpp case RequestWeldingStats):
+        ! converts dist mm -> inches (/25.4) and, ONLY IF succ_ae equals 1,
+        ! inserts a weld-analytics row (length_in, arc_on_sec). succ_ae = 0
+        ! is received and discarded - that is the dry-run / no-arc path.
+        VAR string stats;
+        stats:=tgFmtReal(nTG_WeldDist)+","+tgFmtReal(nTG_ArcOnTime)+","+tgFmtReal(nTG_SuccArcEnd);
+        tgSendAck "13";
+        tgSendAck stats;
+        TPWrite "TG: weld stats "+stats;
     ENDPROC
 
 ENDMODULE

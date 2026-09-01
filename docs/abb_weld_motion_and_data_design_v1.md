@@ -615,9 +615,20 @@ remains:
 
 ## 6. Known gaps carried forward (deliberate)
 
-- **R_W_S (id 13, weld stats)**: called after every FANUC weld; its KAREL source
+- ~~**R_W_S (id 13, weld stats)**: called after every FANUC weld; its KAREL source
   is **not in `resources/FANUC/KAREL/`** (verified) and it stays out of scope.
-  The §3.3 block leaves a marked slot.
+  The §3.3 block leaves a marked slot.~~
+  **CLOSED 2026-08-31**: `R_W_S.kl` was added to `resources/FANUC/KAREL/` and the
+  request is ported — `TG_ReqWeldStats`, called from both welds of
+  `TD05Weld.mod` right after `ArcLEnd`, where the marked slot used to be. What
+  remains is narrower than the original gap: the three numbers are **dummy
+  values**, because FANUC read them from the ArcTool record `$AWEWELDSTAT[1]`
+  and RobotWare has no drop-in equivalent. Candidate real sources (RAPID
+  `Distance()` over the seam targets, a clock around the Arc instructions, the
+  `AW_*` error path for a failed arc end) are in
+  [abb_weld_stats_port_v1.md](abb_weld_stats_port_v1.md) §6 — note the caveat
+  that a VC weld is simulated, so arc-failure behaviour cannot be trusted from
+  the VC alone.
 - **Arc Control**: FANUC never applied it (hidden in the HMI GUI, always 0.0,
   SET_VAR commented out). On ABB it now has an obvious home
   (`main_arc.control` → `aoFr1Dynamic`), so applying it is a cheap improvement —

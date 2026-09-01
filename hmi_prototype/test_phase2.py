@@ -18,9 +18,15 @@ import abb_server
 from abb_server import (
     ACK,
     AbbTgsHmi,
+    fmt_real,
     pose_literal_to_xyzwpr,
     xyzwpr_to_pose_literal,
 )
+
+# The dummy weld statistics TD05Test.mod writes before calling R_W_S
+# (nTG_WeldDist / nTG_ArcOnTime). succ_ae is derived from the dry-run flag,
+# so it is computed per cycle instead of being listed here.
+TD05TEST_WELD_STATS = (123.456, 7.89)
 
 ROBOT_POSE_XYZWPR = [1500.0, -200.0, 1400.0, 10.0, -20.0, 30.0]
 
@@ -153,6 +159,15 @@ class FakeTgsRobot(threading.Thread):
                 self.received["wirefeed_raw"] = self._prompt(conn, "Give me wire feed speed")
                 self.received["arclen_raw"] = self._prompt(conn, "Give me arc length")
                 self.received["arcctl_raw"] = self._prompt(conn, "Give me arc control")
+            # TG_ReqWeldStats (R_W_S) - FANUC calls it right after WELD END,
+            # so it is the last request of the weld branch. One message, no
+            # pose, no sub token. succ_ae mirrors the module's
+            # nTG_SuccArcEnd := 1 - nTG_DryRun.
+            dry_run = int(self.received["pass_status"][1])
+            self._send_ack(conn, "13")
+            self.received["weld_stats_raw"] = ",".join(
+                fmt_real(v) for v in TD05TEST_WELD_STATS + (1 - dry_run,))
+            self._send_ack(conn, self.received["weld_stats_raw"])
         self._end_req(conn)
 
     def _end_req(self, conn):                                # TG_ReqEnd
@@ -187,7 +202,7 @@ class TestFullCycle(unittest.TestCase):
     def test_request_order_matches_tgs_program(self):
         self.assertEqual(
             self.hmi.request_log,
-            ["10", "5", "1", "2", "1", "2", "11", "4", "14", "100"])
+            ["10", "5", "1", "2", "1", "2", "11", "4", "14", "13", "100"])
 
     def test_all_acks_fanuc_compatible(self):
         self.assertEqual(self.robot.acks, [ACK] * len(self.robot.acks))
@@ -252,7 +267,7 @@ class TestBranchScenarios(unittest.TestCase):
     def test_captures_skipped_when_flag_zero(self):
         robot, hmi = run_one_cycle({"do_capture": 0})
         self.assertEqual(hmi.request_log,
-                         ["10", "5", "1", "1", "11", "4", "14", "100"])
+                         ["10", "5", "1", "1", "11", "4", "14", "13", "100"])
 
     def test_weld_abort_skips_params(self):
         robot, hmi = run_one_cycle({"weld_status": 2})
@@ -283,7 +298,7 @@ class TestBranchScenarios(unittest.TestCase):
     def test_predefined_schedule_sends_only_flag_and_speed(self):
         robot, hmi = run_one_cycle({"udwp_flag": 0})
         self.assertEqual(hmi.request_log,
-                         ["10", "5", "1", "2", "1", "2", "11", "4", "14", "100"])
+                         ["10", "5", "1", "2", "1", "2", "11", "4", "14", "13", "100"])
         self.assertEqual(robot.received["udwp"], "0")
         self.assertEqual(robot.received["travel_raw"], "+0017.500")
         self.assertNotIn("proc_raw", robot.received)

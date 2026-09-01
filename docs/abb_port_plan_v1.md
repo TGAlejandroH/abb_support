@@ -567,6 +567,46 @@ informational T3b remains. New finding **F-4**
 (RobotStudio-editor Apply drops a \Dynamic module via PP reset —
 [rapid_validation_findings_v1.md](rapid_validation_findings_v1.md)).*
 
+**Phase 6 — `R_W_S` (id 13, welding stats).** The last request of the weld
+path, unblocked when its KAREL source (`resources/FANUC/KAREL/R_W_S.kl`) was
+added to the repo on 2026-08-31. Design & rationale:
+[abb_weld_stats_port_v1.md](abb_weld_stats_port_v1.md).
+*Status 2026-08-31: implemented — `TG_ReqWeldStats` in `TG_Comms.sys` (id,
+then ONE csv message `dist,arc_on_time,succ_ae`; no pose, no sub token — the
+simplest request in the family) plus three new PERS `nTG_WeldDist` /
+`nTG_ArcOnTime` / `nTG_SuccArcEnd`. Called once per weld right after the weld
+instruction in both sample programs (`TD05Test.mod`, `TD05Weld.mod` ×2),
+which write **dummy values** into the PERS first — an IRC5 has no equivalent
+of the FANUC ArcTool `$AWEWELDSTAT[1]` record the KAREL read, and producing
+real numbers is a separate task (that doc's §6). `succ_ae` is derived as
+`1-nTG_DryRun`, so a dry run correctly reports "no arc". Python: handler
+`"13"` mirroring `FANUCRobot::ReceiveWeldingStats` plus the `RobotCell.cpp`
+analytics gate — a row is recorded ONLY when `succ_ae == 1`, and the distance
+is converted mm→inches HMI-side because `AnalyticsManager::InsertWeldEntry`
+takes inches. 19 new tests (84 total green), including that the handler
+accepts BOTH producers' number formats — RAPID `tgFmtReal` (`+0123.456`) and
+FANUC `CNV_REAL_STR(v,8,3)` (`" 123.456"`, blank-padded, no sign) — because
+`std::stringstream >> double` does. **VC-VALIDATED 2026-08-31**
+([robotstudio_setup.md](robotstudio_setup.md) §17): all three checks green over
+2 cycles each — byte-exact payloads, the `14, 13, 100` order, two distinct
+per-weld servings in the Arc program, the dry-run gate recording nothing, and
+the §15.4 weld criteria still met (so the insertion did not disturb phase 4).
+Validated over the **RWS** transport, which made the run a phase-5 regression
+too.
+**Research done in the same pass** (that doc's §1.4 and §6, sourced): FANUC's
+`$AWEWELDSTAT` is confirmed **per-weld** (`$AWEPRODSTAT` is the cumulative
+twin) and `$WELD_DIST` confirmed **mm**, so the port reproduces the right
+quantity; `$SUCC_AE` is documented **nowhere** and needs a 10-minute check on
+FANUC hardware — if it is a per-weld count rather than a flag, the HMI's
+`== 1.0` gate silently drops any weld that re-ignited, on FANUC too. On the
+ABB side the equivalents are not missing but **optioned**: [659-1] Production
+Monitoring's `SeamResults` table already carries `SeamLen` / `Duration` /
+`Completed`, computed inside RAPID — though its documented read path needs
+discontinued WebWare, so it serves as the spec to match rather than something
+to buy. ⚠ Two earlier assumptions corrected there: **[637-1] Production Screen
+holds no statistics** (it is a launcher, already bundled in [633-4]), and
+`ArcRefresh` is a tuning write-path.*
+
 ---
 
 ## 6. Assumptions & recommended defaults (speak up if wrong)
@@ -585,6 +625,10 @@ informational T3b remains. New finding **F-4**
 4. `R_W_P` welding-schedule side effects (`SET_VAR AWE1WP*`) reduced to storing
    PERS values; RobotWare Arc mapping deferred (cell may not have the Arc option).
 5. Touch-sense family, `R_W_S`, `R_C_C*`, `T_T_R_F` are out of v1 (per priority list).
+   **Amended 2026-08-31 (Phase 6):** `R_W_S` is now ported — its KAREL source
+   was added to the repo, which removed the blocker. The request is complete on
+   the wire; the three statistics it carries are dummy values until the sensing
+   task lands ([abb_weld_stats_port_v1.md](abb_weld_stats_port_v1.md)).
 6. `TGMAINKL`'s dead code (`status = 0` overwriting the `R_F_T` call status) is
    ported by intent, not literally.
 7. Free-memory value in `R_F_T`: v1 sends a dummy constant (⚠ `FSSize` to verify);

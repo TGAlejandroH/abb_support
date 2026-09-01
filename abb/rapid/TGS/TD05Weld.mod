@@ -26,7 +26,7 @@ MODULE TD05Weld_Mod
     !     WELD START[...]                   -+
     !     L P[n] R[175]inch/min FINE         +-> TG_ApplyWeldParams + ArcLStart/ArcLEnd
     !     WELD END[...]                     -+
-    !     (CALL R_W_S - weld stats, not ported, id 13 out of scope)
+    !     CALL R_W_S                        -> TG_ReqWeldStats (dummy values)
     !     L depart                          -> MoveL
     !   ENDIF
     !***********************************************************************
@@ -104,7 +104,16 @@ MODULE TD05Weld_Mod
             ArcLStart rtW2Start,v200,sdTG_Weld,wdTG_Weld,z10,tTG_Weld\WObj:=wobjTG_Weld;
             ArcLEnd rtW2End,v200,sdTG_Weld,wdTG_Weld,fine,tTG_Weld\WObj:=wobjTG_Weld;
 
-            ! FANUC calls R_W_S (weld stats, id 13) here - not ported.
+            ! R_W_S, exactly where FANUC calls it: after WELD END, before
+            ! the depart move. DUMMY stats (see TG_Comms.sys) chosen to be
+            ! consistent with what this weld actually just did, so a VC
+            ! transcript stays sane to read: the seam is 200 mm (rtW2Start
+            ! -> rtW2End) and this, the run's FIRST weld, is served 21 IPM
+            ! = 8.89 mm/s, so 200 / 8.89 = 22.5 s of arc-on time.
+            nTG_WeldDist:=200;
+            nTG_ArcOnTime:=22.5;
+            nTG_SuccArcEnd:=1-nTG_DryRun;
+            TG_ReqWeldStats;
             MoveL rtW2Depart,v200,fine,tTG_Weld\WObj:=wobjTG_Weld;
         ENDIF
 
@@ -123,6 +132,14 @@ MODULE TD05Weld_Mod
             ArcLStart rtW3Start,v200,sdTG_Weld,wdTG_Weld,z10,tTG_Weld\WObj:=wobjTG_Weld;
             ArcLEnd rtW3End,v200,sdTG_Weld,wdTG_Weld,fine,tTG_Weld\WObj:=wobjTG_Weld;
 
+            ! Same seam length, but the run's SECOND weld is served 30 IPM
+            ! = 12.7 mm/s, so 200 / 12.7 = 15.75 s. DIFFERENT numbers from
+            ! the weld above on purpose: the transcript then proves the HMI
+            ! got two independent servings rather than one repeated payload.
+            nTG_WeldDist:=200;
+            nTG_ArcOnTime:=15.75;
+            nTG_SuccArcEnd:=1-nTG_DryRun;
+            TG_ReqWeldStats;
             MoveL rtW3Depart,v200,fine,tTG_Weld\WObj:=wobjTG_Weld;
         ENDIF
 

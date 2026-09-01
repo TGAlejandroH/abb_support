@@ -950,3 +950,124 @@ not of `TG_Main`: **a generated .tgs must end on a fine point** (or
 `TG_Main` must add a `WaitRob \ZeroSpeed` before the save). Manual reduced
 speed makes moves longer and is the most likely place to expose it — an
 exporter rule worth carrying into the Weld Planner.
+
+## 17. Phase 6: R_W_S weld statistics (id 13)
+
+What is being checked: the new `TG_ReqWeldStats` serves the request in the
+right place (once per weld, right after the weld instruction), the csv payload
+arrives byte-exact, and the HMI's analytics gate behaves — a row is recorded
+only when `succ_ae` is 1.
+
+Reminder on what the numbers are: **dummy values** written by the .tgs program
+(see [abb_weld_stats_port_v1.md](abb_weld_stats_port_v1.md)). This section
+validates the *request*, not the statistics.
+
+### 17.1 Check A — non-Arc VC, `TD05Test` (comms regression)
+
+Nothing new to set up; the module already in `HOME:/TGS/` is rebuilt from the
+repo on every transfer.
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 <VC-HOME>
+```
+
+**Expected**, in each of the two cycles, between request 14 and request 100:
+
+```
+  robot -> '13'
+serving request 13
+  robot -> '+0123.456,+0007.890,+0001.000'
+  weld stats: 123.456 mm (4.860 in), arc on 7.890 s, succ_ae=1 -> recorded
+```
+
+FlexPendant: `TG: weld stats +0123.456,+0007.890,+0001.000`
+
+**Pass criteria**
+1. The payload is **byte-identical** to the string above — 29 characters, three
+   signed 9-char fields. A different width means `tgFmtReal` disagrees with the
+   Python `fmt_real`, which would eventually break the C++ parse too.
+2. Request 13 appears **exactly once per cycle**, and the tail of the request
+   log is `… 14, 13, 100` (FANUC order: parameters, weld, stats, end).
+3. `4.860 in` = 123.456/25.4 — proves the mm→inch conversion happens HMI-side.
+   The per-cycle tally at the end of the cycle reads
+   `weld rows recorded: [(4.86, 7.89)]`.
+4. Both cycles identical (the PERS survive a cycle; a drift would show here).
+
+✔ **PASSED 2026-08-31**, 2/2 cycles. Payload byte-identical on both cycles
+(`+0123.456,+0007.890,+0001.000`, 29 chars, three 9-char fields); request log
+tail `14, 13, 100` with exactly one id-13 serving per cycle; FlexPendant
+`TG: weld stats +0123.456,+0007.890,+0001.000`; tally
+`weld rows recorded: [(4.86, 7.89)]` (4.860 = 123.456/25.4, so the mm→inch
+conversion is on the HMI side as intended).
+**Run with the RWS transport** (`http://localhost:80`) rather than a VC HOME
+path — either delivery mechanism works here, since R_W_S is downstream of the
+transfer. The RWS leg served `TD05Weld.mod`/`TD05Test.mod` cleanly in the same
+runs, so this doubles as a phase-5 regression.
+
+### 17.2 Check B — dry run (the analytics gate)
+
+Serve a dry run so the module reports "no arc"
+(`nTG_SuccArcEnd := 1-nTG_DryRun`):
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 <VC-HOME> dry-run
+```
+
+**Expected:**
+
+```
+  robot -> '+0123.456,+0007.890,+0000.000'
+  weld stats: ... succ_ae=0 -> NOT recorded (succ_ae != 1)
+```
+
+**Pass:** the request is still served (FANUC calls `R_W_S` unconditionally
+inside the weld branch) but the per-cycle tally printed at the end of the
+cycle reads `weld rows recorded: []`. This is the behaviour that keeps dry
+runs out of the operator's weld analytics.
+
+✔ **PASSED 2026-08-31**, 2/2 cycles. `TG: dry run = 1` on the pendant, payload
+`+0123.456,+0007.890,+0000.000`, `NOT recorded (succ_ae != 1)`, tally
+`weld rows recorded: []` — and the distance/time fields are unchanged from
+check A, so only the flag moved. This is the check that actually proves
+`nTG_SuccArcEnd := 1-nTG_DryRun` evaluates on the controller: the third field
+went to zero without any other field or any request order changing.
+
+### 17.3 Check C — Arc VC, `weld-demo` (two welds, two servings)
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 <VC-HOME> weld-demo
+```
+
+**Expected:** request 13 served **twice** per cycle, in weld order, with
+different payloads:
+
+```
+weld 2 (first):   '+0200.000,+0022.500,+0001.000'
+weld 3 (second):  '+0200.000,+0015.750,+0001.000'
+```
+
+**Pass criteria**
+1. Two servings, in that order, with those exact payloads. Identical payloads
+   would mean one serving was echoed rather than two independent ones.
+2. The arc-on times match the speeds each weld was actually served:
+   200 mm / 8.89 mm/s = 22.5 s and 200 mm / 12.7 mm/s = 15.75 s. If §15's weld
+   speeds are re-tuned, these dummies must be re-tuned with them or the
+   transcript stops being self-consistent.
+3. **The §15.4 weld criteria still hold** (8.89 / 220.133 / clamp on weld 1;
+   12.7 + library zeros on weld 2) — that is the regression half of this check:
+   inserting `R_W_S` must not disturb the phase-4 choreography.
+4. An aborted weld (`hmi.weld_status = 2`) serves **no** request 13 — the stats
+   call lives inside the weld branch. (Covered by the automated tests; not part
+   of the VC run below, which exercises the welding path.)
+
+✔ **PASSED 2026-08-31**, 2/2 cycles. Two servings per cycle in weld order,
+`+0200.000,+0022.500,+0001.000` (PWeld2) then
+`+0200.000,+0015.750,+0001.000` (PWeld3) — distinct, so two independent
+servings rather than one echoed payload; tally
+`weld rows recorded: [(7.874, 22.5), (7.874, 15.75)]` (7.874 = 200/25.4).
+The arc-on times match the speeds actually served in the same transcript:
+200/8.89 = 22.50 s and 200/12.7 = 15.75 s.
+**§15.4 regression intact**: weld 1 logged `arc length clamped high, was 49`
+with `weld_speed 8.89 / wirefeed 220.133 / arc length 10 / arc control 0`;
+weld 2 `UDWP=0` with `weld_speed 12.7` and library zeros. Inserting R_W_S did
+not disturb the phase-4 choreography.

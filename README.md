@@ -56,7 +56,13 @@ end-to-end against a RobotStudio virtual controller (2026-08-28).
 
 ## Out of scope for v1 (Phase 4 backlog)
 
-Real FTP to a physical IRC5 (FTP option), `R_W_S`, touch-sense and
-camera-calibration request families, RobotWare Arc welddata mapping, and the
-C++ `ABBRobot : Robot` class in TGuideWeldingHMI. (`WaitRob \InPos` before
-pose reports was promoted out of the backlog and is in `tgSendPose`.)
+Real FTP to a physical IRC5 (FTP option), touch-sense and camera-calibration
+request families, RobotWare Arc welddata mapping, and the C++
+`ABBRobot : Robot` class in TGuideWeldingHMI. (`WaitRob \InPos` before pose
+reports was promoted out of the backlog and is in `tgSendPose`.)
+
+`R_W_S` (id 13, welding stats) is **ported as of Phase 6**, but the three
+numbers it reports are still **dummy values** written by the .tgs program:
+an IRC5 has no drop-in equivalent of the FANUC ArcTool `$AWEWELDSTAT[1]`
+record the KAREL read. The wire is final; only the source of the numbers is
+outstanding — see [docs/abb_weld_stats_port_v1.md](docs/abb_weld_stats_port_v1.md).

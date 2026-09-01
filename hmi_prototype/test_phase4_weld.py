@@ -25,10 +25,17 @@ from abb_server import (
     WELD_DEMO_EXPECTED_MM_S,
     WELD_DEMO_SEQUENCE,
     AbbTgsHmi,
+    fmt_real,
     xyzwpr_to_pose_literal,
 )
 
 ROBOT_POSE_XYZWPR = [1500.0, -200.0, 1400.0, 10.0, -20.0, 30.0]
+
+# The dummy (dist_mm, arc_on_s) TD05Weld.mod reports per weld via R_W_S.
+# Both seams are 200 mm; the times are that length divided by the weld speed
+# each weld was served (21 IPM = 8.89 mm/s, then 30 IPM = 12.7 mm/s), so the
+# two payloads differ and a repeated payload cannot pass as two servings.
+TD05WELD_WELD_STATS = ((200.0, 22.5), (200.0, 15.75))
 
 
 class FakeWeldRobot(threading.Thread):
@@ -37,7 +44,9 @@ class FakeWeldRobot(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
         self.weld_params = []      # one dict per R_W_P round, as received
+        self.weld_stats_sent = []  # one payload per R_W_S round, as sent
         self.sub_names = []
+        self.pass_status = ""
         self.errors = []
         self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listener.bind(("127.0.0.1", 0))
@@ -80,6 +89,16 @@ class FakeWeldRobot(threading.Thread):
         self.weld_params.append(got)
         return got
 
+    def _req_weld_stats(self, conn, dist_mm, arc_on_sec):    # TG_ReqWeldStats
+        # R_W_S: id, then ONE csv message. succ_ae mirrors the module's
+        # nTG_SuccArcEnd := 1 - nTG_DryRun (dry run -> no arc -> the HMI
+        # must not record the weld).
+        succ_ae = 1 - int(self.pass_status[1])
+        payload = ",".join(fmt_real(v) for v in (dist_mm, arc_on_sec, succ_ae))
+        self._send_ack(conn, "13")
+        self._send_ack(conn, payload)
+        self.weld_stats_sent.append(payload)
+
     def run(self):
         try:
             conn, _ = self.listener.accept()
@@ -96,7 +115,7 @@ class FakeWeldRobot(threading.Thread):
                 self._send_pose(conn)
                 self._send_ack(conn, "none")
                 self._send_ack(conn, "TD05Weld")
-                self._prompt(conn, "Give me the status")
+                self.pass_status = self._prompt(conn, "Give me the status")
 
                 # global captures done (TD05Weld skips the capture set)
                 self._send_ack(conn, "11")
@@ -109,6 +128,7 @@ class FakeWeldRobot(threading.Thread):
                         break                       # abort to LBL[101]
                     if status == 1:
                         self._req_weld_params(conn)  # then apply + ArcL*
+                        self._req_weld_stats(conn, *TD05WELD_WELD_STATS[i])
 
                 # end request
                 self._send_ack(conn, "100")

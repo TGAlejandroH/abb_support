@@ -139,7 +139,18 @@ MODULE TD05Test_Mod
             ! ArcLEnd with welddata built from nTG_WeldProc/nTG_WireFeed/
             ! nTG_ArcLength/nTG_ArcControl, travel speed nTG_TravelSpeed
             ! (FANUC: L P[124] R[175]inch/min + WELD START/END[R[171],20]).
-            ! FANUC calls R_W_S (welding stats) after WELD END - out of v1.
+            ! This program has no Arc option, so no weld actually runs here.
+
+            ! R_W_S (FANUC: CALL R_W_S right after WELD END). DUMMY stats -
+            ! this module cannot weld, so there is nothing real to measure;
+            ! the fixed values below make the request assertable in a
+            ! transcript. succ_ae follows the dry-run flag exactly as a real
+            ! weld would: welding inhibited -> no arc -> the HMI must NOT
+            ! record an analytics row.
+            nTG_WeldDist:=123.456;
+            nTG_ArcOnTime:=7.89;
+            nTG_SuccArcEnd:=1-nTG_DryRun;
+            TG_ReqWeldStats;           ! R_W_S -> "dist,arc_on,succ_ae"
         ENDIF
 
         ! --- return home (FANUC lines 397-411) ---
