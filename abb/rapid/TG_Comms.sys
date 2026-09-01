@@ -62,6 +62,15 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ArcControl:=0;            ! R[174] arc control
     PERS num nTG_TravelSpeed:=0;           ! R[175] travel speed
 
+    ! Phase 5 (touch-up/retrieval doc section 4): 1 = an operator-edited
+    ! .tgs module was detected at unload and staged in HOME:/TGS/edited/
+    ! for the HMI's "Retrieve robot program from controller". No FANUC
+    ! register equivalent (FANUC needs none: its MD: memory device serves
+    ! the touched-up program directly). Set by tgSaveEditedModule
+    ! (TG_Main); cleared by the HMI/tg_retrieve.py after a successful
+    ! retrieval (RWS symbol write) - the robot never clears it.
+    PERS num nTG_ProgEdited:=0;
+
     ! Frames received from the HMI (FANUC PR[5]/UFRAME[5], PR[6]/UFRAME[6]).
     ! Request PROCs write .uframe; the .tgs program references these wobjs in
     ! its move instructions - no separate "activate" step exists or is needed.

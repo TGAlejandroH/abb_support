@@ -20,14 +20,20 @@ Phase 2 scope: program selection + all priority requests
 Dummy, configurable answers everywhere; no real HMI/camera logic.
 
 Usage:
-    python abb_server.py [host] [port] [cycles] [vc_home_dir]
+    python abb_server.py [host] [port] [cycles] [transfer]
     defaults: 127.0.0.1 2000 2 (no module transfer)
 
-    vc_home_dir: path to the virtual controller's HOME folder (e.g.
-    "<solution>\\Virtual Controllers\\Controller1\\HOME"). When given, the
-    file-transfer request (10) copies abb/rapid/TGS/<prog_name>.mod into
-    <vc_home_dir>/TGS/ - the prototype's stand-in for the FTP upload the
-    real HMI will do (FTP option, plan section 7.3).
+    transfer: how request 10 delivers abb/rapid/TGS/<prog_name>.mod to the
+    controller. Two mechanisms (Phase 5 decision - BOTH are kept, the copy
+    fallback must not be removed):
+      * a directory path = the virtual controller's HOME folder (e.g.
+        "<solution>\\Virtual Controllers\\Controller1\\HOME"): direct file
+        copy into <dir>/TGS/ - the original prototype mechanism.
+      * an http(s) URL = the controller's RWS base (e.g.
+        "http://127.0.0.1:80"): upload via Robot Web Services
+        PUT /fileservice/$home/TGS/<prog_name>.mod - what the real HMI
+        will do (docs/abb_program_touchup_and_retrieval_v1.md section 4).
+    Retrieval of operator-edited programs is the separate tg_retrieve.py.
 """
 
 import math
@@ -36,6 +42,8 @@ import shutil
 import socket
 import sys
 import time
+
+from rws_client import RwsClient, RwsError
 
 ACK = b"0"
 RECV_MAX = 1024  # same buffer size the C++ HMI uses
@@ -161,17 +169,21 @@ class AbbTgsHmi:
     """Application-level request server / transport-level TCP client."""
 
     def __init__(self, host="127.0.0.1", port=2000, program_selection=1,
-                 verbose=True, vc_home_dir=None):
+                 verbose=True, vc_home_dir=None, rws=None):
         self.host = host
         self.port = port
         self.program_selection = program_selection
         self.verbose = verbose
         self.sock = None
 
-        # Module transfer (the FTP stand-in): where the controller's HOME:
-        # lives on disk (virtual controller only), and where the .tgs module
-        # sources are in this repo.
+        # Module transfer: where the .tgs module sources are in this repo,
+        # and one of two delivery mechanisms (Phase 5: both kept).
+        #   vc_home_dir - the controller's HOME: on disk (VC only): copy.
+        #   rws         - an RwsClient (or base-URL string): RWS upload.
         self.vc_home_dir = vc_home_dir
+        if isinstance(rws, str):
+            rws = RwsClient(rws)
+        self.rws = rws
         self.tgs_source_dir = os.path.normpath(os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "..", "abb", "rapid", "TGS"))
@@ -336,10 +348,10 @@ class AbbTgsHmi:
         """
         self.last_free_bytes = int(self.do_receive())
         status = self.ftp_status
-        if status == 1 and self.vc_home_dir:
+        if status == 1 and (self.vc_home_dir or self.rws):
             try:
                 self._transfer_tgs_module()
-            except OSError as exc:
+            except (OSError, RwsError) as exc:
                 self._log(f"ERROR: module transfer failed: {exc}")
                 status = 0
         self.do_send(str(status))
@@ -347,8 +359,20 @@ class AbbTgsHmi:
                                       # (== program name); <= 10 chars
 
     def _transfer_tgs_module(self):
-        """FTP stand-in: copy abb/rapid/TGS/<prog>.mod into <HOME>/TGS/."""
+        """Deliver abb/rapid/TGS/<prog>.mod to the controller's HOME:/TGS/.
+
+        Two mechanisms, per the Phase 5 decision (touch-up doc section 9):
+        RWS upload when an RwsClient is configured, else the original
+        direct-copy fallback into the VC's HOME folder - kept on purpose.
+        """
         src = os.path.join(self.tgs_source_dir, f"{self.prog_name}.mod")
+        if self.rws is not None:
+            with open(src, "rb") as f:
+                data = f.read()
+            dst = f"$home/TGS/{self.prog_name}.mod"
+            self.rws.put_file(dst, data)
+            self._log(f"  transferred {src} -> RWS {dst}")
+            return
         dst_dir = os.path.join(self.vc_home_dir, "TGS")
         os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, f"{self.prog_name}.mod")
@@ -421,9 +445,17 @@ def main(argv):
     host = argv[1] if len(argv) > 1 else "127.0.0.1"
     port = int(argv[2]) if len(argv) > 2 else 2000
     cycles = int(argv[3]) if len(argv) > 3 else 2
-    vc_home_dir = argv[4] if len(argv) > 4 else None
+    transfer = argv[4] if len(argv) > 4 else None
     mode = argv[5] if len(argv) > 5 else None
-    hmi = AbbTgsHmi(host=host, port=port, vc_home_dir=vc_home_dir)
+    # An http(s) URL selects the RWS transfer; anything else is the VC HOME
+    # folder for the kept copy fallback (see module docstring).
+    vc_home_dir = None
+    rws = None
+    if transfer and transfer.lower().startswith(("http://", "https://")):
+        rws = transfer
+    else:
+        vc_home_dir = transfer
+    hmi = AbbTgsHmi(host=host, port=port, vc_home_dir=vc_home_dir, rws=rws)
     if mode == "corrupt-cam":
         hmi.corrupt_cam_frame = True
     elif mode == "corrupt-weld":
