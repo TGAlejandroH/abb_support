@@ -24,6 +24,7 @@ end-to-end against a RobotStudio virtual controller (2026-08-28).
 | `docs/rapid_validation_findings_v1.md` | The three defects found during VC validation — root causes and the rules they imply for the production port |
 | `docs/robotstudio_setup.md` | How to build the VC and run each phase's smoke test |
 | `docs/fanuc_hmi_request_program_calls_v1.md` | FANUC request-number table (reference) |
+| `docs/tg_naming_convention.md` | The `TG`/`tg` ownership prefix — what carries it, in what form, and why it matters on retrofits |
 | `docs/abb_program_touchup_and_retrieval_v1.md` | Pendant position touch-ups and pulling the edited program back to the HMI — why FANUC's `MD:` FTP trick has no ABB equivalent, and the RWS-based replacement |
 | `resources/FANUC/` | Source material: KAREL/LS programs, sample .tgs export, Python socket sample |
 
