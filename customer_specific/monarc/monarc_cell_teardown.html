@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monarc Cell Teardown</title>
+<style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style>
+</head>
+<body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+:root{
+  --paper:#edf0f0;
+  --panel:#e3e8e8;
+  --panel-2:#f6f8f8;
+  --ink:#12181a;
+  --slate:#566368;
+  --faint:#7d8a8e;
+  --rule:#cfd7d7;
+  --rule-hard:#a9b5b6;
+  --arc:#0a7489;
+  --arc-soft:#0a748915;
+  --flux:#9c5711;
+  --flux-soft:#9c571114;
+  --scale:#8c3128;
+  --scale-soft:#8c312814;
+  --shadow:0 1px 0 #0000000d;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0d1315;
+    --panel:#151e20;
+    --panel-2:#111a1c;
+    --ink:#e2e9e9;
+    --slate:#9aabae;
+    --faint:#7d9094;
+    --rule:#253235;
+    --rule-hard:#3a4b4f;
+    --arc:#48c2d8;
+    --arc-soft:#48c2d81a;
+    --flux:#db9440;
+    --flux-soft:#db94401a;
+    --scale:#d9736a;
+    --scale-soft:#d9736a1a;
+    --shadow:0 1px 0 #ffffff08;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0d1315;
+  --panel:#151e20;
+  --panel-2:#111a1c;
+  --ink:#e2e9e9;
+  --slate:#9aabae;
+  --faint:#7d9094;
+  --rule:#253235;
+  --rule-hard:#3a4b4f;
+  --arc:#48c2d8;
+  --arc-soft:#48c2d81a;
+  --flux:#db9440;
+  --flux-soft:#db94401a;
+  --scale:#d9736a;
+  --scale-soft:#d9736a1a;
+  --shadow:0 1px 0 #ffffff08;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+  font-size:16.5px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,.disp{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;text-wrap:balance}
+code,kbd,.mono,table{font-family:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
+
+/* ---------- shell ---------- */
+.shell{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto;padding:0 24px}
+@media (min-width:1000px){
+  .shell{grid-template-columns:226px minmax(0,1fr);gap:56px;padding:0 40px}
+}
+
+/* ---------- rail ---------- */
+.rail{display:none}
+@media (min-width:1000px){
+  .rail{display:block;position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:40px 0 48px;border-right:1px solid var(--rule)}
+}
+.rail .mark{font-family:Archivo,sans-serif;font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--arc);margin-bottom:4px}
+.rail .sub{font-size:12.5px;color:var(--faint);line-height:1.45;margin-bottom:26px;font-family:"JetBrains Mono",monospace}
+.rail nav{display:flex;flex-direction:column;gap:1px}
+.rail a{
+  font-family:Archivo,sans-serif;font-size:13.5px;line-height:1.35;
+  color:var(--slate);text-decoration:none;padding:6px 10px 6px 12px;
+  border-left:2px solid transparent;
+}
+.rail a:hover{color:var(--ink);background:var(--arc-soft);border-left-color:var(--arc)}
+.rail a:focus-visible{outline:2px solid var(--arc);outline-offset:-2px}
+
+/* ---------- masthead ---------- */
+main{padding:40px 0 96px;min-width:0}
+.eyebrow{font-family:Archivo,sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--arc)}
+h1{font-size:clamp(2.1rem,4.6vw,3.35rem);line-height:1.03;font-weight:700;letter-spacing:-.022em;margin:.35em 0 0}
+.standfirst{max-width:64ch;font-size:1.13rem;color:var(--slate);margin:1.05em 0 0}
+.provenance{margin-top:26px;padding-top:16px;border-top:1px solid var(--rule);font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--faint);line-height:1.75;word-break:break-word}
+
+/* ---------- spec strip ---------- */
+.specs{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin:38px 0 0}
+.spec{background:var(--panel-2);padding:14px 16px 16px}
+.spec dt{font-family:Archivo,sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
+.spec dd{margin:5px 0 0;font-family:"JetBrains Mono",monospace;font-size:13px;line-height:1.4;color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* ---------- sections ---------- */
+section{margin-top:64px;scroll-margin-top:24px}
+h2{font-size:1.62rem;font-weight:700;letter-spacing:-.015em;line-height:1.15;margin:0 0 .1em;padding-bottom:.42em;border-bottom:2px solid var(--ink)}
+.kicker{font-family:Archivo,sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 0 10px}
+h3{font-size:1.06rem;font-weight:600;letter-spacing:-.005em;margin:2em 0 .3em}
+h4{font-size:.86rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);margin:1.7em 0 .3em}
+p{max-width:68ch;margin:.85em 0}
+ul,ol{max-width:68ch;padding-left:1.15em;margin:.85em 0}
+li{margin:.34em 0}
+a{color:var(--arc)}
+strong{font-weight:600}
+em{font-style:italic}
+code{font-size:.855em;background:var(--panel);padding:.1em .34em;border-radius:2px;word-break:break-word}
+hr{border:0;border-top:1px solid var(--rule);margin:2.2em 0}
+
+/* ---------- callouts ---------- */
+.note{border:1px solid var(--rule-hard);background:var(--panel-2);padding:14px 18px 16px;margin:1.5em 0;max-width:74ch}
+.note > .lbl{display:block;font-family:Archivo,sans-serif;font-size:10.5px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;margin-bottom:6px}
+.note p{margin:.4em 0;max-width:none}
+.note p:first-of-type{margin-top:0}
+.note p:last-child{margin-bottom:0}
+.note.tech{border-color:var(--arc);background:var(--arc-soft)}
+.note.tech > .lbl{color:var(--arc)}
+.note.watch{border-color:var(--flux);background:var(--flux-soft)}
+.note.watch > .lbl{color:var(--flux)}
+.note.risk{border-color:var(--scale);background:var(--scale-soft)}
+.note.risk > .lbl{color:var(--scale)}
+
+/* ---------- code ---------- */
+.code{background:var(--panel-2);border:1px solid var(--rule);padding:14px 16px;margin:1.4em 0;overflow-x:auto}
+.code pre{margin:0;font-family:"JetBrains Mono",monospace;font-size:12.5px;line-height:1.66;white-space:pre;color:var(--ink)}
+.code .cm{color:var(--faint)}
+.code .hi{color:var(--arc);font-weight:600}
+.code .wm{color:var(--flux);font-weight:600}
+.cap{font-size:12.5px;color:var(--faint);margin:-.9em 0 1.6em;max-width:74ch;font-family:Archivo,sans-serif}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto;margin:1.5em 0;border:1px solid var(--rule)}
+table{width:100%;border-collapse:collapse;font-size:12.5px;line-height:1.45}
+caption{text-align:left;font-family:Archivo,sans-serif;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:11px 12px;background:var(--panel);border-bottom:1px solid var(--rule)}
+th{text-align:left;font-weight:600;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--slate);padding:8px 12px;border-bottom:1px solid var(--rule-hard);white-space:nowrap;background:var(--panel-2)}
+td{padding:7px 12px;border-bottom:1px solid var(--rule);vertical-align:top;font-variant-numeric:tabular-nums}
+tbody tr:last-child td{border-bottom:0}
+td.sig{white-space:nowrap;font-weight:600}
+td.num{white-space:nowrap;color:var(--slate)}
+td.d{font-family:"Source Serif 4",serif;font-size:13.5px;min-width:19em}
+.dir{display:inline-block;font-size:9.5px;font-weight:600;letter-spacing:.09em;padding:1px 5px;border:1px solid currentColor;vertical-align:1px}
+.o{color:var(--arc)}
+.i{color:var(--flux)}
+
+/* ---------- figure ---------- */
+figure{margin:1.7em 0;border:1px solid var(--rule);background:var(--panel-2)}
+figure .fw{overflow-x:auto;padding:22px 20px 8px}
+figure svg{display:block;min-width:640px;width:100%;height:auto}
+figcaption{font-family:Archivo,sans-serif;font-size:12px;color:var(--faint);padding:0 20px 16px;line-height:1.5}
+
+/* ---------- risk ledger ---------- */
+.ledger{display:flex;flex-direction:column;gap:1px;background:var(--rule);border:1px solid var(--rule);margin:1.6em 0}
+.item{background:var(--panel-2);padding:13px 16px 15px;display:grid;grid-template-columns:auto 1fr;gap:0 14px;align-items:baseline}
+.item .sev{font-family:Archivo,sans-serif;font-size:9.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;padding:2px 6px;border:1px solid currentColor;white-space:nowrap}
+.item .sev.hi{color:var(--scale)}
+.item .sev.md{color:var(--flux)}
+.item .sev.lo{color:var(--arc)}
+.item h5{font-family:Archivo,sans-serif;font-size:14px;font-weight:600;margin:0;letter-spacing:-.005em}
+.item .body{grid-column:2;font-size:14.5px;color:var(--slate);margin-top:4px;line-height:1.55}
+.item .body code{font-size:.88em}
+@media (max-width:560px){
+  .item{grid-template-columns:1fr}
+  .item .sev{justify-self:start;margin-bottom:6px}
+  .item .body{grid-column:1}
+}
+
+footer{margin-top:72px;padding-top:20px;border-top:1px solid var(--rule);font-family:Archivo,sans-serif;font-size:12px;color:var(--faint);max-width:74ch;line-height:1.6}
+</style>
+
+<div class="shell">
+<aside class="rail">
+  <div class="mark">Monarc</div>
+  <div class="sub">4600-803651<br>IRB 4600 + IRBP D600<br>RW 6.16.0025</div>
+  <nav>
+    <a href="#cell">The cell</a>
+    <a href="#cycle">One part, end to end</a>
+    <a href="#index">Swapping the two sides</a>
+    <a href="#drives">Shared drives, one station</a>
+    <a href="#find">Finding the part</a>
+    <a href="#weld">Weld data is imperial</a>
+    <a href="#io">I/O map</a>
+    <a href="#service">Torch, wire, TCP</a>
+    <a href="#safety">Safety</a>
+    <a href="#risks">Risk ledger</a>
+    <a href="#files">What's in the folder</a>
+  </nav>
+</aside>
+
+<main>
+  <div class="eyebrow">Customer project review &middot; read-only</div>
+  <h1>Monarc Cell Teardown</h1>
+  <p class="standfirst">An ABB FlexArc-style arc-welding cell: one IRB 4600 serving a two-station indexing positioner, a Miller welder on EtherNet/IP, and a PLC on PROFINET. The interesting engineering is not in the motion — it is in how the programmer measures each part's rotation with the welding wire and re-indexes the whole program around it.</p>
+  <div class="provenance">D:\ABB\Monarc_RS\Project &nbsp;·&nbsp; station Monarch_1.2R2.rsstnx (RobotStudio 26.2.11700.0, author CABRADA) &nbsp;·&nbsp; backup taken 2026-08-31 10:26 from M:\ENGData\USR\Aaron\Tetragen Robotstudios &nbsp;·&nbsp; cell assembly 24854299-1x4600-D600-Sim_12-02-2024</div>
+
+  <dl class="specs">
+    <div class="spec"><dt>Robot</dt><dd>IRB 4600-20/2.50 Type D<br>s/n 4600-803651</dd></div>
+    <div class="spec"><dt>Positioner</dt><dd>IRBP D600 L2000<br>D1200 Type A</dd></div>
+    <div class="spec"><dt>Welder</dt><dd>Miller Auto-Axcess E<br>EtherNet/IP adapter</dd></div>
+    <div class="spec"><dt>Torch</dt><dd>Abicor Binzel<br>reamer 831.0930.1</dd></div>
+    <div class="spec"><dt>Framework</dt><dd>812-1 Production<br>Manager (GAP)</dd></div>
+    <div class="spec"><dt>Tasks</dt><dd>1 motion task<br>T_ROB1</dd></div>
+    <div class="spec"><dt>Part programs</dt><dd>24 declared<br>2 present in backup</dd></div>
+    <div class="spec"><dt>Safety</dt><dd>SafeMove Pro<br>PROFIsafe F-Device</dd></div>
+  </dl>
+
+  <!-- ============================================================= -->
+  <section id="cell">
+    <p class="kicker">Orientation</p>
+    <h2>The cell</h2>
+
+    <p>A single IRB 4600 stands beside an <strong>IRBP D600 L2000 D1200 Type&nbsp;A</strong> — a double-ended indexing positioner. It presents two independent work stations to the robot, one at a time, and swaps them through a 180&deg; index. While the robot welds one side, the operator loads the other behind a rotating shield wall. Troax fencing, one operator stand, a SafeLock VAR&nbsp;PLe gate, an AB-855D stack light.</p>
+
+    <p>The positioner appears in RobotWare as <strong>three mechanical units</strong>, not one:</p>
+
+    <div class="tw"><table>
+      <caption>MOC.cfg — mechanical units</caption>
+      <thead><tr><th>Mech unit</th><th>Joints</th><th>Activation relay</th><th>Feedback</th><th class="d">Role</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">STN1</td><td class="num">ARM1, PLATE1</td><td class="num">soACT_STN1</td><td class="num">siSTN1_ACT</td><td class="d">Station 1 tilt + turntable</td></tr>
+        <tr><td class="sig">STN2</td><td class="num">ARM2, PLATE2</td><td class="num">soACT_STN2</td><td class="num">siSTN2_ACT</td><td class="d">Station 2 tilt + turntable</td></tr>
+        <tr><td class="sig">INTERCH</td><td class="num">INTERCH, INTERCH_PLATE1, INTERCH_PLATE2</td><td class="num">soACT_INTCH</td><td class="num">siINTCH_ACT</td><td class="d">The 180&deg; index axis <em>plus</em> both turntables, so all three move as one during the swap</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>Both <code>STN1</code> and <code>STN2</code> carry <code>-allow_move_of_user_frame</code>, so work objects can be coordinated to them. The turntables (<code>PLATE1</code>, <code>PLATE2</code>) are declared <code>-independent_joint_on</code> with a joint bound of &plusmn;20&nbsp;rad against a maximum of &plusmn;1.25&times;10<sup>6</sup>&nbsp;rad — the hardware can spin continuously, though no RAPID in this backup uses <code>IndAMove</code>.</p>
+
+    <p>The application layer is ABB's <strong>Production Manager</strong> (internally "GAP"). <code>main()</code> is a single line — <code>ExecEngine;</code> — and everything after that is the engine dispatching <em>parts</em>. A part is a <code>partdata</code> record naming a routine, a station number and an ID; the PLC or the FlexPendant Production Screen picks one, the engine runs it.</p>
+
+    <div class="note tech"><span class="lbl">Where the code lives</span>
+      <p>The framework modules (<code>Irbp1Prc</code>, <code>Irbp1EEv</code>, <code>GoSafeUsr</code>, <code>BE_Mnu</code>) come from the option media and are auto-loaded via <code>SYS.cfg → CAB_TASK_MODULES</code>. The cell-specific work is in <code>Utility.sys</code>, <code>TorchServices.sys</code>, <code>mDeclarations.sys</code>, <code>wobj_Database.sys</code>, <code>m2ndLoadPos.sys</code> and the <code>mRS4xxxxx.mod</code> part programs. Four modules are <strong>encrypted and unreadable</strong>: <code>GAP_USER.sys</code>, <code>GAP_PARTADV.sys</code>, <code>GAP_PARTADV_SHRD.sys</code>, <code>ProdScr.sys</code>.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="cycle">
+    <p class="kicker">Sequence</p>
+    <h2>One part, end to end</h2>
+
+    <p>Every production routine — <code>RS461117_Stn1</code>, <code>RS462509_Stn2</code>, and by inference the ~20 that live only in the station file — follows the same eleven-step skeleton. It is worth learning once, because it is copy-pasted verbatim.</p>
+
+    <div class="code"><pre><span class="cm">! 1  clear the handshake outputs</span>
+SetDO doOK_Unclamp, 0;   SetDO doAllWeldsComplete, 0;
+SetDO doWld1TouchOn, 0;  SetDO do5_WireBrake, 0;
+DeactUnit STN1;
+MoveAbsJ jposSafe\NoEOffs, v1000, z50, tWeldGun;
+
+<span class="cm">! 2  extend wire 0.3 s so the cut lands on solid wire</span>
+SetDO soAwManFeedFwd, 1;  WaitTime 0.3;  SetDO soAwManFeedFwd, 0;
+
+<span class="cm">! 3  trim to a known stickout, then lock the wire</span>
+MoveJ ..., v1000, z100, tWeldGun;
+WireCutter;
+SetDO do5_WireBrake, 1;
+MoveJ pWireIntermediate, v200, z50, tWeldGun;
+
+<span class="cm">! 4  ask the PLC to drive the clamp to the programmed start position</span>
+SetDO doOK_Unclamp, 1;
+WaitTime 1;
+WaitDI diReadyToResumeProg, 1;
+SetDO doOK_Unclamp, 0;
+
+<span class="cm">! 5  declare the nominal table angle, then take the drives</span>
+<span class="hi">initialHeadstockRot := -22;</span>
+ActUnit STN1;
+
+<span class="cm">! 6-8  wire touch search, correction maths, welds  (see "Finding the part")</span>
+
+<span class="cm">! 9  tell the PLC it may unload</span>
+SetDO doAllWeldsComplete, 1;
+DeactUnit STN1;
+MoveAbsJ jposSafe\NoEOffs, v200, z50, tWeldGun;</pre></div>
+    <p class="cap">Condensed from <code>mRS462509.mod:187</code>. Steps 2–3 exist purely so the welding wire becomes a repeatable mechanical probe in step 6.</p>
+
+    <p>Two things about this skeleton matter more than they look:</p>
+
+    <ul>
+      <li><strong>The clamp is the PLC's, not the robot's.</strong> The robot never actuates the fixture. It raises <code>doOK_Unclamp</code>, the PLC moves the clamp and answers <code>diReadyToResumeProg</code>. The same handshake appears in <code>clampBrakeTest</code>, so it is also the manual test path. Clamp position feedback (<code>diStn1ClampOpen/Closed/AtPos1/AtPos2</code>) is mapped but never read in RAPID — the PLC owns that logic.</li>
+      <li><strong>Every routine opens with <code>DeactUnit</code> and closes with <code>DeactUnit</code>.</strong> That is not defensive style, it is mandatory — see the next two sections.</li>
+    </ul>
+
+    <p>There is also a <code>..._NoIO</code> twin of most part routines (<code>RS461117_Stn2NoIO</code>, <code>RS462509_Stn2NoIO</code>) which drops the clamp handshake, the wire trim and the search, and just welds the nominal path. These are the dry-run / air-cut versions used at the pendant.</p>
+
+    <div class="note watch"><span class="lbl">Trap in the NoIO twins</span>
+      <p>The <code>_NoIO</code> routines do <em>not</em> set <code>initialHeadstockRot</code> and do not search, but the twist-compensation maths in the full routines reads that same shared <code>PERS num</code>. Running a <code>_NoIO</code> routine leaves whatever value the last full part wrote. It is harmless in the <code>_NoIO</code> path itself, but it means the variable's value at any moment tells you nothing about which part it belongs to.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="index">
+    <p class="kicker">Interchange</p>
+    <h2>Swapping the two sides</h2>
+
+    <p>The index is not written by the customer — it is <code>IndexToStn1</code> / <code>IndexToStn2</code> in <code>Irbp1Prc</code>, from the Positioner functional package. Reading it is the fastest way to understand the cell's rhythm:</p>
+
+    <ol>
+      <li>If <code>bInterchCalib1</code> is false, run <code>CalibIntch1</code> (<code>CalibInterch1Proc</code>). The calibrated index positions are <code>nInterchStn1 = -0.249999&deg;</code> and <code>nInterchStn2 = 179.901&deg;</code> — note the 0.1&deg; asymmetry, that is real calibration data, not a typo.</li>
+      <li><code>ActInterch1</code> activates the 3-joint INTERCH unit and calls <code>GetNextPartAdv</code> for <em>both</em> stations, then <code>MechUnitLoad INTERCH, 2</code> and <code>MechUnitLoad INTERCH, 3</code> with each side's payload. If a part's <code>partadv.load.mass ≤ 0.001</code> it silently substitutes the 200&nbsp;kg default and writes an event-log warning.</li>
+      <li>A <strong>single <code>MoveAbsJ</code></strong> at <code>sdInterch1 = [1000,500,5000,180]</code> drives the index axis <em>and</em> both turntables at once: station 1 to the incoming part's <em>process</em> angle, station 2 to the outgoing part's <em>load</em> angle. The two sides are pre-oriented during the swing — no separate positioning move afterwards.</li>
+      <li><code>WaitTime nTorqueTime</code> (0.4&nbsp;s) to let the torque settle, then <code>DeactInterch1</code> and <code>WaitUntil IsMechUnitActive(INTERCH)=FALSE</code>.</li>
+    </ol>
+
+    <div class="note tech"><span class="lbl">partadv is the part's positioner recipe</span>
+      <p>Each part carries a <code>partadv</code> record holding three angles — <em>load</em>, <em>process</em>, <em>service</em> — plus its <code>loaddata</code>. <code>ActStn1</code> pulls it with <code>GetNextPartAdv</code> and applies the payload with <code>MechUnitLoad STN1, 2</code>. So payload and table angles are <strong>data per part</strong>, not code. Editing them from the pendant's Production Manager → Part view changes the motion without touching RAPID.</p>
+    </div>
+
+    <p>The collision guard for the swing is an execution-engine event, not inline code. <code>Utility.sys</code> registers:</p>
+    <div class="code"><pre>CONST ee_event ee_ArmsAtZero := [<span class="hi">EE_CLOSE_JIG</span>,"ArmsToZero_DPos","",1,GAP_STN_1+GAP_STN_2];</pre></div>
+    <p>so before the jig closes on either station, <code>ArmsToZero_DPos</code> levels both tilt axes to <code>eax_b = 0</code>. That is what keeps a tilted fixture from clipping the shield wall on the way round.</p>
+
+    <div class="note risk"><span class="lbl">ArmsToZero_DPos ends with Stop;</span>
+      <p><code>Utility.sys:278</code> — the routine bound to <code>EE_CLOSE_JIG</code> finishes with a bare <code>Stop;</code>. In a production cycle that halts the program and requires an operator start. It reads like leftover commissioning debug that never got removed. Verify against the running plant before deleting: if production has been running, either the event is not firing or the operators have been living with the stop.</p>
+    </div>
+
+    <h3>A second load position, driven from the HMI</h3>
+    <p><code>m2ndLoadPos.sys</code> lets the operator ask for an arbitrary table angle at load time. The PLC writes the angle to the group input <code>giTableAngle</code>, the sign to <code>diTableAngNeg</code>, then pulses <code>siSTN1LoadPos2</code>. An <code>ISignalDI</code> interrupt fires a TRAP which activates the station, moves the table to that angle, then arms a temporary <em>joint</em> world zone (<code>WZHomeJointDef</code>, tolerance 2&deg; tilt / 3&deg; rotate) that drives <code>soAtSTN1_2ndPos</code> back to the PLC.</p>
+
+    <div class="note watch"><span class="lbl">Motion inside a TRAP</span>
+      <p>The TRAP does <code>ActUnit</code> → <code>MoveJ</code> → <code>DeactUnit</code>. It can fire at any point in the cycle, from a PLC signal, and it moves the positioner while holding the robot at <code>CRobT()</code>. If the torch is inside the part when the request lands, the table rotates around it. Whatever interlock prevents that lives on the PLC side and is not visible from the robot.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="drives">
+    <p class="kicker">Electrical constraint</p>
+    <h2>Shared drives, one station at a time</h2>
+
+    <p>Count the hardware. <code>MOC.cfg</code> declares <strong>five</strong> positioner measurement nodes (<code>pos1_1</code>…<code>pos1_5</code> on measurement link 2) — ARM1, PLATE1, ARM2, PLATE2 and the index axis. The option list declares <strong>three</strong> drive units: <code>ADU-790A in position X3</code>, <code>Y3</code>, <code>Z3</code>.</p>
+
+    <p>Five motors, three drives. The gap is closed with contactors, and RobotWare's activation relays are cross-connected straight onto them:</p>
+
+    <div class="tw"><table>
+      <caption>EIO.cfg — activation cross-connections</caption>
+      <thead><tr><th>Result</th><th>Expression</th><th class="d">Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">doACT_K1</td><td class="num">soACT_STN1 OR soACT_INTCH</td><td class="d">Connect drive group 1 (needed by station 1 and by the index)</td></tr>
+        <tr><td class="sig">doACT_K2</td><td class="num">soACT_STN2 OR soACT_INTCH</td><td class="d">Connect drive group 2 (station 2 and the index)</td></tr>
+        <tr><td class="sig">doACT_K3</td><td class="num">soACT_STN1</td><td class="d">Switch the shared drive to station 1's arm</td></tr>
+        <tr><td class="sig">doACT_K4</td><td class="num">soACT_STN2</td><td class="d">Switch the shared drive to station 2's arm</td></tr>
+        <tr><td class="sig">doACT_K5</td><td class="num">soACT_INTCH</td><td class="d">Switch the shared drive to the index motor</td></tr>
+        <tr><td class="sig">siSTN1_ACT</td><td class="num">diK1_ACT AND diK3_ACT</td><td class="d">Both contactors confirmed before RobotWare calls STN1 active</td></tr>
+        <tr><td class="sig">siSTN2_ACT</td><td class="num">diK2_ACT AND diK4_ACT</td><td class="d">Same for STN2</td></tr>
+        <tr><td class="sig">siINTCH_ACT</td><td class="num">diK1_ACT AND diK2_ACT AND diK5_ACT</td><td class="d">Three contactors for the index</td></tr>
+        <tr><td class="sig">doACT_K11</td><td class="num">doACT_K13 OR doACT_K15</td><td class="d">Brake release, station 1 / index group</td></tr>
+        <tr><td class="sig">doACT_K12</td><td class="num">doACT_K14 OR doACT_K15</td><td class="d">Brake release, station 2 / index group</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>K3, K4 and K5 are mutually exclusive by construction — they connect three different motors to the same drive. Which gives the cell's hardest rule:</p>
+
+    <div class="note risk"><span class="lbl">STN1 and STN2 can never be active together</span>
+      <p>This is why every routine is bracketed in <code>ActUnit</code>/<code>DeactUnit</code>, why <code>mDeclarations</code> carries the odd little <code>initialize()</code> / <code>initialize2()</code> pair (an <code>ActUnit</code> immediately followed by <code>DeactUnit</code>, to force a known state), and why the drive I/O board is configured <code>-StateWhenStartup "Deactivated"</code>.</p>
+      <p><code>Testing.mod:152 positionTest</code> does <code>ActUnit STN2</code> … <code>ActUnit STN1</code> with no intervening <code>DeactUnit</code>. Expect an activation failure at the second <code>ActUnit</code>.</p>
+    </div>
+
+    <p>The same sharing shows up in the RAPID data, and this is the subtler trap. <code>PartR1S1.ProgStn1</code> and <code>PartR1S2.ProgStn2</code> both write <code>jtCurrent.extax.eax_b</code> and <code>eax_c</code>. The two stations <em>reuse the same external-axis slots</em>, because they reuse the same drive-module axis numbers.</p>
+
+    <div class="note watch"><span class="lbl">extax values are only meaningful with the matching station active</span>
+      <p><code>eax_b</code> is the tilt/arm (&plusmn;20&deg; in the test moves; <code>ArmsToZero_DPos</code> zeroes only this one), <code>eax_c</code> is the turntable. Under <code>INTERCH</code> the slots shift again — <code>eax_b</code> and <code>eax_c</code> become the two stations' angles and <code>eax_d</code> becomes the index axis. A robtarget copied from a station-1 routine into a station-2 routine will command station 2's axes to station 1's angles without complaint.</p>
+    </div>
+
+    <p>One more detail with operational bite: the shared drive I/O board carries <code>-TrustLevel "DRVIO_TRUSTLEVEL"</code>, defined as <code>ActionWhenLost "NONE"</code>, <code>ReportWhenLost "NONE"</code>. If that board drops off the bus, nothing stops and nothing is logged.</p>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="find">
+    <p class="kicker">The core technique</p>
+    <h2>Finding the part</h2>
+
+    <p>These are long tubular weldments clamped in a headstock. They do not land at the same rotation twice. The programmer's answer is to <strong>measure the part with the welding wire and then move the part to meet the taught program</strong> — rather than recompute the program to meet the part.</p>
+
+    <h3>Step 1 — the wire is the probe</h3>
+    <p>SmarTac is configured as <code>smtMiller1</code>: touch sensing <em>through the welder</em>, not through a separate sensor card.</p>
+
+    <div class="tw"><table>
+      <caption>PROC.cfg — SMARTAC_SIGNALS, active profile</caption>
+      <thead><tr><th>Function</th><th>Signal</th><th class="d">Note</th></tr></thead>
+      <tbody>
+        <tr><td class="d">Sensor on</td><td class="sig">doWld1TouchOn</td><td class="d">Energises the wire for touch sensing</td></tr>
+        <tr><td class="d">Sensor active</td><td class="sig">diWld1TouchActive</td><td class="d">Welder confirms sensing is live — RAPID waits on this</td></tr>
+        <tr><td class="d">Detect</td><td class="sig">diWld1Touched</td><td class="d">Contact; the signal handed to <code>SearchL</code>/<code>SearchC</code></td></tr>
+      </tbody>
+    </table></div>
+
+    <p>Hence the wire choreography at the top of every part: feed 0.3&nbsp;s, cut at the trim station, then <code>do5_WireBrake</code> to stop the spool creeping. A search is only as repeatable as the stickout.</p>
+
+    <p>A second profile, <code>smtLaser</code> (<code>di3_SMTAC_LaserDet</code> in, <code>Local_IO_0_DO10</code> out), is fully configured but <strong>not selected</strong> — <code>SMARTAC_SETTINGS</code> points at <code>smtMiller1</code>. Its footprint is all over the code as commented-out laser searches, three <code>Laser1</code>/<code>Laser2</code>/<code>Laser2p2</code> tooldata, and a working <code>Testing.laserTest</code>. A laser trial that was tried and shelved.</p>
+
+    <h3>Step 2 — two different corrections, depending on the part</h3>
+
+    <h4>mRS461117 — Cartesian offset</h4>
+    <p>A circular search gives X and Z, a linear search gives Y, and the delta is applied by wrapping every single target in <code>Offs()</code>:</p>
+    <div class="code"><pre>SearchC\Stop, diWld1Touched, pSearchPt_1W, pSearch_1W_8, pSearch_1W_12, v5, tWeldGun\WObj:=wobj_Stn1;
+dTrans.x := pSearchPt_1W.trans.x - pSearch_1W_8.trans.x;
+dTrans.z := pSearchPt_1W.trans.z - pSearch_1W_8.trans.z;
+SearchL\Stop, diWld1Touched, SearchPt_1L, SearchTo_1L, v5, tWeldGun\WObj:=wobj_Stn1;
+dTrans.y := SearchPt_1L.trans.y - SearchPt_1LIdeal.trans.y;
+
+ArcLStart <span class="hi">Offs(p461117_1_140, dTrans.x, dTrans.y, dTrans.z)</span>, v300, sm3_16_ft_block, wd3_16_ft_block_095, fine, ...</pre></div>
+
+    <h4>mRS462509 — rotational re-index, and this is the clever one</h4>
+    <p>The circular search does not read a position. It reads <strong>the positioner's own angle at the moment of contact</strong>:</p>
+    <div class="code"><pre>SearchC\Stop, diWld1Touched, pSearchPt_1W, pSearch_1W_n22, pSearch_1W_n18, v5, tWeldGun\WObj:=wobj_Stn1;
+<span class="hi">angularDisp1 := pSearchPt_1W.extax.eax_c;</span>          <span class="cm">! where the feature actually is</span>
+TPWrite "  Angular  Reading  Station  1 (462509) " + ValToStr(angularDisp1);
+
+p462509_1_3.extax.eax_c := angularDisp1;                <span class="cm">! ... and 13 more targets</span>
+p462509_1_4.extax.eax_c := angularDisp1;
+
+MoveJ Offs(p462509_1_2, dTrans.x,0,0), v1000, z10, tWeldGun\WObj:=<span class="hi">wobj_Stn1_NoCoord</span>;</pre></div>
+
+    <p>The <code>_NoCoord</code> work object is what makes this work, and it is easy to miss. <code>wobj_Database.sys</code> declares each station frame twice:</p>
+
+    <div class="tw"><table>
+      <caption>wobj_Database.sys</caption>
+      <thead><tr><th>Work object</th><th>ufprog</th><th>ufmec</th><th class="d">Behaviour</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">wobj_Stn1 / wobj_Stn2</td><td class="num">FALSE</td><td class="num">STN1 / STN2</td><td class="d"><strong>Coordinated.</strong> The frame rides the turntable; the TCP follows the part as it turns.</td></tr>
+        <tr><td class="sig">wobj_Stn1_NoCoord / wobj_Stn2_NoCoord</td><td class="num">TRUE</td><td class="num">STN1 / STN2</td><td class="d"><strong>Not coordinated,</strong> same geometry. The taught point stays fixed in the world; the <code>extax</code> in the robtarget still commands the table.</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>So the correction is: <em>the feature moved, therefore rotate the table to bring the feature back to where the program was taught.</em> With the coordinated frame that would cancel out — the path would follow the part and the offset would do nothing. With <code>_NoCoord</code> the taught world position holds still and the table does the work. The choice of frame is load-bearing, not cosmetic.</p>
+
+    <h3>Step 3 — modelling the part's twist</h3>
+    <p>A long tube does not just sit rotated, it sits <em>twisted</em>. So the measured error is scaled down for weld groups nearer the fixed end:</p>
+
+    <div class="code"><pre><span class="cm">! six weld groups, six fractions of the measured angular error</span>
+scaledAngularDisp1 := ((angularDisp1 - initialHeadstockRot) * (<span class="hi">41</span>/44)) + initialHeadstockRot;   <span class="cm">! Weld_7</span>
+scaledAngularDisp1 := ((angularDisp1 - initialHeadstockRot) * (<span class="hi">36</span>/44)) + initialHeadstockRot;   <span class="cm">! Weld_3</span>
+scaledAngularDisp1 := ((angularDisp1 - initialHeadstockRot) * (<span class="hi">28</span>/44)) + initialHeadstockRot;   <span class="cm">! Weld_6</span>
+scaledAngularDisp1 := ((angularDisp1 - initialHeadstockRot) * (<span class="hi">20</span>/44)) + initialHeadstockRot;   <span class="cm">! Weld_3</span>
+scaledAngularDisp1 := ((angularDisp1 - initialHeadstockRot) * (<span class="hi">12</span>/44)) + initialHeadstockRot;   <span class="cm">! Weld_5</span>
+scaledAngularDisp1 := ((angularDisp1 - initialHeadstockRot) * ( <span class="hi">4</span>/44)) + initialHeadstockRot;   <span class="cm">! Weld_4</span></pre></div>
+    <p class="cap">Stations at 4, 12, 20, 28, 36 and 41 of 44 — evenly spaced 8 apart, with the last one at 41. A linear interpolation of angular error along the part's length.</p>
+
+    <p>It is a genuinely neat piece of process engineering. It is also six hard-coded magic numbers in executable RAPID, one shared scratch variable overwritten six times, and a denominator that only makes sense for one part geometry.</p>
+
+    <h3>How much scatter is it actually compensating?</h3>
+    <p><code>mLogging.mod</code> appends every new <code>angularDisp1</code> to <code>HOME/log/VariableLog1.csv</code> and <code>VariableLog2.csv</code>. Those files are in the backup, and they answer the question:</p>
+
+    <div class="tw"><table>
+      <caption>Measured part rotation, VariableLog1.csv / VariableLog2.csv</caption>
+      <thead><tr><th>Log</th><th>Family</th><th>n</th><th>Mean</th><th>Min</th><th>Max</th><th>SD</th><th>Spread</th></tr></thead>
+      <tbody>
+        <tr><td class="num">Log 1</td><td class="d">nominal &minus;22&deg;</td><td class="num">230</td><td class="num">&minus;21.09&deg;</td><td class="num">&minus;24.35&deg;</td><td class="num">&minus;18.81&deg;</td><td class="num">1.22&deg;</td><td class="num">5.55&deg;</td></tr>
+        <tr><td class="num">Log 1</td><td class="d">second family</td><td class="num">55</td><td class="num">+48.58&deg;</td><td class="num">+46.56&deg;</td><td class="num">+49.99&deg;</td><td class="num">0.82&deg;</td><td class="num">3.43&deg;</td></tr>
+        <tr><td class="num">Log 2</td><td class="d">nominal &minus;22&deg;</td><td class="num">233</td><td class="num">&minus;21.07&deg;</td><td class="num">&minus;23.16&deg;</td><td class="num">&minus;18.25&deg;</td><td class="num">1.31&deg;</td><td class="num">4.91&deg;</td></tr>
+        <tr><td class="num">Log 2</td><td class="d">second family</td><td class="num">59</td><td class="num">+47.74&deg;</td><td class="num">+44.86&deg;</td><td class="num">+49.30&deg;</td><td class="num">0.94&deg;</td><td class="num">4.44&deg;</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>Roughly <strong>&plusmn;2.5&deg; part to part, &sigma;&nbsp;≈&nbsp;1.2&deg;</strong>. At a 100&nbsp;mm working radius that is about 4&nbsp;mm of arc error at the extremes — far outside anything a fillet weld will tolerate. The search is not a nicety; the cell does not run without it.</p>
+
+    <div class="note risk"><span class="lbl">No error handler on any search</span>
+      <p>All 13 <code>SearchL</code>/<code>SearchC</code> instructions in the project use <code>\Stop</code> and none of the enclosing routines has an <code>ERROR</code> clause. A missed touch — dirty part, bent wire, failed cut, welder not in touch mode — aborts the part with a RAPID error rather than degrading gracefully. Given the arc error handling <em>is</em> fully wired to the HMI (<code>goER_ErrType</code>, <code>giERActionSig</code>), search failure is the one process fault with no operator path.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="weld">
+    <p class="kicker">Process data</p>
+    <h2>Weld data is imperial, stored in metric</h2>
+
+    <p>This is the single most important thing to know before touching a <code>welddata</code> or <code>seamdata</code> value. <code>PROC.cfg</code> sets:</p>
+    <div class="code"><pre>ARC_UNITS:   -name "CDN_UNITS" -arc_length_units "mm" -arc_velocity_units <span class="hi">"ipm"</span> -arc_feed_units <span class="hi">"ipm"</span>
+ARC_SYSTEM_PROP: -name "ARC1" -units <span class="hi">"US_UNITS"</span> -restart_on -restart_dist 10 -scrape_opt_on</pre></div>
+
+    <p>The pendant shows inches per minute. RAPID stores mm/s. Every value in <code>mDeclarations.sys</code> is an exact whole number of ipm — which is how you can tell the data was entered on the pendant and never hand-edited:</p>
+
+    <div class="tw"><table>
+      <caption>Stored value ↔ what the programmer actually typed</caption>
+      <thead><tr><th>Stored (mm/s)</th><th>Entered</th><th>Stored (mm/s)</th><th>Entered</th><th>Stored (mm/s)</th><th>Entered</th></tr></thead>
+      <tbody>
+        <tr><td class="num">169.333</td><td class="num">400 ipm</td><td class="num">8.89</td><td class="num">21 ipm</td><td class="num">2.11667</td><td class="num">5 ipm</td></tr>
+        <tr><td class="num">158.75</td><td class="num">375 ipm</td><td class="num">6.35</td><td class="num">15 ipm</td><td class="num">4.23333</td><td class="num">10 ipm</td></tr>
+        <tr><td class="num">338.667</td><td class="num">800 ipm</td><td class="num">14.8167</td><td class="num">35 ipm</td><td class="num">2.54</td><td class="num">6 ipm</td></tr>
+        <tr><td class="num">275.167</td><td class="num">650 ipm</td><td class="num">9.31333</td><td class="num">22 ipm</td><td class="num">6.77333</td><td class="num">16 ipm</td></tr>
+      </tbody>
+    </table></div>
+
+    <p><code>weavedata weave1 = [1, 0, 2.032, 4.826, 3.048, …]</code> is the same story: 0.080&Prime; length, 0.190&Prime; width, 0.120&Prime; height.</p>
+
+    <div class="note watch"><span class="lbl">Never edit weld data in a text editor</span>
+      <p>Type <code>8.9</code> instead of <code>8.89</code> and you have silently changed 21&nbsp;ipm to 21.02&nbsp;ipm. Worse, a "tidy" round number in the file is a sign somebody already did. Edit these through the pendant or the RobotStudio arc data editor so the unit conversion stays exact.</p>
+    </div>
+
+    <h3>The naming convention carries the joint spec</h3>
+    <p>Read <code>sm3_16_ft_tube_095_overlap</code> as: seam data, 3/16&Prime; fillet, on tube, 0.095&Prime; material, closing pass. The suffix vocabulary:</p>
+    <ul>
+      <li><code>_ft</code> fillet, <code>_VB</code> vee butt · <code>_tube</code> / <code>_block</code> which member · <code>_095</code> material thickness</li>
+      <li><code>_tack</code>, <code>_tackHI</code>, <code>_tack_long</code> — tacking schedules</li>
+      <li><code>_seal</code>, <code>_Seal</code>, <code>_Weave</code>, <code>_Stitch</code>, <code>_Wrap</code>, <code>_craterFill</code> — pass type</li>
+      <li><code>_overlap</code> — <strong>the tie-in pass.</strong> Always a slower travel speed than its parent: <code>wd3_16_ft_tube</code> 19&nbsp;ipm → <code>wd3_16_ft_tube_overlap</code> 10&nbsp;ipm. Used on the last <code>ArcC</code>/<code>ArcCEnd</code> of every circumferential weld, so the closing overlap gets extra fill.</li>
+    </ul>
+
+    <h3>Welder integration</h3>
+    <div class="tw"><table>
+      <caption>Miller EIP configuration</caption>
+      <thead><tr><th>Item</th><th class="d">Value</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">Equipment class</td><td class="d"><code>Miller_EIP</code> → <code>awEqMillerEIP</code>, code from <code>MILLER:/Code/</code></td></tr>
+        <tr><td class="sig">Weld lists</td><td class="d">8 defined; <strong>list 4 is the only one flagged <code>IsSynergic</code></strong>, and almost all production data uses schedule 4</td></tr>
+        <tr><td class="sig">Exposed fields</td><td class="d"><code>ARC_UI_MASKING</code>: voltage + wirefeed only</td></tr>
+        <tr><td class="sig">Options</td><td class="d"><code>heat_on</code>, <code>cool_time_on</code>, <code>fill_on</code>, <code>autoinhib_on</code></td></tr>
+        <tr><td class="sig">Arc restart</td><td class="d"><code>restart_on</code>, back up 10&nbsp;mm and retry; <code>scrape_opt_on</code> for scrape starts</td></tr>
+        <tr><td class="sig">Error recovery</td><td class="d"><code>MoveOutDist 20</code>, <code>PathRecSpeed 500</code>, <code>PathToolOffs 20</code>, <code>NoOfRetry 50</code>, <code>HideAbort TRUE</code>, <code>RepairEnabled FALSE</code></td></tr>
+        <tr><td class="sig">Error catalogue</td><td class="d">57 Miller fault codes mapped to text (wire stuck, gas flow, coolant flow, could not initiate arc, missed weld…)</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="note tech"><span class="lbl">Weld error recovery happens on the HMI, not the pendant</span>
+      <p><code>ARC_ERR_HNDL_IO</code> routes the whole recovery dialogue to the PLC: <code>goErrActiveDiag</code>, <code>doDiagActive</code>, <code>doEscapeOK</code>, <code>diErrAck</code>, <code>giERActionSig</code>, <code>goER_ErrType</code>, <code>goER_ErrNum</code>. The operator answers "resume / skip seam / skip part" on the cell HMI and the PLC replies through <code>giERActionSig</code>. Anyone rebuilding the HMI has to reimplement that state machine — it is not optional decoration.</p>
+    </div>
+
+    <div class="note watch"><span class="lbl">Seam names are copy-pasted and wrong</span>
+      <p>Every weld carries <code>\SeamName:=</code> for the weld log. In <code>RS461117_Stn1</code> all of them read <code>"RS461117_Stn2_Weld_..."</code>. In <code>RS462509_Stn2</code> and <code>RS462509_Stn2NoIO</code> they read <code>"rRS462509_Stn1_Weld_..."</code>. And <code>Weld_3</code> is used for two different seams in the same routine. Weld traceability data is attributing station 1's welds to station 2 and vice versa.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="io">
+    <p class="kicker">Interfaces</p>
+    <h2>I/O map</h2>
+
+    <p>Four separate buses. Getting this topology right is most of the integration work.</p>
+
+    <figure>
+      <div class="fw">
+      <svg viewBox="0 0 700 268" role="img" aria-label="Network topology: PROFINET to the PLC, EtherNet/IP private network to the Miller welder and DSQC1030 local I/O, plus internal simulated boards">
+        <defs>
+          <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="var(--slate)"/>
+          </marker>
+        </defs>
+        <!-- controller -->
+        <rect x="252" y="86" width="196" height="96" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="350" y="112" text-anchor="middle" font-family="Archivo, sans-serif" font-size="13" font-weight="700" fill="var(--ink)">IRC5 · 4600-803651</text>
+        <text x="350" y="131" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--slate)">RobotWare 6.16.0025</text>
+        <text x="350" y="147" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--slate)">T_ROB1 · ExecEngine</text>
+        <text x="350" y="167" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--arc)">LAN3/X5 → 192.168.0.14</text>
+
+        <!-- PLC -->
+        <rect x="20" y="16" width="182" height="72" fill="none" stroke="var(--flux)" stroke-width="1.5"/>
+        <text x="111" y="38" text-anchor="middle" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--flux)">Cell PLC / HMI</text>
+        <text x="111" y="55" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--slate)">PROFINET controller</text>
+        <text x="111" y="70" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--slate)">robot is the device</text>
+        <path d="M202 60 L 250 100" stroke="var(--slate)" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+        <path d="M250 108 L 202 74" stroke="var(--slate)" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+        <text x="222" y="52" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--faint)">16B + 16B</text>
+
+        <!-- PROFIsafe -->
+        <rect x="20" y="104" width="182" height="58" fill="none" stroke="var(--scale)" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="111" y="126" text-anchor="middle" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--scale)">Safety PLC</text>
+        <text x="111" y="143" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--slate)">PROFIsafe F-Host</text>
+        <text x="111" y="156" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--faint)">src 1 → dest 10 · SIL2</text>
+        <path d="M202 133 L 250 133" stroke="var(--scale)" stroke-width="1.2" stroke-dasharray="4 3" fill="none" marker-end="url(#ar)"/>
+        <text x="226" y="126" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--faint)">8B</text>
+
+        <!-- Miller -->
+        <rect x="498" y="16" width="182" height="72" fill="none" stroke="var(--arc)" stroke-width="1.5"/>
+        <text x="589" y="38" text-anchor="middle" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--arc)">Miller Auto-Axcess E</text>
+        <text x="589" y="55" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--slate)">192.168.125.161</text>
+        <text x="589" y="70" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--faint)">asm 112/100 · RPI 15 ms</text>
+        <path d="M450 100 L 498 60" stroke="var(--slate)" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+        <path d="M498 74 L 450 108" stroke="var(--slate)" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+
+        <!-- DSQC1030 -->
+        <rect x="498" y="104" width="182" height="72" fill="none" stroke="var(--arc)" stroke-width="1.5"/>
+        <text x="589" y="126" text-anchor="middle" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--arc)">DSQC1030 Local I/O</text>
+        <text x="589" y="143" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--slate)">192.168.125.100</text>
+        <text x="589" y="158" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--faint)">16 DI / 16 DO · COS · 40 ms</text>
+        <path d="M450 140 L 498 140" stroke="var(--slate)" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+        <text x="589" y="192" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--faint)">reamer · cutter · wire brake · BullsEye</text>
+
+        <!-- internal -->
+        <rect x="252" y="204" width="196" height="52" fill="none" stroke="var(--rule-hard)" stroke-width="1.2"/>
+        <text x="350" y="224" text-anchor="middle" font-family="Archivo, sans-serif" font-size="11.5" font-weight="600" fill="var(--slate)">Internal boards</text>
+        <text x="350" y="240" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--faint)">B_GAP_SIM (simulated) · DRVIO_1</text>
+        <path d="M350 182 L 350 202" stroke="var(--slate)" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+
+        <text x="111" y="184" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" letter-spacing="1.5" fill="var(--faint)">PROFINET · LAN3 / X5</text>
+        <text x="589" y="210" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" letter-spacing="1.5" fill="var(--faint)">ETHERNET/IP · PRIVATE NET</text>
+      </svg>
+      </div>
+      <figcaption>Two physical networks and two internal boards. The PLC side is PROFINET with the robot as a <em>device</em> (station name <code>robotenergyio</code>); process equipment is on the controller's private EtherNet/IP network. Safety rides the same PROFINET device as an 8-byte PROFIsafe module in slot 3, starting at bit offset 128.</figcaption>
+    </figure>
+
+    <h3>PLC ↔ robot, PROFINET (device <code>PN_Internal_Device</code>)</h3>
+    <p>16 bytes each way. Bit numbers below are the <code>DeviceMap</code> values, which are what the PLC programmer needs.</p>
+
+    <div class="tw"><table>
+      <caption>Robot → PLC (outputs)</caption>
+      <thead><tr><th>Bit</th><th>Signal</th><th class="d">Function</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0–7</td><td class="sig">doMotors_ON / _OFF, doAutoON, doEStopActive, doCycleON, doRunchainOK, doExecERR, doPwrFailERR</td><td class="d">Standard controller state, wired through <code>SYSSIG_OUT</code></td></tr>
+        <tr><td class="num">8–11</td><td class="sig">doMotSup_Trig, doMotSup_ON, doPathRetERR, doTask_Exec</td><td class="d">Collision detection triggered / armed, path-return error, task executing</td></tr>
+        <tr><td class="num">12</td><td class="sig">doAllWeldsComplete</td><td class="d"><strong>Part finished</strong> — set by each part routine before the retract move</td></tr>
+        <tr><td class="num">13</td><td class="sig">doR1AtHome</td><td class="d">Cross-connected from <code>siAtSafeR1</code> (GoSafe home-joint zone)</td></tr>
+        <tr><td class="num">14</td><td class="sig">doPPAtMain</td><td class="d">Program pointer at <code>main</code></td></tr>
+        <tr><td class="num">16–23</td><td class="sig">goJobSelAck</td><td class="d">Echo of the selected job/part number</td></tr>
+        <tr><td class="num">32–34</td><td class="sig">doBE_Calib, doOK_Unclamp, doOK_Clamp</td><td class="d">BullsEye calibrating; <strong>clamp permission handshake</strong></td></tr>
+        <tr><td class="num">35–36</td><td class="sig">soAtSTN1_2ndPos, soAtSTN2_2ndPos</td><td class="d">Table reached the operator-requested second load angle (world-zone driven)</td></tr>
+        <tr><td class="num">48</td><td class="sig">doJobComplete</td><td class="d">Job complete (Production Manager)</td></tr>
+        <tr><td class="num">50</td><td class="sig">doR1WeldActive</td><td class="d">Cross-connected from <code>diWld1ArcDetect</code> — <strong>real arc-on feedback</strong></td></tr>
+        <tr><td class="num">53, 56, 58, 59</td><td class="sig">doR1AtReamer, doR1AtBullseye, doR1AtWireServicePos, doR1AtServicePos</td><td class="d">Robot inside one of four stationary world zones</td></tr>
+        <tr><td class="num">62</td><td class="sig">doR1BE_Active</td><td class="d">BullsEye routine running</td></tr>
+        <tr><td class="num">70</td><td class="sig">doActivateCup</td><td class="d">Declared, not used in RAPID</td></tr>
+        <tr><td class="num">73</td><td class="sig">doR1RdyForOrder</td><td class="d"><code>soR1RdyForOrder AND doCycleON</code> — robot ready to be given a part</td></tr>
+        <tr><td class="num">100</td><td class="sig">doRequestToEnter</td><td class="d">Robot requests cell entry</td></tr>
+        <tr><td class="num">107</td><td class="sig">doHMIPowerOnButton</td><td class="d">Motors-on lamp for the HMI</td></tr>
+        <tr><td class="num">108–127</td><td class="sig">goErrActiveDiag, doDiagActive, doEscapeOK, goER_ErrType, goER_ErrNum</td><td class="d"><strong>Arc error dialogue to the HMI</strong> (see the note above)</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="tw"><table>
+      <caption>PLC → robot (inputs)</caption>
+      <thead><tr><th>Bit</th><th>Signal</th><th class="d">Function</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0–9, 12</td><td class="sig">diMotor_ON/_OFF, diReset_EStop, diResetExecERR, diStartMain, diProgStart, diStopAtEndOfInstruct, diQuickStop, diSoftStop, diCycleStop, diPPToMain</td><td class="d">Remote control of the controller via <code>SYSSIG_IN</code></td></tr>
+        <tr><td class="num">10–11</td><td class="sig">siSTN1LoadPos2, siSTN2LoadPos2</td><td class="d">Request the second load position — fires the <code>m2ndLoadPos</code> interrupt</td></tr>
+        <tr><td class="num">16–23</td><td class="sig">giJobSel</td><td class="d"><strong>Part / menu number.</strong> Also carries the service-menu commands 101–110</td></tr>
+        <tr><td class="num">32</td><td class="sig">diReadyToResumeProg</td><td class="d"><strong>Clamp is in position, robot may continue</strong></td></tr>
+        <tr><td class="num">33</td><td class="sig">diTableAngNeg</td><td class="d">Sign bit for <code>giTableAngle</code></td></tr>
+        <tr><td class="num">34</td><td class="sig">giTableAngle</td><td class="d">Requested table angle in degrees, read with <code>GInput</code></td></tr>
+        <tr><td class="num">43–50</td><td class="sig">diStn1/2ClampOpen, ClampClosed, ClampAtPos1, ClampAtPos2</td><td class="d">Clamp state — mapped but <strong>never read by RAPID</strong></td></tr>
+        <tr><td class="num">51</td><td class="sig">diRequestToRotateHeadstock</td><td class="d">Mapped, not used in RAPID</td></tr>
+        <tr><td class="num">58</td><td class="sig">diR1MenuOrder</td><td class="d">Execute the service menu named by <code>giJobSel</code></td></tr>
+        <tr><td class="num">62</td><td class="sig">diCycleStart</td><td class="d">Start the part (OR'd with the pendant's <code>soOpInitCycle</code>)</td></tr>
+        <tr><td class="num">63</td><td class="sig">diEnableOrder</td><td class="d">Enable order handling</td></tr>
+        <tr><td class="num">64–65</td><td class="sig">diSpeedOverride25 / 100</td><td class="d">Force 25% or 100% speed override</td></tr>
+        <tr><td class="num">108–115</td><td class="sig">diErrAck, giERActionSig</td><td class="d">Operator's answer to the arc error dialogue</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="note tech"><span class="lbl">The PLC's service-menu channel</span>
+      <p><code>Utility.sys</code> registers <code>menudata</code> entries whose last field is a PLC command number. Raise <code>diR1MenuOrder</code> with the number in <code>giJobSel</code> and the robot runs that routine:</p>
+      <p><code>101</code> torch clean · <code>102</code> service position · <code>103</code> index station 1 to robot · <code>104</code> index station 2 to robot · <code>105</code> BullsEye reference pointer · <code>106</code> tool check · <code>107</code> tool update · <code>108</code> move arms to zero · <code>109</code> wire service position · <code>110</code> tool setup.</p>
+      <p>Commands 103 and 104 both call <code>ArmsToZero_DPos</code> first, then <code>IndexToStn1</code>/<code>IndexToStn2</code>. Note that 109 and 110 are both wired to <code>ServiceWirePos</code> — the "tool setup" menu does not run tool setup.</p>
+    </div>
+
+    <h3>DSQC1030 local I/O — process equipment</h3>
+    <div class="tw"><table>
+      <caption>EtherNet/IP Local I/O, 192.168.125.100</caption>
+      <thead><tr><th>Map</th><th>Signal</th><th>Category</th><th class="d">Function</th></tr></thead>
+      <tbody>
+        <tr><td class="num">DO 0</td><td class="sig">do1_TC_START</td><td class="num">TorchCleaner</td><td class="d">Start the Binzel reamer cycle (pulsed 1 s)</td></tr>
+        <tr><td class="num">DO 1</td><td class="sig">do2_TC_CUT</td><td class="num">TorchCleaner</td><td class="d">Wire cutter: 1 = closed, 0 = open</td></tr>
+        <tr><td class="num">DO 2</td><td class="sig">do3_TC_INJECTION</td><td class="num">TorchCleaner</td><td class="d">Anti-spatter spray</td></tr>
+        <tr><td class="num">DO 3</td><td class="sig">do4_SMTAC_LASER_ON</td><td class="num">Smartac</td><td class="d">Laser sensor power — for the unused laser profile</td></tr>
+        <tr><td class="num">DO 4</td><td class="sig">do5_WireBrake</td><td class="num">—</td><td class="d"><strong>Wire brake.</strong> Holds stickout constant through the search</td></tr>
+        <tr><td class="num">DI 0</td><td class="sig">sen1</td><td class="num">Bullseye_R1</td><td class="d">BullsEye light-beam sensor</td></tr>
+        <tr><td class="num">DI 1</td><td class="sig">di2_TC_READY</td><td class="num">TorchCleaner</td><td class="d">Reamer ready — stroke down, clamp open</td></tr>
+        <tr><td class="num">DI 2</td><td class="sig">di3_SMTAC_LaserDet</td><td class="num">Smartac</td><td class="d">Laser detect (used only in <code>Testing.laserTest</code>)</td></tr>
+        <tr><td class="num">DI 3</td><td class="sig">di4_SMTAC_O2</td><td class="num">Smartac</td><td class="d">Second sensor channel, unused</td></tr>
+        <tr><td class="num">DO 5–15, DI 4–15</td><td class="sig">Local_IO_0_DO6…DI16</td><td class="num">—</td><td class="d">Spare, named but unassigned</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Welder signals — from the add-in, not from EIO.cfg</h3>
+    <p>Four signals used in RAPID are <strong>not</strong> in the saved <code>EIO.cfg</code>; they come from the Arc option and the Miller EIP add-in's own configuration: <code>doWld1TouchOn</code>, <code>diWld1TouchActive</code>, <code>diWld1Touched</code>, <code>soAwManFeedFwd</code>. So does <code>diWld1ArcDetect</code>, which the <code>ArcOn</code> cross-connection depends on. Restore <code>SYSPAR</code> onto a system without the Miller add-in and the program will not compile.</p>
+    <p><code>EIO.cfg</code> does define the pendant-facing pair <code>siWld1StopProc</code> / <code>soWld1StopProc</code> (category <code>Arc_1_R1</code>) used by the Production Screen's "Stop Process" widget, plus <code>soWld1ManWireFeed</code> / <code>siWld1ManWireFeed</code>.</p>
+
+    <h3>Internal boards and the simulation short-circuit</h3>
+    <p><code>B_GAP_SIM</code> is a <em>simulated</em> local device carrying the whole Production Manager signal set (<code>soGap_*</code> / <code>siGap_*</code>, 60+ signals). It exists so the cell logic closes on itself. The important cross-connections:</p>
+    <div class="tw"><table>
+      <thead><tr><th>Result</th><th>Expression</th><th class="d">Effect</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">siGap_AtStn_1</td><td class="num">diLS_1_INPOS OR soLS_1_INPOS</td><td class="d">Real limit switch <em>or</em> the software stand-in. <code>Irbp1Prc</code> sets <code>soLS_1_INPOS</code> only when <code>NOT RobOS()</code> — i.e. <strong>in the virtual controller only</strong></td></tr>
+        <tr><td class="sig">soGap_NextStn_1</td><td class="num">siGap_AtStn_2</td><td class="d">"Next station is 1 if we're at 2" — <strong>the ping-pong is wired in cross-connections</strong>, not decided in RAPID or by the PLC</td></tr>
+        <tr><td class="sig">soGap_NextStn_2</td><td class="num">siGap_AtStn_1</td><td class="d">The mirror of the above</td></tr>
+        <tr><td class="sig">siGap_Run_Part_R1</td><td class="num">diCycleStart OR soOpInitCycle</td><td class="d">A part can be started by the PLC or from the pendant</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="service">
+    <p class="kicker">Maintenance loops</p>
+    <h2>Torch, wire and TCP integrity</h2>
+
+    <p>Three self-maintenance loops keep the process honest, and all three are worth understanding before changing anything about the torch.</p>
+
+    <h3>Torch cleaning, on a part counter</h3>
+    <p><code>Utility.ServiceFlag</code> is bound to the <code>EE_SERVICE</code> engine event and counts parts:</p>
+    <div class="code"><pre>IF nTCFreqSet &gt; 0 THEN
+  Incr nTCCount;
+  IF nTCCount &gt;= nTCFreqSet TorchClean;
+ENDIF
+IF nSPFreqSet &gt; 0 THEN
+  Incr nSPCount;
+  IF nSPCount &gt;= nSPFreqSet ServicePos;
+ENDIF</pre></div>
+    <p>Both intervals are set from the pendant (<code>TCFreq</code>, <code>SPFreq</code> menus); <code>0</code> disables. <code>TorchClean</code> then goes to a pounce point, resets the cleaner, waits <code>di2_TC_READY</code>, descends, pulses <code>do1_TC_START</code>, sprays anti-spatter, trims the wire and returns to <code>jposSafe</code>.</p>
+
+    <div class="note watch"><span class="lbl">The counters never reset</span>
+      <p><code>nTCCount</code> and <code>nSPCount</code> are incremented and compared but never zeroed in any readable module. Once the threshold is passed, the condition stays true and the service runs every part. Either the reset is inside encrypted <code>GAP_USER.sys</code>, or the intervals are being left at <code>0</code> in production and cleaning is triggered manually from the HMI (command 101).</p>
+      <p>Separately: <code>TorchClean</code> waits on <code>di2_TC_READY</code> both before <em>and</em> immediately after the start pulse. If the cleaner does not drop "ready" fast enough the second wait passes instantly and the robot can lift before the ream finishes — masked by a following <code>WaitTime\InPos, 3</code>. <code>TorchServices.RunReamer</code> handles this correctly (it waits for ready to go <em>false</em> first) but the call to it is commented out. <code>nCleanTime</code> is prompted for and stored, then never used.</p>
+    </div>
+
+    <h3>Wire trim</h3>
+    <p><code>WireCutter</code> opens the cutter, approaches the trim station in two steps, pulses <code>soAwManFeedFwd</code> for <code>nWireFeedTime</code>, closes the cutter, waits <code>nWTrimTime</code>, opens again. Straightforward, and the reason the touch searches are repeatable at all.</p>
+
+    <h3>BullsEye</h3>
+    <p>Version 10.2.5, beam sensor on <code>sen1</code>, scanning with <code>tWeldGun</code> and a 15&nbsp;mm TCP extension. Three entry points are exposed as PLC menu commands: <code>BERefPnt</code> (105), <code>BEToolCheck</code> (106, <code>BECheckTcp \XYZOnly \SingleScan</code>), <code>BEToolUpdate</code> (107, <code>BEUpdateTcp \XYZOnly</code>). <code>BEToolUpdate</code> has a proper error handler — on <code>ERRNO 111528</code> it falls back to a full unprompted setup.</p>
+
+    <p>The operational log is instructive:</p>
+    <div class="tw"><table>
+      <caption>BE_Oper_T_ROB1.log — recent history</caption>
+      <thead><tr><th>Date</th><th class="d">Event</th></tr></thead>
+      <tbody>
+        <tr><td class="num">—</td><td class="d"><code>BEUpdateTcp</code> corrected the TCP by <code>TCP_Delta = 0.515 mm</code> in 282 s</td></tr>
+        <tr><td class="num">2026-04-06</td><td class="d"><code>BEBeamMoveErr 36</code> twice — "beam has moved or calibration changed", tool re-initialised, setup invalidated</td></tr>
+        <tr><td class="num">2026-04-06</td><td class="d">Full setup from scratch: <strong>1523 s (25 min)</strong>, reference pointer rewritten to <code>[65.03, 600, 134.63]</code>, max deviation 0.70&nbsp;mm, mean 0.40&nbsp;mm</td></tr>
+      </tbody>
+    </table></div>
+    <p>The resulting <code>tWeldGun</code> — <code>[[46.013, -18.509, 414.927], …]</code>, 3.1&nbsp;kg — matches the current declaration exactly, so the tool data in the backup is live and correct. <code>tWeldGunNew</code> (<code>[[23.812, -2.154, 433.620], …]</code>) is a stale leftover referenced by nothing.</p>
+
+    <div class="note tech"><span class="lbl">A geometry check routine already exists</span>
+      <p><code>Testing.positionTest</code> drives the torch to three reference points — cleaning station, station 2, station 1 — with the wire brake engaged, in a fixed order. That is a ready-made after-crash / weekly verification routine, and it is the fastest way to confirm the cell geometry has not shifted. Worth knowing it is there before writing a new one.</p>
+    </div>
+
+    <h4>World zones</h4>
+    <p>Four stationary spherical zones are armed by <code>POWER_ON</code> event routines and report robot location to the PLC: BullsEye r=200&nbsp;mm, reamer r=250&nbsp;mm, service position r=200&nbsp;mm, wire service position r=200&nbsp;mm. They are defined with <code>WZDOSet \Stat</code>, so they survive until the next restart and cannot be freed by the program.</p>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="safety">
+    <p class="kicker">Safety</p>
+    <h2>Safety configuration</h2>
+
+    <p>SafeMove Pro with a PROFIsafe F-Device. All three stop functions — General, Automatic and Emergency — are <strong>Category&nbsp;1</strong> and all three are commanded from the safety PLC over PROFIsafe. Manual mode is capped at 0.25&nbsp;m/s. <code>RUNCHN_BOOL</code> selects soft AS, GS and SS; soft ES is not selected.</p>
+
+    <div class="tw"><table>
+      <caption>SafeMove zones — seal 2E540591, created 2025-03-05</caption>
+      <thead><tr><th>#</th><th>Zone</th><th>Top / bottom</th><th>Priority</th><th class="d">Supervision</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td class="sig">SafetyPerimeter</td><td class="num">+2.4 / &minus;0.7 m</td><td class="num">BASE</td><td class="d">Keep-<em>in</em>, permanent, robot included. Violation → Cat 1 stop. Tool speed limited to <strong>0.25 m/s</strong> while inside</td></tr>
+        <tr><td class="num">2</td><td class="sig">ProductionZone</td><td class="num">+2.3 / &minus;0.7 m</td><td class="num">NORMAL</td><td class="d">Tool speed up to <strong>4 m/s</strong>. NORMAL priority overrides the BASE limit of zone 1</td></tr>
+        <tr><td class="num">3</td><td class="sig">TipChange</td><td class="num">+1.5 / +0.3 m</td><td class="num">NORMAL</td><td class="d">Keep-<em>out</em>, armed by <code>sciConfiguration1Active</code> from the PLC. Violation → Cat 1 stop + <code>scoConfiguration1Violation</code></td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="note tech"><span class="lbl">Read the two speed zones together</span>
+      <p>Because zone 2 sits inside zone 1 and carries NORMAL priority, the effective rule is: <strong>250 mm/s everywhere inside the fence, except inside the ProductionZone envelope where 4 m/s is allowed.</strong> The torch-service and tip-change end of the cell is therefore permanently speed-limited. A cycle-time complaint about slow travel to the reamer is a safety-zone question, not a program question.</p>
+    </div>
+
+    <p>The torch is modelled for supervision as three capsules — <code>TorchBody</code> (r 40&nbsp;mm), <code>TorchNozzle</code> (r 25&nbsp;mm), <code>TorchBracket</code> (r 50&nbsp;mm) — plus two speed supervision points, with an elbow offset of <code>[-0.24, 0, 0.32]</code>&nbsp;m and the upper arm as a capsule plus a lozenge.</p>
+
+    <div class="note watch"><span class="lbl">Verify the safety tool against tWeldGun</span>
+      <p>SafeMove's <code>Tool id="1" name="tWeldGun"</code> declares <code>TCP = [13.7, 18.5, 439.9] mm</code> with orientation <code>[0.8037, -0.1875, 0.3387, 0.4518]</code>. RAPID's <code>tWeldGun</code> is <code>[46.0, -18.5, 414.9] mm</code> with <code>[0.9016, 0.0289, 0.4313, -0.0157]</code>. The two do not agree — about 25&nbsp;mm in Z and a different orientation. Since SafeMove supervises against <em>its own</em> model, a mismatch shifts the real supervised point away from the real TCP. Confirm on the plant whether the safety tool was deliberately set conservative or has simply drifted since the last BullsEye setup.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="risks">
+    <p class="kicker">Findings</p>
+    <h2>Risk ledger</h2>
+
+    <p>Ordered by what would bite hardest, not by where it appears in the code.</p>
+
+    <div class="ledger">
+
+      <div class="item"><span class="sev hi">Blocks work</span><h5>The virtual controller here is RobotWare 6.15.8029; the plant is 6.16.0025</h5>
+        <div class="body">The backup was taken from a 6.16.0025 system (<code>BACKINFO/version.xml</code>, <code>program.id</code>). The VC RobotStudio built on this machine (<code>Virtual Controllers/…/system.xml</code>) is 6.15.8029, because 6.16.0025 media is not installed locally. Install RobotWare 6.16.0025 and Positioner 6.16.0025 before trusting anything you simulate.</div>
+      </div>
+
+      <div class="item"><span class="sev hi">Safety</span><h5>The VC has no SafeMove configuration</h5>
+        <div class="body">The active safety config in the VC (<code>INTERNAL/SC_DISK/sc_cfg.xml</code>) is the 2015 RW 6.09 default — seal <code>88036456</code>, <strong>zero zones</strong> — and <code>sc_eio.cfg</code> is empty. The real configuration (seal <code>2E540591</code>) exists only as a file in <code>HOME/Safe Move/</code> and inside the May-2025 backup under <code>User Files</code>. Nothing you simulate will trip on the perimeter or the 250 mm/s base limit; the real robot will.</div>
+      </div>
+
+      <div class="item"><span class="sev hi">Incomplete</span><h5>35 of the declared parts have no code in this backup</h5>
+        <div class="body"><code>mDeclarations.sys</code> declares 24 production parts (IDs 1001–1036, 1500). Only <code>RS461117_Stn1/Stn2</code> and <code>RS462509_Stn1/Stn2</code> have routines. Production Manager will list the rest and fail on selection. Their targets and paths exist <em>only</em> as station data in <code>Monarch_1.2R2.rsstnx</code> — and the station also holds an older generation of modules (<code>m461117</code>, <code>m461541</code>, <code>m461547</code>, … <code>m722067</code>) alongside the current <code>mRS…</code> set. Get a full plant backup, or Synchronize-to-RAPID from the station and be deliberate about which generation you take.</div>
+      </div>
+
+      <div class="item"><span class="sev md">Process</span><h5>No error handling on 13 search instructions</h5>
+        <div class="body">Every <code>SearchL</code>/<code>SearchC</code> uses <code>\Stop</code> with no <code>ERROR</code> clause anywhere up the call chain. A missed touch aborts the part. This is the one process fault with no operator recovery path, in a cell where everything else routes to the HMI.</div>
+      </div>
+
+      <div class="item"><span class="sev md">Data integrity</span><h5>Seam names misattribute welds between stations</h5>
+        <div class="body"><code>RS461117_Stn1</code> logs every weld as <code>"RS461117_Stn2_Weld_n"</code>; <code>RS462509_Stn2</code> and its <code>_NoIO</code> twin log as <code>"rRS462509_Stn1_Weld_n"</code>; <code>Weld_3</code> is reused for two seams. If anyone is consuming the weld log for traceability, it is wrong.</div>
+      </div>
+
+      <div class="item"><span class="sev md">Motion</span><h5>Station 1's payload data is a placeholder</h5>
+        <div class="body">Station 1's <code>loaddata</code> is <code>[250, [0.001, 0.001, 0.001], [1,0,0,0], 30, 30, 60]</code> — a mass with a COG at the origin and round-number inertias. Station 2's is <code>[340, [0.1, 0.4, 901.4], [1,0,0,0], 476.9, 25.4, 2.6]</code>, which is clearly measured. The two arms also differ in <code>ARM_TYPE</code> mass: ARM1 892&nbsp;kg vs ARM2 806&nbsp;kg. Positioner path accuracy, servo tuning and collision-detection thresholds all read this data.</div>
+      </div>
+
+      <div class="item"><span class="sev md">Operations</span><h5>ModPos tuning is enabled in AUTO, and the PP warnings are off</h5>
+        <div class="body"><code>SYS.cfg</code>: <code>HOTEDIT_MODPOS -tuning_in_auto</code> lets positions be tuned in automatic mode. <code>WARN_AT_START</code> sets <code>cursor_pp_diff_warning 0</code> and <code>show_pp_to_cursor_button 0</code>, so the "program pointer differs from cursor" warning is suppressed and PP-to-cursor is hidden. Deliberate operator-convenience choices, but they mean taught positions can change in production with no record.</div>
+      </div>
+
+      <div class="item"><span class="sev md">Restore hazard</span><h5>ApplSys still holds the untouched ABB templates</h5>
+        <div class="body"><code>SYS.cfg → CAB_TASK_MODULES</code> auto-loads <code>HOME:/ApplSys/PartR1S1.mod</code>, <code>PartR1S2.mod</code> and <code>gapMain.mod</code>. Those files are the <em>original</em> templates: <code>ProgStn1</code> is a comment block ending in <code>Stop;</code> and <code>pdProgStn1</code> has part ID 0, against 9.7&nbsp;KB of real code and ID 111 in the saved program. Establish which copy is authoritative before any restore or Reset RAPID.</div>
+      </div>
+
+      <div class="item"><span class="sev md">Cycle</span><h5>ArmsToZero_DPos ends with Stop; and is bound to EE_CLOSE_JIG</h5>
+        <div class="body">A bare <code>Stop;</code> in an execution-engine event routine halts the cycle. <code>ServicePos</code> and <code>ServiceWirePos</code> also end in <code>Stop;</code>, which is intentional there (the operator works on the torch, then presses start). In <code>ArmsToZero_DPos</code> it looks accidental.</div>
+      </div>
+
+      <div class="item"><span class="sev md">Uncontrolled motion</span><h5>m2ndLoadPos moves the machine from inside a TRAP</h5>
+        <div class="body"><code>ActUnit</code> → <code>MoveJ</code> → <code>DeactUnit</code> inside <code>STN1LoadPos2TRAP</code>, triggered by a PLC signal that can arrive at any point in the cycle. Whatever prevents this firing with the torch inside the part lives on the PLC side.</div>
+      </div>
+
+      <div class="item"><span class="sev lo">Test code</span><h5>Mismatched activation in the test routines</h5>
+        <div class="body"><code>Testing.laserTest</code> does <code>ActUnit STN1</code> three times against two <code>DeactUnit STN2</code> — net +2 on STN1, &minus;2 on STN2. <code>Testing.positionTest</code> activates STN2 then STN1 without deactivating. <code>gapMain.MockRoutine</code>, <code>mRSTestFixture</code> and <code>mRSTestFixture2</code> activate STN1/STN2 and never release. Harmless because every production routine opens with <code>DeactUnit</code>, but these will error if run in the wrong order.</div>
+      </div>
+
+      <div class="item"><span class="sev lo">Dead code</span><h5>Orphaned and shadowed declarations</h5>
+        <div class="body"><code>initialHeadstockRot2</code>, <code>angularDisp2</code>, <code>scaledAngularDisp2</code>, <code>nTestCount</code>, <code>tool1</code>, <code>tWeldGunNew</code> — declared once, used nowhere. <code>mLogging.CheckAndLog2</code> logs <code>angularDisp1</code> instead of <code>angularDisp2</code>, and neither <code>CheckAndLog</code> routine is called from any readable module even though the CSVs hold 285 and 292 samples. <code>Utility.declarations()</code> contains a bare <code>&lt;SMT&gt;</code> placeholder. <code>mRSTestFixture.mod</code> declares a <code>LOCAL PERS wobj_Stn1</code> that shadows the global one with a zero user frame. <code>SyncPos.mod</code> and <code>SafeTest.mod</code> reference <code>obBETemp</code>, which is not declared in any module in this backup.</div>
+      </div>
+
+      <div class="item"><span class="sev lo">Framework</span><h5>GoSafe park and service positions are not defined</h5>
+        <div class="body"><code>ROB1_1_HomeData</code> has the safe position filled in and flagged TRUE; the park and service entries are <code>9E+09</code> with FALSE. The <code>SetParkPos1</code> / <code>CheckParkPos1</code> / <code>SetServicePos1</code> menus exist but have nothing to act on. Note this is separate from <code>Utility.ServicePos</code>, which is the cell's own torch-service move and does work.</div>
+      </div>
+
+      <div class="item"><span class="sev lo">Fragile</span><h5>Hard-coded absolute path in mLogging</h5>
+        <div class="body"><code>/hd0a/4600-803651/HOME/log/VariableLog1.csv</code> embeds the system name. Rename the system and the logging silently stops (the <code>Open</code> will raise, with no handler). Use <code>HOME:/log/…</code> instead.</div>
+      </div>
+
+      <div class="item"><span class="sev lo">Pendant</span><h5>Production Screen widget DLLs are missing</h5>
+        <div class="body"><code>ProductionSetup.xml</code> declares <code>TpsViewMillerDataEditor.dll</code> and <code>TpsViewMillerWeldInfo.dll</code>, neither of which is in <code>HOME/ProdScr/tps/</code> — they come from the Miller add-in at runtime. <code>ProdScr.log</code> in the May-2025 backup shows <code>FileNotFoundException</code> for the arc-status and process-stop widgets too; those two DLLs have since been added. Expect widget load errors on a VC without the full add-in media.</div>
+      </div>
+
+      <div class="item"><span class="sev lo">Opacity</span><h5>Four modules are encrypted</h5>
+        <div class="body"><code>GAP_USER.sys</code>, <code>GAP_PARTADV.sys</code>, <code>GAP_PARTADV_SHRD.sys</code>, <code>ProdScr.sys</code>. Anything you cannot account for — the service-counter reset, the <code>CheckAndLog</code> callers, the <code>ActStn</code>/<code>IndexToStn</code> wrappers' menu bindings — is probably in there. Plan around the interface, not the implementation.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section id="files">
+    <p class="kicker">Provenance</p>
+    <h2>What's actually in the folder</h2>
+
+    <div class="tw"><table>
+      <caption>D:\ABB\Monarc_RS\Project</caption>
+      <thead><tr><th>Path</th><th class="d">What it is</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">Station\Monarch_1.2R2.rsstnx</td><td class="d">11.3&nbsp;MB XML. The full cell: IRB 4600, the IRBP D600 mechanism (Bed / Headstock / Arm500D_2000 / MTD2000 / MTD750), the Binzel torch, Troax fence, ABB safety-fence assemblies, SafeLock gate, stack light, operator stand. Plus ~35 RAPID modules' worth of targets and paths, most of which are <strong>not</strong> in the controller.</td></tr>
+        <tr><td class="sig">Controller Data\4600-803651_Virtual</td><td class="d">The controller backup — RW 6.16.0025, taken 2026-08-31 10:26. This is the authoritative source for RAPID, <code>SYSPAR</code>, and the BullsEye / arc / variable logs.</td></tr>
+        <tr><td class="sig">Virtual Controllers\4600-803651_Virtual</td><td class="d">The VC RobotStudio built locally at RW 6.15.8029. Live program in <code>INTERNAL\RAPID\PRG1\</code> — 28 user modules plus the option modules (<code>Irbp1Prc</code>, <code>StnIndCfg12</code>, <code>BE_Mnu</code>, <code>ScreenMaker</code>).</td></tr>
+        <tr><td class="sig">User Files\…_BACKUP_2025-05-26_VC</td><td class="d">A May-2025 backup. Framework only — <strong>no part programs, no <code>mDeclarations</code>, no <code>wobj_Database</code>, no <code>m2ndLoadPos</code></strong>. Useful for two things: the real <code>sc_cfg.xml</code> and <code>sc_eio.cfg</code>, and as a before/after on the last 15 months of work.</td></tr>
+        <tr><td class="sig">Components\*.rslib</td><td class="d">The positioner (52&nbsp;MB) and torch (6&nbsp;MB) geometry libraries.</td></tr>
+        <tr><td class="sig">DistributionPackages\abb.robotics.3HEA_04600_803651</td><td class="d">The cell's customer-specific add-in / licence package, also embedded in <code>HOME\Option Disk\Option Disk.zip</code>.</td></tr>
+        <tr><td class="sig">…\HOME\System Backup\…2025-03-17_925.tar</td><td class="d">A commissioning-era full backup carried inside HOME. 4.1&nbsp;MB, easy to miss.</td></tr>
+        <tr><td class="sig">…\HOME\log\VariableLog1/2.csv</td><td class="d">577 logged part-rotation measurements. The best available evidence about real process variation in this cell.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Reference numbers worth keeping</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Item</th><th class="d">Value</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">Interchange positions</td><td class="d"><code>nInterchStn1 = -0.249999&deg;</code>, <code>nInterchStn2 = 179.901&deg;</code>, calibrated (<code>bInterchCalib1 = TRUE</code>)</td></tr>
+        <tr><td class="sig">Interchange speed</td><td class="d"><code>sdInterch1 = [1000, 500, 5000, 180]</code>; settle <code>nTorqueTime = 0.4 s</code>; <code>nMaxTorque1 = 12</code></td></tr>
+        <tr><td class="sig">Robot calibration</td><td class="d">Fine-calibrated 2024-12-06 by Axis Calibration; positioner nodes <code>pos1_1…5</code> all valid, method 1</td></tr>
+        <tr><td class="sig">Robot joint limits</td><td class="d">Axis 2 restricted to <code>-1.5708 … +2.618</code> rad, axis 3 to <code>-3.1416 … +1.309</code> rad</td></tr>
+        <tr><td class="sig">Collision detection</td><td class="d"><code>path_col_detect_on</code>; gravity 0.2, friction 1.0, disturbance 0.5; <code>CollisionErrorHandling</code> enabled</td></tr>
+        <tr><td class="sig">Wire feeder payload</td><td class="d"><code>ldFeeder</code> = 10&nbsp;kg on axis 3, COG <code>[0, -0.055, 0.065]</code></td></tr>
+        <tr><td class="sig">Program memory</td><td class="d">31.89&nbsp;MB free at startup, per <code>arcLog_T_ROB1.log</code></td></tr>
+        <tr><td class="sig">Brake check</td><td class="d"><code>BrakeMaintenance = 1</code> + <code>BrakeMaintenanceAlways</code>; positioner arms carry <code>-deactivate_cyclic_brake_check_arm</code></td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <footer>
+    Compiled by reading the project read-only — no files were modified. Every value cited is traceable to a named file in <code>D:\ABB\Monarc_RS\Project</code>. Claims marked "verify" need confirming against the running plant, because the backup can only tell you what was configured, not what was commissioned.
+  </footer>
+</main>
+</div>
+
+</body></html>
