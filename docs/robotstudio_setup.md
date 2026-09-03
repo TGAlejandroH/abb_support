@@ -124,10 +124,19 @@ frames + captures) → `11` (global captures done) → `4` (weld frame) →
 Things worth checking after the run (Controller tab → RAPID → `TG_Comms` data,
 or a RAPID Watch on the PERS variables):
 
-- `wobjTG_Cam.uframe` ≈ `[[850,-120,400],[…]]` and `wobjTG_Weld.uframe` ≈
+- `wobjTG_Cam.oframe` ≈ `[[850,-120,400],[…]]` and `wobjTG_Weld.oframe` ≈
   `[[900,80,350],[…]]` — the dummy frames served by `abb_server.py`
   (`cam_frame_xyzwpr` / `weld_frame_xyzwpr`), proving the received frames
   landed in the work objects the .tgs program uses.
+- ⚠ **`wobjTG_Cam.uframe` and `wobjTG_Weld.uframe` are both identity** — check
+  this *before* reading anything into the `oframe` values above. The received
+  frame now lands in `oframe`, and that is only equivalent to the old `uframe`
+  write while `uframe` is identity (`weld_frame_update_strategy_v1.md` §4). A
+  `PERS` keeps what it was last assigned, across loads and across a saved
+  station, so **a station that ever ran the pre-2026-09-03 code still holds a
+  frame in `uframe`** — and then every pose is double-transformed while the
+  `oframe` watch reads exactly right. `TD05Test.mod` normalizes both at entry;
+  if the values disagree with that, the module did not load.
 - `nTG_TravelSpeed`=17.5, `nTG_WeldProc`=5, `nTG_WireFeed`=250,
   `nTG_ArcLength`=2.5, `nTG_PassOK`=1, `nTG_GlobalCapOK`=1.
 
@@ -310,7 +319,17 @@ request 10 copies the updated `abb/rapid/TGS/TD05Test.mod` from the repo into
 New syntax exercised (⚠ first VC contact for these, plan §2.14): optional
 `\PERS` parameters on user PROCs, conditional argument propagation
 (`tgSendPose \Tool?Tool \WObj?WObj`), and a component write through a PERS
-parameter (`WObj.uframe:=...`).
+parameter (`WObj.oframe:=...`).
+
+⚠ **Before loading `TG_Comms.sys` on this VC — it has no external axis.** The
+file declares `wobjTG_WeldStn1` with `ufmec:="STN1"`, a mechanical unit that
+does not exist here. Nothing references it, but if the controller resolves
+`ufmec` at load or at Check Program rather than at first use, the whole shared
+SYSMODULE is refused and the validated non-coordinated path goes with it.
+**Comment that one declaration out** (or rename the station to this cell's
+unit) if the load or the program check complains about it, and record which it
+was — that answers a live question in
+`weld_frame_update_strategy_v1.md` §5.3.
 
 **Pass criteria:**
 

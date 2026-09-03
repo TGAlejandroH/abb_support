@@ -89,10 +89,151 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ProgEdited:=0;
 
     ! Frames received from the HMI (FANUC PR[5]/UFRAME[5], PR[6]/UFRAME[6]).
-    ! Request PROCs write .uframe; the .tgs program references these wobjs in
-    ! its move instructions - no separate "activate" step exists or is needed.
+    ! Request PROCs write .oframe; the .tgs program references these wobjs in
+    ! its move instructions - no separate "activate" step exists or is needed
+    ! FOR THE TWO BASE-REFERENCED OBJECTS. The coordinated shape is another
+    ! story: its station must be an ACTIVE mechanical unit (ActUnit) before
+    ! a move - or a CRobT - in that work object resolves. That is one of the
+    ! coordinated prerequisites still open; see the WIP block below.
+    !
+    ! THE RULE (weld_frame_update_strategy_v1, 2026-09-03).
+    ! A request writes .oframe, ALWAYS - one write target, no case to
+    ! detect here. What the HMI SENDS branches on one thing only: whether
+    ! the weld is coordinated.
+    !
+    !   NOT COORDINATED - static table, OR indexed on a 1-/2-axis
+    !   positioner that does not move during the weld:
+    !       ufprog TRUE, ufmec "", uframe identity
+    !       oframe <- the CAD/part frame W.R.T. THE ROBOT BASE
+    !       (exactly what the HMI sends FANUC today)
+    !
+    !   COORDINATED MOTION - WORK IN PROGRESS, see the declaration below:
+    !       ufprog FALSE, ufmec "<station>", uframe computed live by the
+    !       controller from the station angles (the declared one ignored)
+    !       oframe <- OPEN: the part W.R.T. THE POSITIONER FRAME, or a
+    !       DISPLACEMENT in that frame, which is what the HMI's own
+    !       (unfinished, untested) coordinated FANUC path computes today
+    !
+    ! Writing THE SERVED FRAME to uframe is never right. Coordinated: the
+    ! controller ignores uframe outright (plan E28), so the write is a
+    ! SILENT no-op - finding F-2's failure mode. Not coordinated: uframe is
+    ! identity, so writing oframe is the same geometry anyway, because
+    ! motion and CRobT both see only the product uframe*oframe.
+    !
+    ! BUT "uframe is identity" is a claim about the LIVE PERS VALUE, not
+    ! about the declarations below. A PERS keeps whatever it was last
+    ! assigned - across program loads, and across a saved station - so a
+    ! controller that ever ran the pre-2026-09-03 code, which served the
+    ! frame INTO uframe, still holds that frame there. Compose it with the
+    ! new oframe write and every pose is double-transformed silently, while
+    ! a pendant watch on oframe shows exactly the expected numbers.
+    ! => AN EXPORTED PROGRAM MUST ASSIGN uframe:=IDENTITY AT ENTRY, next to
+    ! its .oframe nominal, for every base-referenced work object it uses.
+    ! That is a one-time normalization of an assumption, NOT a frame write,
+    ! and it is the one legitimate reason to touch uframe at all.
+    ! TD05Test.mod and TD05Weld.mod both do it; THE WELD PLANNER ABB
+    ! EXPORTER MUST TOO.
+    !
+    ! ONE DECLARATION PER SHAPE - ufprog/ufmec ARE NEVER WRITTEN AT RUNTIME.
+    ! The two shapes are separate symbols, so a program picks one by PASSING
+    ! it (\WObj:=...) rather than by mutating a record. Reasons, in order:
+    !   - runtime ufmec re-binding is unverified and unusual; declaring each
+    !     shape once makes the question moot;
+    !   - a program mixing indexed and coordinated welds would otherwise
+    !     have to reassign mid-run, which is exactly the look-ahead hazard
+    !     tracked as O-3 (a PERS write landing after RAPID has already
+    !     prepared queued instructions);
+    !   - robtargets bind by NAME, so a record whose kind changes mid-program
+    !     makes the same named target mean different things at different
+    !     points - and a pendant watch shows one mutating record;
+    !   - the static shape stays byte-identical to what a VC has accepted.
+    ! An exported program therefore assigns only frame COMPONENTS at entry -
+    ! .uframe identity and .oframe nominal - never ufprog/ufmec.
+    ! NOTE Accepted cost: ufprog/ufmec correctness
+    ! now lives on the controller, the same trust model as tTG_Weld - a
+    ! wrong ufmec here is a silent wrong-station weld, so treat these as
+    ! cell configuration and verify them when commissioning.
+    !
+    ! For an INDEXED weld the served frame describes the part AT THE ANGLE
+    ! THE WELD PLANNER AUTHORED for that weld: the HMI rotates its
+    ! localization result from the capture angle to the weld's
+    ! tool_path_parameters positioner_angle - bTpos * Rz(dtheta) *
+    ! inverse(bTpos) - and NEVER reads the robot's actual station position.
+    ! So the served value does not depend on when the request runs, and the
+    ! real requirement is that THE PROGRAM'S INDEX EQUALS THE ANGLE THE
+    ! PLANNER AUTHORED (true by construction for an exported program).
+    ! Keep the safe order regardless: index, then request the frame, then
+    ! weld. And once a frame has been served, do not re-assign either
+    ! component before the weld that consumes it.
+    !
+    ! ---- Non-coordinated: static table, or indexed on a positioner -------
+    ! Base-referenced. Identity uframe, so uframe*oframe = oframe = whatever
+    ! the HMI serves. These are also the standalone/VC defaults.
     PERS wobjdata wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
     PERS wobjdata wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
+    ! ---- Coordinated motion, station 1 -----------------------------------
+    ! WORK IN PROGRESS on both sides of the wire, 2026-09-03. This is the
+    ! declared shape only; nothing in this repo references it yet, and the
+    ! prerequisites listed at the end of this block are all still open.
+    !
+    ! ufprog FALSE + ufmec => the controller derives uframe live from the
+    ! station angles and IGNORES the declared uframe, which is why it is
+    ! left identity. oframe is the component TG_ReqWeldFrame writes.
+    !
+    ! COMMENT THIS DECLARATION OUT WHEN THE TEST CELL HAS NO EXTERNAL AXIS,
+    ! or change "STN1" to the mechanical unit of the setup being tested.
+    ! The name must exist in this controller's MOC configuration, and the
+    ! phase 1-6 validation VC (RW6.15.08/IRB4600) has no positioner at all.
+    ! THIS FILE IS THE SHARED SYSMODULE: if a controller rejects an
+    ! unresolvable ufmec at load or at Check Program, it takes the ALREADY
+    ! VALIDATED non-coordinated path down with it. One "!" in front of the
+    ! declaration line is the whole rollback. Note the asymmetry - an
+    ! unresolvable name fails loudly, while a wrong-but-resolvable one is a
+    ! silent wrong-station weld, so verify the name at commissioning.
+    ! NOTE NOT YET LOADED ON A CONTROLLER. Only the static shape above has been
+    ! (LOCAL PERS wobjdata accepted as a \WObj argument, RW6.15.08/IRB4600,
+    ! Check Program clean). Bundle this with the coordinated VC load-check.
+    !
+    ! WHAT THIS oframe CARRIES IS STILL OPEN. The absolute reading is "the
+    ! part w.r.t. the positioner frame". What the HMI's coordinated FANUC
+    ! path computes today is instead a DISPLACEMENT in the positioner frame
+    ! (RobotCell::getWeldFrameToSendToRobot ->
+    ! Weld::GetCoordinatedOffsetInPositionerFrame, destined for FANUC's
+    ! OFFSET,PR[n]) - a different quantity, differing by the nominal
+    ! part-on-plate mount. That HMI path is itself unfinished and untested,
+    ! so this is a decision still to be made, not a defect to fix here.
+    ! Either way TG_ReqWeldFrame is unaffected: it writes .oframe on
+    ! whatever it is handed. What the convention changes is what the
+    ! exporter divides the robtargets by. See section 5 of
+    ! weld_frame_update_strategy_v1.md for the two shapes side by side.
+    !
+    ! Prerequisites, none of them closed (all WIP):
+    !   - ActUnit for the station, and whether it is a mechanical unit in
+    !     the robot's own motion task or a MultiMove group (SyncMoveOn);
+    !   - real extjoint values for the station axes in every robtarget -
+    !     the exporter writes 9E9 for axes it does not command (plan D5);
+    !   - the controller's STN1 BASE FRAME must agree with the positioner
+    !     calibration the PC uses. A disagreement is a silent rigid offset
+    !     on EVERY coordinated weld - E47 one level up, and a bigger risk
+    !     than a mistyped ufmec.
+    ! D4 / second station: add wobjTG_WeldStn2 with ufmec:="STN2" - deferred
+    ! until the two-station template lands, so the resident set does not grow
+    ! symbols nothing references yet.
+    PERS wobjdata wobjTG_WeldStn1:=[FALSE,FALSE,"STN1",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
+    ! No coordinated CAMERA work object, deliberately. Captures stay
+    ! base-referenced on ABB exactly as on FANUC, so the HMI's scan and
+    ! registration path is one code path across both brands (owner call,
+    ! 2026-09-03). NOTE What that costs depends on the open convention
+    ! question above. Under the ABSOLUTE reading the PC's positioner model
+    ! enters as a single left-multiply - inverse(plate_pc(theta_s)) * P_base
+    ! - so a calibration error there lands on the weld at full magnitude.
+    ! Under the DISPLACEMENT reading it enters as a conjugation that cancels
+    ! at zero correction, which is the better-conditioned arithmetic. Either
+    ! way it is a known, accepted accuracy item, not an oversight. See
+    ! weld_frame_update_strategy_v1.md section 5 for both, and for the two
+    ! ways in if measurement later says it matters.
 
     ! Tools (FANUC UT[2] camera / UT[8] torch).
     ! TODO: DUMMY VALUES - replace with the calibrated tooldata of the real cell.
@@ -460,11 +601,18 @@ MODULE TG_Comms(SYSMODULE)
         ! plan 4.5; KAREL received 6 prompted reals) -> recv capture flag.
         ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
         ! the outgoing pose (which goes out in the frame's PREVIOUS value -
-        ! FANUC parity, plan 1.4.1) AND the wobj whose .uframe receives the
+        ! FANUC parity, plan 1.4.1) AND the wobj whose .oframe receives the
         ! served frame, written through the PERS reference. Omitted ->
         ! DEPRECATED modal fallback; the frame lands in wobjTG_Cam.
-        ! -> WObj.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197]; forced
+        ! -> WObj.oframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197]; forced
         ! to 2 = abort sentinel on a bad frame payload, matrix I4)
+        !
+        ! The camera work object is ALWAYS the base-referenced wobjTG_Cam,
+        ! for a coordinated weld as much as an indexed one - captures are
+        ! taken at a standstill at one index, and keeping them
+        ! base-referenced keeps the HMI's scan/registration path identical
+        ! to FANUC's. There is no coordinated camera work object; see the
+        ! declaration block for the accuracy item that buys.
         VAR string reply;
         VAR pose pFrame;
         VAR bool frame_ok;
@@ -475,9 +623,9 @@ MODULE TG_Comms(SYSMODULE)
         frame_ok:=tgTryStrToPose(reply,pFrame);
         IF frame_ok THEN
             IF Present(WObj) THEN
-                WObj.uframe:=pFrame;
+                WObj.oframe:=pFrame;
             ELSE
-                wobjTG_Cam.uframe:=pFrame;
+                wobjTG_Cam.oframe:=pFrame;
             ENDIF
         ENDIF
         ! The capture-status exchange must ALWAYS complete: the HMI's R_C_F
@@ -530,10 +678,25 @@ MODULE TG_Comms(SYSMODULE)
         ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal)
         ! -> recv weld status (0=skip, 1=weld, 2=abort program).
         ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
-        ! the outgoing pose AND the wobj whose .uframe receives the served
+        ! the outgoing pose AND the wobj whose .oframe receives the served
         ! frame, written through the PERS reference. Omitted -> DEPRECATED
         ! modal fallback; the frame lands in wobjTG_Weld.
-        ! -> WObj.uframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
+        ! -> WObj.oframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
+        !
+        ! .oframe in EVERY case, coordinated or not (see THE RULE at the
+        ! top of this file), so this PROC never has to know which case it
+        ! is in - and cannot, by construction: it writes .oframe on
+        ! WHATEVER IT WAS HANDED, and the call site chooses.
+        !     TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;      ! indexed
+        !     TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;  ! coordinated
+        ! What the served pose is RELATIVE TO does differ - the robot base
+        ! for a non-coordinated weld (FANUC parity), the positioner frame
+        ! for a coordinated one - but that follows from which work object
+        ! the exporter passed, and the HMI holds the project and knows the
+        ! weld's positioner group. Not this routine's business.
+        ! NOTE The DEPRECATED modal fallback below writes wobjTG_Weld BY NAME,
+        ! so it can only ever express the non-coordinated case. That is
+        ! fine - it is the static back-pocket path - but do not extend it.
         VAR string reply;
         VAR pose pFrame;
         VAR bool frame_ok;
@@ -544,9 +707,9 @@ MODULE TG_Comms(SYSMODULE)
         frame_ok:=tgTryStrToPose(reply,pFrame);
         IF frame_ok THEN
             IF Present(WObj) THEN
-                WObj.uframe:=pFrame;
+                WObj.oframe:=pFrame;
             ELSE
-                wobjTG_Weld.uframe:=pFrame;
+                wobjTG_Weld.oframe:=pFrame;
             ENDIF
         ENDIF
         ! The weld-status exchange must ALWAYS complete: the HMI's R_W_F

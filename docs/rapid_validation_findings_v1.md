@@ -80,7 +80,7 @@ then read:
 ! in the .tgs program
 wobjTG_Act := wobjTG_Cam;                      ! copy taken HERE
 ...
-TG_ReqCamFrame;                                 ! writes wobjTG_Cam.uframe LATER
+TG_ReqCamFrame;                                 ! writes wobjTG_Cam.oframe LATER
 ! -> wobjTG_Act still holds the frame as it was before the request
 ```
 

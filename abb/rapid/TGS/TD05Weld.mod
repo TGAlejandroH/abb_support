@@ -61,6 +61,62 @@ MODULE TD05Weld_Mod
         stTG_ProgPass:="TD05Weld";
         stTG_RobStatus:="Ok";
         stTG_SubName:="none";
+
+        ! --- work object (weld_frame_update_strategy_v1) -----------------
+        ! The exported program picks its work object by PASSING it, and
+        ! assigns that object's frame nominals here, ahead of any motion
+        ! (which also keeps it clear of RAPID's look-ahead, O-3).
+        ! ufprog/ufmec are NEVER written at runtime - the two shapes are
+        ! separate resident symbols in TG_Comms.sys, so a program mixing
+        ! indexed and coordinated welds just passes a different \WObj per
+        ! weld instead of mutating a record mid-run.
+        !
+        ! THIS PROGRAM IS NOT COORDINATED - a static table, or a part
+        ! indexed on a positioner that is stationary during the weld. So it
+        ! uses wobjTG_Weld (identity uframe), and the oframe below is the
+        ! nominal part frame w.r.t. THE ROBOT BASE that the robtargets were
+        ! divided by. TG_ReqWeldFrame overwrites just that component with
+        ! the measured one, which the HMI sends base-referenced exactly as
+        ! it does for FANUC.
+        !
+        ! uframe:=identity is part of that contract, not housekeeping: the
+        ! non-coordinated case is correct only because uframe*oframe =
+        ! oframe, and that is a claim about the LIVE PERS value, which
+        ! persists across loads and saved stations - including a frame left
+        ! there by the pre-2026-09-03 code, which served the frame INTO
+        ! uframe. Composing the two double-transforms every pose silently.
+        ! THE WELD PLANNER ABB EXPORTER MUST EMIT THIS RESET TOO, for every
+        ! base-referenced work object its program uses.
+        ! Having assigned the nominals here, the program must not re-assign
+        ! either component MID-RUN: from TG_ReqWeldFrame until the weld it
+        ! serves, the oframe belongs to the HMI.
+        !
+        ! NOTE An INDEXED weld adds a sequencing rule. The HMI serves the
+        ! part as it stands AT THE ANGLE THE WELD PLANNER AUTHORED for that
+        ! weld - it rotates its localization result from the capture angle
+        ! to the weld's positioner_angle and never reads the station's
+        ! actual position - so the requirement is that THE PROGRAM'S INDEX
+        ! EQUALS THAT AUTHORED ANGLE when the weld runs, which holds by
+        ! construction for an exported program. Keep the safe order
+        ! regardless: index the positioner FIRST, then request the frame,
+        ! then weld.
+        !
+        ! A COORDINATED weld changes the nominal below and the \WObj on
+        ! every motion and request:
+        !   wobjTG_WeldStn1.oframe:=[<see the open note in TG_Comms.sys>];
+        !   TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;
+        ! The request PROC itself is identical, because .oframe is the
+        ! write target either way and the call site chooses the object. No
+        ! uframe reset there - the controller derives that one from the
+        ! station angles and ignores the declared value. NOTE Coordinated
+        ! welds are WORK IN PROGRESS on both sides, and what that oframe
+        ! carries is still open: the absolute part-on-plate pose, or a
+        ! displacement in the positioner frame as the HMI's own unfinished
+        ! FANUC path computes. See weld_frame_update_strategy_v1.md
+        ! section 5 before writing a coordinated program against this.
+        wobjTG_Weld.uframe:=[[0,0,0],[1,0,0,0]];
+        wobjTG_Weld.oframe:=[[0,0,0],[1,0,0,0]];
+
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
 
         TG_ReqPassCheck \Tool:=tTG_Weld \WObj:=wobj0;

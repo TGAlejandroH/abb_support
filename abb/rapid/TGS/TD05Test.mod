@@ -43,6 +43,39 @@ MODULE TD05Test_Mod
         stTG_ProgPass:="TD05Test";     ! SET_PASS_SR: program name == password
         stTG_RobStatus:="Ok";          ! SET_ROB_S_SR('Ok')
         stTG_SubName:="none";          ! deterministic start (SR[25] was stale on FANUC)
+
+        ! --- work objects (weld_frame_update_strategy_v1) ----------------
+        ! The program assigns the frame nominals here, before any motion;
+        ! the requests below overwrite the .oframe component with the
+        ! measured frame. ufprog/ufmec are never written at runtime.
+        !
+        ! WHY uframe IS RESET TOO, and it is contract rather than tidiness.
+        ! The non-coordinated case is correct only BECAUSE uframe is
+        ! identity, which makes uframe*oframe = oframe = the frame the HMI
+        ! served. That is a claim about the LIVE PERS value, and a PERS
+        ! keeps whatever it was last assigned - across loads and across a
+        ! saved station. A controller that ever ran the pre-2026-09-03 code,
+        ! which served the frame INTO uframe, still holds a frame there;
+        ! composing it with the new oframe write double-transforms every
+        ! pose silently, while a watch on oframe reads exactly right. So
+        ! normalize it at entry. THE WELD PLANNER ABB EXPORTER MUST EMIT
+        ! THE SAME RESET for every base-referenced work object its program
+        ! uses - .uframe is assumed identity everywhere downstream.
+        !
+        ! This demo is not coordinated, so the weld uses the
+        ! base-referenced wobjTG_Weld. A coordinated weld would pass
+        ! wobjTG_WeldStn1 instead - see TD05Weld.mod - and would NOT reset
+        ! uframe: the controller derives that one itself and ignores the
+        ! declared value.
+        ! The CAMERA object is always wobjTG_Cam, base-referenced, for a
+        ! coordinated weld too: captures are standstill captures at one
+        ! index, and keeping them base-referenced keeps the HMI's scan and
+        ! registration path identical to FANUC's.
+        wobjTG_Cam.uframe:=[[0,0,0],[1,0,0,0]];
+        wobjTG_Cam.oframe:=[[0,0,0],[1,0,0,0]];
+        wobjTG_Weld.uframe:=[[0,0,0],[1,0,0,0]];
+        wobjTG_Weld.oframe:=[[0,0,0],[1,0,0,0]];
+
         ! DEPRECATED modal alternative (plan 7.6): nTG_ActTool:=8; nTG_ActFrame:=0;
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
 
@@ -70,7 +103,7 @@ MODULE TD05Test_Mod
         ! DEPRECATED modal alternative (plan 7.6): nTG_ActTool:=2; nTG_ActFrame:=5;
         MoveAbsJ jtCap1,v100,fine,tTG_Cam;
         stTG_SubName:="C1PGlobal_m45_3";
-        TG_ReqCamFrame \Tool:=tTG_Cam \WObj:=wobjTG_Cam;   ! R_C_F -> wobjTG_Cam.uframe + nTG_DoCapture
+        TG_ReqCamFrame \Tool:=tTG_Cam \WObj:=wobjTG_Cam;   ! R_C_F -> wobjTG_Cam.oframe + nTG_DoCapture
         ! 2 = robot-side abort sentinel: bad frame payload (matrix I4)
         IF nTG_DoCapture=2 GOTO abort_end;
         IF nTG_DoCapture=1 THEN
@@ -108,11 +141,17 @@ MODULE TD05Test_Mod
         ! different Cartesian positions - visible proof that TG_ReqWeldFrame
         ! updated the frame the welding motions run in.
         !
-        ! Reset to identity first, so the "before" position is the same on
-        ! every cycle (wobjTG_Weld otherwise persists from the previous run,
-        ! exactly like FANUC UFRAME[6] does). Demo-only: a production .tgs
-        ! program must NOT clear a received frame.
-        wobjTG_Weld.uframe:=[[0,0,0],[1,0,0,0]];
+        ! Back to the identity nominal first, so the "before" position is
+        ! the same on every cycle (wobjTG_Weld otherwise persists from the
+        ! previous run, exactly like FANUC UFRAME[6] does). uframe needs no
+        ! repeat - nothing writes it after the entry normalization above.
+        ! DEMO-ONLY, and the distinction is worth being exact about:
+        ! assigning the nominal AT ENTRY is prescribed (see the header
+        ! block), but a production .tgs must never re-assign a work object
+        ! frame MID-RUN, between a TG_ReqWeldFrame and the weld it serves.
+        ! That would discard the frame the HMI just served and re-open the
+        ! O-3 look-ahead hazard.
+        wobjTG_Weld.oframe:=[[0,0,0],[1,0,0,0]];
         ! The same target in two different frames needs two different arm
         ! configurations, so the stored confdata cannot satisfy both.
         ! Demo-only: a production program keeps configuration control on.
@@ -122,7 +161,7 @@ MODULE TD05Test_Mod
         TPWrite "TG DEMO: before R_W_F, TCP ="\Pos:=CPos(\Tool:=tTG_Weld \WObj:=wobj0);
         ! ----------------------------------------------------------------------
 
-        TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;   ! R_W_F -> wobjTG_Weld.uframe + nTG_WeldStatus
+        TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;   ! R_W_F -> wobjTG_Weld.oframe + nTG_WeldStatus
         TG_CamClose;                   ! FANUC defensive CAM_CLOSE after R_W_F
         IF nTG_WeldStatus=2 GOTO abort_end;
         IF nTG_WeldStatus=1 THEN
