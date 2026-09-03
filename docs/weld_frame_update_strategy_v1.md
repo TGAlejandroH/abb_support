@@ -13,13 +13,14 @@ target open and assumed `TG_ReqWeldFrame` would have to detect which case it was
 
 **Status:** implemented in this repo 2026-09-03 (`TG_Comms.sys`, `TGS/TD05Test.mod`,
 `TGS/TD05Weld.mod`). **Not yet run on a controller** — the `oframe` write is numerically inert on
-the current declarations (§4), so the existing VC validation still stands, but the
-coordinated/`ufmec` shape has never been loaded.
+the current declarations (§4), so the existing VC validation still stands, but `wobjTG_WeldStn1` —
+the coordinated shape — has never been loaded.
 
-⚠ **This document was revised the day it was written.** The first version branched on *mounting*
-("is the part bolted to the chuck?") rather than on *coordination*, which put every station weld on
-the `ufmec` shape. §6 records why that was dropped, including the calibration argument that turned
-out not to hold — worth reading before anyone proposes it again.
+⚠ **This document was revised twice the day it was written.** The first version branched on
+*mounting* ("is the part bolted to the chuck?") rather than on *coordination*, which put every
+station weld on the `ufmec` shape — §6 records why that was dropped, including the calibration
+argument that turned out not to hold. The second put both shapes in one `wobjdata` and swapped the
+record at entry; §3 records why they are now separate symbols. Read both before re-proposing either.
 
 ---
 
@@ -33,6 +34,7 @@ out not to hold — worth reading before anyone proposes it again.
 | `oframe` | the CAD/part frame **w.r.t. the robot base** | the part **w.r.t. the positioner/coordinated frame** |
 | What the HMI sends | base-referenced — **identical to FANUC today** | positioner-referenced — mirrors FANUC's dynamic coordinated frame |
 | What a request writes | `oframe` | `oframe` |
+| Work object | `wobjTG_Weld` | `wobjTG_WeldStn1` (per station) |
 
 **The branch is coordinated-vs-not, and nothing else.** Not brand, not whether the part sits on a
 positioner, not whether the cell has one. A part indexed on a 2-axis positioner and a part clamped
@@ -59,27 +61,65 @@ So the routine needs no branch, and the case knowledge stays where it is actuall
 exporter, which holds the weld's positioner group. RAPID is the layer hardest to change and hardest
 to test. Keep it dumb.
 
-## 3. Who states the mounting, and when
+## 3. Two work objects, one per shape — and `ufprog`/`ufmec` are never written at runtime
 
-The exported program assigns the **whole `wobjdata` record** at entry, before any motion:
+The two shapes are **separate resident symbols**, not one record that changes kind:
 
 ```rapid
-! not coordinated (static table, or indexed on a positioner)
-wobjTG_Weld := [FALSE, TRUE, "", [[0,0,0],[1,0,0,0]], <part w.r.t. robot base>];
-
-! coordinated motion
-wobjTG_Weld := [FALSE, FALSE, "STN1", [[0,0,0],[1,0,0,0]], <part w.r.t. positioner frame>];
+! TG_Comms.sys — declared once, per cell
+PERS wobjdata wobjTG_Weld     := [FALSE, TRUE,  "",     <identity>, <oframe>];
+PERS wobjdata wobjTG_WeldStn1 := [FALSE, FALSE, "STN1", <identity>, <oframe>];
 ```
 
-Assigning the whole record, not a component, is what makes the statement complete — a program that
-inherited the previous run's `ufprog`/`ufmec` would weld against the wrong thing. At entry, ahead of
-motion, also keeps it clear of RAPID's look-ahead (contract **O-3**).
+An exported program **picks one by passing it**, and assigns only its `.oframe` nominal at entry:
 
-⚠ **Sequencing, and this is the one thing to get right.** A base-referenced frame describes the part
-**at the index it was reported at**. So for an indexed weld the station must already be at the weld
-index when `TG_ReqWeldFrame` runs — index first, then request the frame, then weld. This is the same
-rule the FANUC path already lives under; confirm the exporter sequences it that way rather than
-assuming, because the failure is silent and geometric.
+```rapid
+wobjTG_Weld.oframe := <part w.r.t. robot base>;
+...
+TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;       ! indexed / static
+TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;   ! coordinated
+```
+
+**`TG_ReqWeldFrame` needs no branch, and cannot have one.** It writes `.oframe` on *whatever it was
+handed* — it never names a work object. That is the point of the `\PERS wobjdata WObj` parameter
+style adopted as the fix for **F-2**: the frame is visible at the call site instead of hidden in
+global state. The exporter knows which case each weld is, so it encodes that in the argument.
+
+*(The deprecated modal fallback writes `wobjTG_Weld` **by name**, so it can only express the
+non-coordinated case. That is fine — it is the static back-pocket path. Do not extend it.)*
+
+### Why separate symbols rather than reassigning one record
+
+The first version of this document had a single `wobjTG_Weld` whose whole record was assigned at
+entry, taking either shape. Four problems, in order of severity:
+
+1. **Runtime `ufmec` re-binding is unverified.** Assigning the string component is syntactically
+   legal; whether the controller re-resolves the mechanical-unit binding mid-execution — rather than
+   at load or first use — is not established, and normal ABB practice is a declared constant naming
+   a configured unit. Declaring each shape once makes the question moot.
+2. **A mixed program breaks it.** A part with some seams welded at an index and some with the
+   turntable turning would have to reassign the record *between* welds — exactly the hazard **O-3**
+   tracks, a `PERS` write landing after RAPID has already prepared queued instructions. The
+   entry-time assignment dodged that only by being ahead of all motion.
+3. **Robtargets bind by name.** Every target says `\WObj:=wobjTG_Weld`. If that record's *kind*
+   changes mid-program, the same named target means different things at different points, and a
+   pendant watch shows one mutating record.
+4. **The static path stops being the verified one.** `wobjTG_Weld` keeping its declaration means the
+   common case stays byte-identical to a shape a controller has actually accepted.
+
+⚠ **Accepted cost:** `ufprog`/`ufmec` correctness now lives on the controller — the same trust model
+as `tTG_Weld`, and the same **E47**-class hazard. A wrong `ufmec` is a silent wrong-station weld.
+Treat these declarations as cell configuration and verify them at commissioning.
+
+⚠ **Sequencing, and this is the one thing to get right in the exported program.** A base-referenced
+frame describes the part **at the index it was reported at**. So for an indexed weld the station must
+already be at the weld index when `TG_ReqWeldFrame` runs — index first, then request the frame, then
+weld. This is the same rule the FANUC path already lives under; confirm the exporter sequences it
+that way rather than assuming, because the failure is silent and geometric.
+
+**Station 2 (D4) is deliberately not declared yet.** `wobjTG_WeldStn2` with `ufmec:="STN2"` is a
+one-line addition when the two-station template lands; declaring it now would add a resident symbol
+nothing references.
 
 ## 4. Why the `oframe` switch is free today
 
@@ -93,18 +133,48 @@ the source. `NON-ESSENTIAL-NICE-TO-HAVE/TGToolFrameSet.mod` step **4B** is writt
 (both a `uframe` and an `oframe` shift of −100 mm should move the TCP identically) and has **not
 been run**. Two minutes on the same VC session as the coordinated load-check.
 
-## 5. What the coordinated case costs the HMI
+## 5. What the coordinated case costs the HMI — and what was decided not to change
 
 Only coordinated welds change what the HMI sends, and only in the last step: it serves the part's
 pose in the **positioner frame** instead of the robot base. Everything upstream — socket protocol,
 request sequence, pose codec, registration — is untouched, and the FANUC path is untouched entirely.
 
-Two requirements come with it:
+**Captures stay base-referenced, on both brands.** *(Owner call, 2026-09-03.)* Every capture is taken
+at a standstill at one index, and reporting them all in the base-referenced `wobjTG_Cam` keeps the
+HMI's scan and registration path one code path across FANUC and ABB. There is **no coordinated camera
+work object**, and none should be added without a measurement to justify it.
 
-- **`wobjTG_Cam` and `wobjTG_Weld` must agree on the convention for a coordinated weld.** The
-  capture registers against the pose reported in the camera work object, and a pose reported in the
-  positioner frame is not comparable with one reported in base. For a non-coordinated weld both are
-  base-referenced, which is what the HMI already assumes, so nothing to do there.
+⚠ **What that costs, stated so it is a known item and not an oversight.** For a coordinated weld the
+HMI holds the part in base, `P_base`, and must produce a positioner-referenced `oframe`:
+
+```
+oframe = inverse(plate_pc(θs)) · P_base
+```
+
+`plate_pc` is the **PC's own** positioner model, and this is a single left-multiply — so a
+calibration error there lands on the weld at **full magnitude**, with nothing downstream to absorb
+it, because this *is* the vision correction. Note the contrast with §6.2: there the error entered as
+a conjugation that partially cancels and vanishes at Δθ = 0; here it does not.
+
+**Two ways in if measurement later says it matters**, in increasing order of disruption:
+
+1. **Ask the controller for the plate pose.** At a standstill, have the program report the same pose
+   in both conventions and let the HMI difference them to obtain the *controller's* `plate(θ)`
+   instead of using its own model. One extra exchange, no change to how captures are reported.
+2. **Report a coordinated weld's captures in a station work object** (`wobjTG_CamStn1`, the symmetric
+   pair to `wobjTG_WeldStn1`). Registration output is then already plate-relative and no PC model
+   enters at all — but it splits the capture convention, which is precisely what the owner call above
+   declined. ⚠ This is *not* "capturing while the positioner moves" — no such capture exists.
+   `ufprog:=FALSE` describes how the controller **derives** the frame (from the station's current
+   angles), not whether anything is moving; the capture is still an ordinary standstill capture at
+   one index.
+
+The right first step for either is to **measure the error**, not to design around it. It is the same
+robot↔positioner calibration figure the cell work is chasing anyway, and it is measurable
+independently of this decision.
+
+### Two requirements that do stand
+
 - **Home and transition moves stay on `wobj0`.** True in both cases, but under a coordinated work
   object it stops being cosmetic: a rest-home move bound to the part's work object would follow the
   turntable.
@@ -112,12 +182,10 @@ Two requirements come with it:
 ⚠ **And one consequence further downstream, from the HMI's own composition.**
 [abb_port_plan_v1.md](abb_port_plan_v1.md) §1.4.1 establishes (read off `RobotCell.cpp`) that the
 HMI consumes exactly one reported pose — `R_C`'s — and lands the cloud in base via
-`bTpart · act_pose · cloud`, where `bTpart` is *the frame the HMI itself sent*. For a
-non-coordinated weld that still lands in base, unchanged, because `bTpart` is base-referenced. For a
-**coordinated** weld it lands in the **positioner frame**, since `bTpart` now is. Anything
-downstream that assumes a base-frame cloud — collision checking, display, anything combining the
-scan with a fixed cell feature — needs the extra `plate(θ)` for that case. Not a defect, but it is
-the one place the coordinated convention reaches past the frame exchange itself.
+`bTpart · act_pose · cloud`, where `bTpart` is *the frame the HMI itself sent*. With captures
+base-referenced that still lands in base for **every** weld, coordinated included, which is the
+point of keeping the capture convention uniform. The positioner-frame conversion happens once, on
+the PC, at the moment the weld frame is served.
 
 *(Unchanged by any of this: the camera-calibration handlers expect base-frame poses, so those
 requests keep `\WObj:=wobj0` — port plan §1.4.1 corollary (b). Cam-cal is out of v1 scope anyway.)*
@@ -168,10 +236,15 @@ frame convention. Do not let this decision be read as having solved it.
 
 ## 7. Open
 
-- **Controller check.** The `ufprog:=FALSE`/`ufmec` work object has not been loaded on a VC. Bundle
-  it with the Weld Planner's outstanding coordinated `633-4` Arc VC check.
+- **Controller check.** `wobjTG_WeldStn1` — the `ufprog:=FALSE`/`ufmec` shape — has not been loaded
+  on a VC. Bundle it with the Weld Planner's outstanding coordinated `633-4` Arc VC check. Confirm
+  the station name matches this controller's `MOC` mechanical unit while you are there.
 - **Step 4B** (§4) — the composition premise this rule rests on, written and unrun.
 - **Sequencing confirmation** (§3) — that the exporter indexes the positioner before requesting the
   frame on an indexed weld.
-- **Look-ahead (contract O-3) is unchanged** by this rule. The entry-time mounting assignment sits
-  ahead of all motion, so only the per-weld `oframe` write is exposed, exactly as before.
+- **Measure the robot↔positioner calibration error** (§5) — it sizes the accepted cost of keeping
+  captures base-referenced, and decides whether either fallback is ever needed.
+- **Station 2** — `wobjTG_WeldStn2` when D4's two-station template lands.
+- **Look-ahead (contract O-3) is unchanged** by this rule. `ufprog`/`ufmec` are never written at
+  runtime and the `.oframe` nominal is assigned ahead of all motion, so only the per-weld `oframe`
+  write is exposed, exactly as before.

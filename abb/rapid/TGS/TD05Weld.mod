@@ -63,32 +63,32 @@ MODULE TD05Weld_Mod
         stTG_SubName:="none";
 
         ! --- work object (weld_frame_update_strategy_v1) -----------------
-        ! The exported program STATES the work object once, before any
-        ! motion. The exporter knows whether the weld is coordinated; the
-        ! request PROCs must not have to guess, and a program that
-        ! inherited the previous run's ufprog/ufmec would weld against the
-        ! wrong thing. Assigning the WHOLE record is what makes the
-        ! statement complete. Ahead of motion also keeps it clear of
-        ! RAPID's look-ahead (contract O-3).
+        ! The exported program picks its work object by PASSING it, and
+        ! assigns only that object's .oframe nominal here, ahead of any
+        ! motion (which also keeps it clear of RAPID's look-ahead, O-3).
+        ! ufprog/ufmec are NEVER written at runtime - the two shapes are
+        ! separate resident symbols in TG_Comms.sys, so a program mixing
+        ! indexed and coordinated welds just passes a different \WObj per
+        ! weld instead of mutating a record mid-run.
         !
-        ! NOT COORDINATED - a static table, or a part indexed on a
-        ! positioner that is stationary during the weld. Identity uframe,
-        ! and the oframe below is the nominal part frame w.r.t. THE ROBOT
-        ! BASE that the robtargets were divided by; TG_ReqWeldFrame
-        ! overwrites just that component with the measured one, which the
-        ! HMI sends base-referenced exactly as it does for FANUC.
-        ! NOTE An INDEXED weld adds a sequencing rule: a base-referenced frame
-        ! describes the part at the index it was reported at, so index the
-        ! positioner FIRST, then request the frame, then weld.
+        ! THIS PROGRAM IS NOT COORDINATED - a static table, or a part
+        ! indexed on a positioner that is stationary during the weld. So it
+        ! uses wobjTG_Weld (identity uframe), and the oframe below is the
+        ! nominal part frame w.r.t. THE ROBOT BASE that the robtargets were
+        ! divided by. TG_ReqWeldFrame overwrites just that component with
+        ! the measured one, which the HMI sends base-referenced exactly as
+        ! it does for FANUC.
+        ! NOTE An INDEXED weld adds a sequencing rule: a base-referenced
+        ! frame describes the part at the index it was reported at, so
+        ! index the positioner FIRST, then request the frame, then weld.
         !
-        ! A COORDINATED weld instead reads
-        !   wobjTG_Weld:=[FALSE,FALSE,"STN1",
-        !                 [[0,0,0],[1,0,0,0]],   ! ufprog FALSE -> ignored
-        !                 [[<part w.r.t. the positioner frame>]]];
-        ! and the HMI serves that frame positioner-referenced. Nothing else
-        ! in this program changes - the request call below is identical,
-        ! because .oframe is the write target either way.
-        wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+        ! A COORDINATED weld changes two lines and nothing else - the
+        ! nominal below and the \WObj on every motion and request:
+        !   wobjTG_WeldStn1.oframe:=[<part w.r.t. the positioner frame>];
+        !   TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;
+        ! The request PROC itself is identical, because .oframe is the
+        ! write target either way and the call site chooses the object.
+        wobjTG_Weld.oframe:=[[0,0,0],[1,0,0,0]];
 
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
 

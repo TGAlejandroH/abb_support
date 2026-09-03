@@ -45,18 +45,18 @@ MODULE TD05Test_Mod
         stTG_SubName:="none";          ! deterministic start (SR[25] was stale on FANUC)
 
         ! --- work objects (weld_frame_update_strategy_v1) ----------------
-        ! The exported program states BOTH work objects once, before any
-        ! motion; the requests below write only .oframe.
-        ! Static/identity here - this demo is not coordinated, so both
-        ! oframes are base-referenced, which is what the HMI already
-        ! assumes and what it sends FANUC.
-        ! For a COORDINATED weld both records take [FALSE,FALSE,"STN1",...]
-        ! with the SAME ufmec, differing only in oframe: the pose reported
-        ! by TG_ReqCapture is what the capture registers against, and a
-        ! pose reported in the positioner frame is not comparable with one
-        ! reported in base. Camera and weld must not disagree.
-        wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
-        wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+        ! The program assigns only the .oframe nominals here, before any
+        ! motion; the requests below overwrite the same component with the
+        ! measured frame. ufprog/ufmec are never written at runtime.
+        ! This demo is not coordinated, so the weld uses the
+        ! base-referenced wobjTG_Weld. A coordinated weld would pass
+        ! wobjTG_WeldStn1 instead - see TD05Weld.mod.
+        ! The CAMERA object is always wobjTG_Cam, base-referenced, for a
+        ! coordinated weld too: captures are standstill captures at one
+        ! index, and keeping them base-referenced keeps the HMI's scan and
+        ! registration path identical to FANUC's.
+        wobjTG_Cam.oframe:=[[0,0,0],[1,0,0,0]];
+        wobjTG_Weld.oframe:=[[0,0,0],[1,0,0,0]];
 
         ! DEPRECATED modal alternative (plan 7.6): nTG_ActTool:=8; nTG_ActFrame:=0;
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
