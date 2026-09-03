@@ -124,7 +124,7 @@ frames + captures) → `11` (global captures done) → `4` (weld frame) →
 Things worth checking after the run (Controller tab → RAPID → `TG_Comms` data,
 or a RAPID Watch on the PERS variables):
 
-- `wobjTG_Cam.uframe` ≈ `[[850,-120,400],[…]]` and `wobjTG_Weld.uframe` ≈
+- `wobjTG_Cam.oframe` ≈ `[[850,-120,400],[…]]` and `wobjTG_Weld.oframe` ≈
   `[[900,80,350],[…]]` — the dummy frames served by `abb_server.py`
   (`cam_frame_xyzwpr` / `weld_frame_xyzwpr`), proving the received frames
   landed in the work objects the .tgs program uses.
@@ -310,7 +310,7 @@ request 10 copies the updated `abb/rapid/TGS/TD05Test.mod` from the repo into
 New syntax exercised (⚠ first VC contact for these, plan §2.14): optional
 `\PERS` parameters on user PROCs, conditional argument propagation
 (`tgSendPose \Tool?Tool \WObj?WObj`), and a component write through a PERS
-parameter (`WObj.uframe:=...`).
+parameter (`WObj.oframe:=...`).
 
 **Pass criteria:**
 

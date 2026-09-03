@@ -43,6 +43,21 @@ MODULE TD05Test_Mod
         stTG_ProgPass:="TD05Test";     ! SET_PASS_SR: program name == password
         stTG_RobStatus:="Ok";          ! SET_ROB_S_SR('Ok')
         stTG_SubName:="none";          ! deterministic start (SR[25] was stale on FANUC)
+
+        ! --- part mounting (weld_frame_update_strategy_v1) ---------------
+        ! The exported program states the mounting for BOTH work objects,
+        ! once, before any motion: uframe = the mount, oframe = the part on
+        ! it, and the requests below write only oframe.
+        ! The camera and weld work objects MUST share a mount. The pose
+        ! reported by TG_ReqCapture is what the capture registers against,
+        ! so a capture taken at one station index is only comparable with a
+        ! weld run at another when both are reported in the same mount.
+        ! Identity/static here because this demo has no station; on the
+        ! chuck both records take [FALSE,FALSE,"STN1",...] with the SAME
+        ! ufmec, differing only in oframe.
+        wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+        wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
         ! DEPRECATED modal alternative (plan 7.6): nTG_ActTool:=8; nTG_ActFrame:=0;
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
 
@@ -70,7 +85,7 @@ MODULE TD05Test_Mod
         ! DEPRECATED modal alternative (plan 7.6): nTG_ActTool:=2; nTG_ActFrame:=5;
         MoveAbsJ jtCap1,v100,fine,tTG_Cam;
         stTG_SubName:="C1PGlobal_m45_3";
-        TG_ReqCamFrame \Tool:=tTG_Cam \WObj:=wobjTG_Cam;   ! R_C_F -> wobjTG_Cam.uframe + nTG_DoCapture
+        TG_ReqCamFrame \Tool:=tTG_Cam \WObj:=wobjTG_Cam;   ! R_C_F -> wobjTG_Cam.oframe + nTG_DoCapture
         ! 2 = robot-side abort sentinel: bad frame payload (matrix I4)
         IF nTG_DoCapture=2 GOTO abort_end;
         IF nTG_DoCapture=1 THEN
@@ -112,7 +127,7 @@ MODULE TD05Test_Mod
         ! every cycle (wobjTG_Weld otherwise persists from the previous run,
         ! exactly like FANUC UFRAME[6] does). Demo-only: a production .tgs
         ! program must NOT clear a received frame.
-        wobjTG_Weld.uframe:=[[0,0,0],[1,0,0,0]];
+        wobjTG_Weld.oframe:=[[0,0,0],[1,0,0,0]];
         ! The same target in two different frames needs two different arm
         ! configurations, so the stored confdata cannot satisfy both.
         ! Demo-only: a production program keeps configuration control on.
@@ -122,7 +137,7 @@ MODULE TD05Test_Mod
         TPWrite "TG DEMO: before R_W_F, TCP ="\Pos:=CPos(\Tool:=tTG_Weld \WObj:=wobj0);
         ! ----------------------------------------------------------------------
 
-        TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;   ! R_W_F -> wobjTG_Weld.uframe + nTG_WeldStatus
+        TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;   ! R_W_F -> wobjTG_Weld.oframe + nTG_WeldStatus
         TG_CamClose;                   ! FANUC defensive CAM_CLOSE after R_W_F
         IF nTG_WeldStatus=2 GOTO abort_end;
         IF nTG_WeldStatus=1 THEN

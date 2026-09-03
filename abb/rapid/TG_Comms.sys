@@ -89,8 +89,28 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ProgEdited:=0;
 
     ! Frames received from the HMI (FANUC PR[5]/UFRAME[5], PR[6]/UFRAME[6]).
-    ! Request PROCs write .uframe; the .tgs program references these wobjs in
+    ! Request PROCs write .oframe; the .tgs program references these wobjs in
     ! its move instructions - no separate "activate" step exists or is needed.
+    !
+    ! THE uframe/oframe SPLIT (weld_frame_update_strategy_v1, 2026-09-03).
+    ! uframe = THE MOUNT: what the part is bolted to. A part on the
+    !   chuck/turntable -> ufprog:=FALSE, ufmec:="<station>", and the
+    !   controller computes uframe live from the station angles. A part on a
+    !   static table -> ufprog:=TRUE and an identity (or fixture) uframe.
+    ! oframe = THE PART ON THE MOUNT: the part's pose in mount coordinates.
+    !   This is what vision measures and the ONLY component a request writes.
+    ! The rule is the SAME for an indexed weld and a coordinated one - the
+    ! index/coordinated distinction is whether the station MOVES during the
+    ! weld, not what the part is bolted to. Writing uframe is never correct:
+    ! with ufprog:=FALSE the controller ignores it outright (plan E28), and
+    ! with ufprog:=TRUE writing oframe instead is numerically identical
+    ! because motion and CRobT both use the product uframe*oframe.
+    !
+    ! The values below are the standalone/VC defaults (static, identity, so
+    ! uframe*oframe = oframe = whatever the HMI serves). A Weld-Planner
+    ! program that welds on a station ASSIGNS THE WHOLE RECORD at entry,
+    ! before any motion - see TGS/TD05Weld.mod - so the exported program,
+    ! not this file, is the source of truth about the part's mounting.
     PERS wobjdata wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
     PERS wobjdata wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
@@ -460,11 +480,16 @@ MODULE TG_Comms(SYSMODULE)
         ! plan 4.5; KAREL received 6 prompted reals) -> recv capture flag.
         ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
         ! the outgoing pose (which goes out in the frame's PREVIOUS value -
-        ! FANUC parity, plan 1.4.1) AND the wobj whose .uframe receives the
+        ! FANUC parity, plan 1.4.1) AND the wobj whose .oframe receives the
         ! served frame, written through the PERS reference. Omitted ->
         ! DEPRECATED modal fallback; the frame lands in wobjTG_Cam.
-        ! -> WObj.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197]; forced
+        ! -> WObj.oframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197]; forced
         ! to 2 = abort sentinel on a bad frame payload, matrix I4)
+        !
+        ! The camera wobj must share the MOUNT (ufprog/ufmec) of the weld
+        ! wobj: the pose reported here is what the capture registers
+        ! against, and only a shared mount makes a pose reported at one
+        ! station index comparable with a weld executed at another.
         VAR string reply;
         VAR pose pFrame;
         VAR bool frame_ok;
@@ -475,9 +500,9 @@ MODULE TG_Comms(SYSMODULE)
         frame_ok:=tgTryStrToPose(reply,pFrame);
         IF frame_ok THEN
             IF Present(WObj) THEN
-                WObj.uframe:=pFrame;
+                WObj.oframe:=pFrame;
             ELSE
-                wobjTG_Cam.uframe:=pFrame;
+                wobjTG_Cam.oframe:=pFrame;
             ENDIF
         ENDIF
         ! The capture-status exchange must ALWAYS complete: the HMI's R_C_F
@@ -530,10 +555,21 @@ MODULE TG_Comms(SYSMODULE)
         ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal)
         ! -> recv weld status (0=skip, 1=weld, 2=abort program).
         ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
-        ! the outgoing pose AND the wobj whose .uframe receives the served
+        ! the outgoing pose AND the wobj whose .oframe receives the served
         ! frame, written through the PERS reference. Omitted -> DEPRECATED
         ! modal fallback; the frame lands in wobjTG_Weld.
-        ! -> WObj.uframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
+        ! -> WObj.oframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
+        !
+        ! .oframe, NOT .uframe, for an indexed weld as well as a coordinated
+        ! one (see the uframe/oframe split at the top of this file). The
+        ! served value is the part's pose IN MOUNT COORDINATES - that is the
+        ! wire meaning, in both cases, so this PROC never has to know which
+        ! case it is in. On a coordinated/indexed station the HMI can obtain
+        ! it without any positioner model of its own: the pose reported one
+        ! line above is measured THROUGH the current oframe, so composing
+        ! the measured correction onto the oframe it already knows cancels
+        ! uframe - the plate, the station angle and the robot<->positioner
+        ! calibration - out of the loop entirely.
         VAR string reply;
         VAR pose pFrame;
         VAR bool frame_ok;
@@ -544,9 +580,9 @@ MODULE TG_Comms(SYSMODULE)
         frame_ok:=tgTryStrToPose(reply,pFrame);
         IF frame_ok THEN
             IF Present(WObj) THEN
-                WObj.uframe:=pFrame;
+                WObj.oframe:=pFrame;
             ELSE
-                wobjTG_Weld.uframe:=pFrame;
+                wobjTG_Weld.oframe:=pFrame;
             ENDIF
         ENDIF
         ! The weld-status exchange must ALWAYS complete: the HMI's R_W_F

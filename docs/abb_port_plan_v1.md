@@ -170,7 +170,7 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
     Verified 2026-08-27.
 11. **String → frame in one call**: `StrToVal` parses any RAPID value literal,
     including structured types: `StrToVal("[[600,500,225.3],[1,0,0,0]]", myPose)`
-    fills a `pose`, and `wobjTG_Weld.uframe := myPose;` is a plain component
+    fills a `pose`, and `wobjTG_Weld.oframe := myPose;` is a plain component
     assignment. Reverse direction via `NumToStr` concatenation (preferred over
     `ValToStr` to control digits). Verified 2026-08-27. **80-char string budget**:
     trans at 2 decimals + quats at 6 decimals → worst case ≈ 75 chars. Fits, with
@@ -203,7 +203,7 @@ forums; items marked ⚠ still to be confirmed in RobotStudio during Phase 1.
     standard RAPID (`CRobT`'s own `\Tool`/`\WObj` are optional PERS parameters;
     `\Par?Arg` is the conditional-argument form). A `PERS` parameter is a
     persistent *reference*: legal directly in `CRobT(\Tool:= \WObj:=)` — no
-    scratch copy needed — and component writes through it (`WObj.uframe:=...`)
+    scratch copy needed — and component writes through it (`WObj.oframe:=...`)
     land in the caller's persistent. **Verified on the VC 2026-08-28**: program
     check clean, and all three forms exercised in a numerically validated cycle
     (the write-through frame reached the capture-pose report to 0.01 mm).
@@ -317,7 +317,10 @@ PERS num nTG_ActTool  := 8;   ! UTOOL_NUM:  2=camera, 8=torch
 PERS num nTG_ActFrame := 0;   ! UFRAME_NUM: 5=camera, 6=weld, else base
 ```
 
-The received frames land in `wobjTG_Cam.uframe` / `wobjTG_Weld.uframe`
+The received frames land in `wobjTG_Cam.oframe` / `wobjTG_Weld.oframe`
+(**`oframe`, not `uframe`** — see
+[weld_frame_update_strategy_v1.md](weld_frame_update_strategy_v1.md): `uframe` is the
+mount, `oframe` is the part on it, and only `oframe` is ever written)
 (`StrToVal`-parsed `pose`, §4.5). Because they're `PERS` and wobj is an
 argument of each move, "receiving the frame and updating it in the welding
 program" needs **no activation step** — the next `MoveL ... \WObj:=wobjTG_Weld`
@@ -370,7 +373,7 @@ and RAPID can parse a whole pose literal in one call (§2.11). Decision:
   of `tgPoseToStr(...)` built from `CRobT` on the request's explicit
   `\Tool`/`\WObj` PERS parameters (§7.6; deprecated modal fallback when omitted).
 - **HMI → robot frame** (R_C_F, R_W_F): ONE prompt `"Give me the frame"` → one
-  ≤ 80-char payload → `tgStrToPose` → assign to `wobjTG_*.uframe`. (Replaces the
+  ≤ 80-char payload → `tgStrToPose` → assign to `wobjTG_*.oframe`. (Replaces the
   six `"Give me the frame x"…"r"` exchanges of KAREL.)
 - **Conversion lives on the PC side**: the Python prototype (and later the C++
   `ABBRobot` class) exposes the same frame interface as the FANUC path
@@ -461,7 +464,7 @@ expected choreography exactly).*
 
 **Phase 2 — priority requests.** All PROCs of §4.2 + shared PERS; Python handlers
 with dummy data; verify scalar field widths and the §4.5 pose codec round-trip
-(known frame → Python → RAPID → `wobjTG_*.uframe` → sent back → matches, incl.
+(known frame → Python → RAPID → `wobjTG_*.oframe` → sent back → matches, incl.
 Euler↔quaternion conversion and normalization; check in RobotStudio watch window).
 *Status 2026-08-28: implemented — all 7 remaining request PROCs in `TG_Comms.sys`,
 sample .tgs module `abb/rapid/TGS/TD05Test.mod` (mirrors the TD05tRJYQd call
@@ -665,7 +668,7 @@ holds no statistics** (it is a launcher, already bundled in [633-4]), and
    request PROCs take optional `\PERS tooldata Tool,\PERS wobjdata WObj`; passing
    both is the (b) style — the parameters are persistent references, fed straight
    to `CRobT` (no `tTG_Scratch` copies on this path), and for R_C_F/R_W_F the
-   served frame is written through `WObj.uframe`, so the request no longer
+   served frame is written through `WObj.oframe`, so the request no longer
    hardcodes data names. Omitting them falls back to the original modal-number
    resolution (with a TPWrite warning if exactly one is passed). Mechanically this
    is (c)'s optional-argument shape, but as policy it is (b): `TD05Test.mod`,

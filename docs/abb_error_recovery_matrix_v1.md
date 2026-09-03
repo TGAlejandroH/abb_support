@@ -128,7 +128,7 @@ way — its existing timeout/reconnect covers it.
   `UnLoad`/reuse the loaded module, status 1 → always UnLoad + Load fresh.
   Design change — only if E7 justifies it.
 - **F-C — malformed frame payload proceeds against a stale frame.** The
-  request keeps the previous `uframe` and still reads the go/no-go flag; if the
+  request keeps the previous `oframe` and still reads the go/no-go flag; if the
   HMI says "capture", the capture pose is reported in a frame the HMI doesn't
   know it has. Same defect class as findings F-2 — wrong-frame data with no
   diagnostic — only triggered from the wire side.
