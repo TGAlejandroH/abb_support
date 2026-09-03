@@ -327,7 +327,11 @@ weld uses the `ufprog:=FALSE`/`ufmec` work object, and there the served frame is
 w.r.t. the **positioner frame**. The two shapes are separate resident symbols and the call
 site passes the right one — `ufprog`/`ufmec` are never written at runtime — so the request
 PROC has no case to detect. Captures stay base-referenced in `wobjTG_Cam` in both cases,
-keeping the HMI's scan path identical to FANUC's)
+keeping the HMI's scan path identical to FANUC's. ⚠ Two consequences for the exporter:
+an exported program must assign **`uframe := identity`** at entry for every
+base-referenced work object it uses — the equivalence rests on the controller's *live*
+`PERS` value, not on the declaration — and the **coordinated** payload is still an open
+decision, since the HMI's coordinated path is unfinished)
 (`StrToVal`-parsed `pose`, §4.5). Because they're `PERS` and wobj is an
 argument of each move, "receiving the frame and updating it in the welding
 program" needs **no activation step** — the next `MoveL ... \WObj:=wobjTG_Weld`
