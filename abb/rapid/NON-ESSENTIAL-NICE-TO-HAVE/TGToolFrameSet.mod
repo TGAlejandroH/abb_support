@@ -349,9 +349,11 @@ MODULE TGToolFrameSet_Mod
     ! so uframe and oframe COMPOSE. Step 4B measures that claim.
     !
     !   3A  uframe write - the static case. The shape TG_ReqWeldFrame used
-    !       to have; it now writes .oframe in every case
-    !       (weld_frame_update_strategy_v1), which is why step 4B's
-    !       composition claim is load-bearing rather than a curiosity. So a
+    !       to have; it now writes .oframe in every case, coordinated or
+    !       not (weld_frame_update_strategy_v1). That makes step 4B's
+    !       composition claim load-bearing rather than a curiosity: the
+    !       non-coordinated case relies on uframe*oframe with an identity
+    !       uframe being the same geometry as a uframe write. So a
     !       "set the tool on the fly" request is the same shape with
     !       Tool.tframe := pFrame instead. Both arrive from tgTryStrToPose,
     !       which already yields a `pose` - exactly the type both fields

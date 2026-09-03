@@ -92,25 +92,38 @@ MODULE TG_Comms(SYSMODULE)
     ! Request PROCs write .oframe; the .tgs program references these wobjs in
     ! its move instructions - no separate "activate" step exists or is needed.
     !
-    ! THE uframe/oframe SPLIT (weld_frame_update_strategy_v1, 2026-09-03).
-    ! uframe = THE MOUNT: what the part is bolted to. A part on the
-    !   chuck/turntable -> ufprog:=FALSE, ufmec:="<station>", and the
-    !   controller computes uframe live from the station angles. A part on a
-    !   static table -> ufprog:=TRUE and an identity (or fixture) uframe.
-    ! oframe = THE PART ON THE MOUNT: the part's pose in mount coordinates.
-    !   This is what vision measures and the ONLY component a request writes.
-    ! The rule is the SAME for an indexed weld and a coordinated one - the
-    ! index/coordinated distinction is whether the station MOVES during the
-    ! weld, not what the part is bolted to. Writing uframe is never correct:
-    ! with ufprog:=FALSE the controller ignores it outright (plan E28), and
-    ! with ufprog:=TRUE writing oframe instead is numerically identical
-    ! because motion and CRobT both use the product uframe*oframe.
+    ! THE RULE (weld_frame_update_strategy_v1, 2026-09-03).
+    ! A request writes .oframe, ALWAYS - one write target, no case to
+    ! detect here. What the HMI SENDS branches on one thing only: whether
+    ! the weld is coordinated.
+    !
+    !   NOT COORDINATED - static table, OR indexed on a 1-/2-axis
+    !   positioner that does not move during the weld:
+    !       ufprog TRUE, ufmec "", uframe identity
+    !       oframe <- the CAD/part frame W.R.T. THE ROBOT BASE
+    !       (exactly what the HMI sends FANUC today)
+    !
+    !   COORDINATED MOTION:
+    !       ufprog FALSE, ufmec "<station>", uframe computed live by the
+    !       controller from the station angles (the declared one ignored)
+    !       oframe <- the part W.R.T. THE POSITIONER FRAME
+    !       (mirrors FANUC's dynamic coordinated frame)
+    !
+    ! Writing uframe is never right. Coordinated: the controller ignores it
+    ! outright (plan E28), so the write is a SILENT no-op - finding F-2's
+    ! failure mode. Not coordinated: uframe is identity, so writing oframe
+    ! is the same geometry anyway, because motion and CRobT both see only
+    ! the product uframe*oframe.
     !
     ! The values below are the standalone/VC defaults (static, identity, so
     ! uframe*oframe = oframe = whatever the HMI serves). A Weld-Planner
-    ! program that welds on a station ASSIGNS THE WHOLE RECORD at entry,
-    ! before any motion - see TGS/TD05Weld.mod - so the exported program,
-    ! not this file, is the source of truth about the part's mounting.
+    ! program ASSIGNS THE WHOLE RECORD at entry, before any motion - see
+    ! TGS/TD05Weld.mod - so the exported program, not this file, states
+    ! whether a weld is coordinated.
+    !
+    ! For an INDEXED weld the served frame describes the part AT THE INDEX
+    ! IT WAS REPORTED AT, so the station must already be at the weld index
+    ! when TG_ReqWeldFrame runs. Index, then request the frame, then weld.
     PERS wobjdata wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
     PERS wobjdata wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
@@ -486,10 +499,12 @@ MODULE TG_Comms(SYSMODULE)
         ! -> WObj.oframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197]; forced
         ! to 2 = abort sentinel on a bad frame payload, matrix I4)
         !
-        ! The camera wobj must share the MOUNT (ufprog/ufmec) of the weld
-        ! wobj: the pose reported here is what the capture registers
-        ! against, and only a shared mount makes a pose reported at one
-        ! station index comparable with a weld executed at another.
+        ! For a COORDINATED weld the camera wobj must use the same
+        ! convention as the weld wobj (same ufprog/ufmec): the pose
+        ! reported here is what the capture registers against, and a pose
+        ! reported in the positioner frame is not comparable with one
+        ! reported in base. For a non-coordinated weld both are
+        ! base-referenced, which is what the HMI already assumes.
         VAR string reply;
         VAR pose pFrame;
         VAR bool frame_ok;
@@ -560,16 +575,14 @@ MODULE TG_Comms(SYSMODULE)
         ! modal fallback; the frame lands in wobjTG_Weld.
         ! -> WObj.oframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
         !
-        ! .oframe, NOT .uframe, for an indexed weld as well as a coordinated
-        ! one (see the uframe/oframe split at the top of this file). The
-        ! served value is the part's pose IN MOUNT COORDINATES - that is the
-        ! wire meaning, in both cases, so this PROC never has to know which
-        ! case it is in. On a coordinated/indexed station the HMI can obtain
-        ! it without any positioner model of its own: the pose reported one
-        ! line above is measured THROUGH the current oframe, so composing
-        ! the measured correction onto the oframe it already knows cancels
-        ! uframe - the plate, the station angle and the robot<->positioner
-        ! calibration - out of the loop entirely.
+        ! .oframe in EVERY case, coordinated or not (see THE RULE at the
+        ! top of this file), so this PROC never has to know which case it
+        ! is in. What the served pose is RELATIVE TO does differ - the
+        ! robot base for a non-coordinated weld (FANUC parity), the
+        ! positioner frame for a coordinated one - but that is decided by
+        ! the wobjdata the exported program assigned at entry, and by the
+        ! HMI, which holds the project and knows the weld's positioner
+        ! group. Not by this routine.
         VAR string reply;
         VAR pose pFrame;
         VAR bool frame_ok;

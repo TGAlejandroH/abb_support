@@ -44,17 +44,17 @@ MODULE TD05Test_Mod
         stTG_RobStatus:="Ok";          ! SET_ROB_S_SR('Ok')
         stTG_SubName:="none";          ! deterministic start (SR[25] was stale on FANUC)
 
-        ! --- part mounting (weld_frame_update_strategy_v1) ---------------
-        ! The exported program states the mounting for BOTH work objects,
-        ! once, before any motion: uframe = the mount, oframe = the part on
-        ! it, and the requests below write only oframe.
-        ! The camera and weld work objects MUST share a mount. The pose
-        ! reported by TG_ReqCapture is what the capture registers against,
-        ! so a capture taken at one station index is only comparable with a
-        ! weld run at another when both are reported in the same mount.
-        ! Identity/static here because this demo has no station; on the
-        ! chuck both records take [FALSE,FALSE,"STN1",...] with the SAME
-        ! ufmec, differing only in oframe.
+        ! --- work objects (weld_frame_update_strategy_v1) ----------------
+        ! The exported program states BOTH work objects once, before any
+        ! motion; the requests below write only .oframe.
+        ! Static/identity here - this demo is not coordinated, so both
+        ! oframes are base-referenced, which is what the HMI already
+        ! assumes and what it sends FANUC.
+        ! For a COORDINATED weld both records take [FALSE,FALSE,"STN1",...]
+        ! with the SAME ufmec, differing only in oframe: the pose reported
+        ! by TG_ReqCapture is what the capture registers against, and a
+        ! pose reported in the positioner frame is not comparable with one
+        ! reported in base. Camera and weld must not disagree.
         wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
         wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 

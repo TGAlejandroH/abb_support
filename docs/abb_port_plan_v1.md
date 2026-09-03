@@ -318,9 +318,13 @@ PERS num nTG_ActFrame := 0;   ! UFRAME_NUM: 5=camera, 6=weld, else base
 ```
 
 The received frames land in `wobjTG_Cam.oframe` / `wobjTG_Weld.oframe`
-(**`oframe`, not `uframe`** — see
-[weld_frame_update_strategy_v1.md](weld_frame_update_strategy_v1.md): `uframe` is the
-mount, `oframe` is the part on it, and only `oframe` is ever written)
+(**`oframe`, not `uframe`**, in every case — see
+[weld_frame_update_strategy_v1.md](weld_frame_update_strategy_v1.md). A non-coordinated
+weld — static table, or indexed on a positioner — keeps an identity `uframe` and receives
+the CAD frame w.r.t. the **robot base**, exactly as FANUC does today; only a coordinated
+weld takes `ufprog:=FALSE`/`ufmec`, and there the served frame is the part w.r.t. the
+**positioner frame**. Either way the write target is `oframe`, so the request PROC has no
+case to detect)
 (`StrToVal`-parsed `pose`, §4.5). Because they're `PERS` and wobj is an
 argument of each move, "receiving the frame and updating it in the welding
 program" needs **no activation step** — the next `MoveL ... \WObj:=wobjTG_Weld`
