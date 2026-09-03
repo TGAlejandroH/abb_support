@@ -1,0 +1,200 @@
+MODULE TG_Weld(SYSMODULE)
+    !***********************************************************************
+    ! Weld data + weld-parameter application for the TetraGen ABB port.
+    !
+    ! This is the ABB counterpart of what r_w_p.kl does on FANUC after
+    ! storing the received registers: FANUC writes the values into the
+    ! ArcTool weld-procedure file selected by the proc number
+    ! (AWE1WP<proc>, schedule 20) via SET_VAR. On ABB there is no schedule
+    ! file - weld parameters are ordinary RAPID data passed to the weld
+    ! instructions, so the whole SET_VAR dance collapses into the component
+    ! assignments in TG_ApplyWeldParams below.
+    !
+    ! KEPT SEPARATE FROM TG_Comms.sys ON PURPOSE. welddata / seamdata /
+    ! ArcL* only exist when option 633-4 Arc is installed. TG_Comms is pure
+    ! HMI protocol and must stay loadable on a system without Arc (it is
+    ! what the phase 1-3 regression program TD05Test.mod runs against), so
+    ! everything Arc-dependent lives here instead.
+    !
+    ! ---------------------------------------------------------------------
+    ! VERIFIED ON THE VIRTUAL CONTROLLER 2026-08-31 (TGArcCheck.mod):
+    !   * welddata := [weld_speed, org_weld_speed, main_arc, org_arc] and
+    !     arcdata  := [sched, mode, voltage, wirefeed, control, current,
+    !                  voltage2, wirefeed2, control2]
+    !     - both declarations compile and read back on this controller.
+    !   * welddata.weld_speed GOVERNS the weld speed, and it is mm/s under
+    !     the configured PROC/ARC_UNITS = SI_UNITS. Measured: a 300.0 mm
+    !     ArcLEnd pass with weld_speed = 8.89 took 33.722 s -> 8.896 mm/s,
+    !     a 0.07 % match. The speeddata argument of the instruction (v200 in
+    !     the test) does NOT govern the weld; it governs the positioning
+    !     move of ArcLStart only.
+    !   * main_arc.control, .sched and .mode all exist and accept
+    !     assignment, so the Arc Control field of the HMI - which FANUC
+    !     never applied at all - has a real home here.
+    ! ---------------------------------------------------------------------
+    !
+    ! UNITS. Under SI_UNITS (the configured value, confirmed in the
+    ! controller arc log) arc_velocity_units = mm_s and arc_feed_units =
+    ! mm_s, while the HMI sends both travel speed and wire feed in IPM.
+    ! Hence the single conversion constant below. RobotWare also ships
+    ! US_UNITS (ipm for both), which would make these conversions the
+    ! identity; that is a deliberate future simplification, not a default -
+    ! switching it re-opens the signal-scaling question and would need its
+    ! own verification round. See docs/abb_weld_motion_and_data_design_v1.md
+    ! section 2.5c.
+    !***********************************************************************
+
+    ! IPM -> mm/s. 1 inch/min = 25.4/60 mm/s.
+    LOCAL CONST num nTG_IpmToMmS:=0.4233333;
+
+    ! Fronius correction ranges are small (about +/-10 steps in 0.1
+    ! increments) while the HMI GUI accepts 0..9999 - and the HMI ships a
+    ! DEFAULT arc length of 49.0, which is already out of range. Clamp
+    ! robot-side so the HMI needs no change and an out-of-range value can
+    ! never reach the power source ("correction outside specified range").
+    LOCAL CONST num nTG_CorrMin:=-10;
+    LOCAL CONST num nTG_CorrMax:=10;
+
+    ! ------------------------- active weld data -------------------------
+    ! PERS is MANDATORY: the Seam/Weld/Weave arguments of ArcLStart are
+    ! accessMode="Persistent", so a VAR or an expression raises "not a
+    ! persistent reference" (same rule as the \Tool/\WObj of CRobT, F-3).
+    !
+    ! wdTG_Weld is the direct analogue of the FANUC custom schedule slot
+    ! SCH[20]: the single set of parameters the current weld runs with.
+    PERS seamdata sdTG_Weld:=[0.2,0.05,[0,0,0,0,0,0,0,0,0],0,0,0,0,0,[0,0,0,0,0,0,0,0,0],0,0,[0,0,0,0,0,0,0,0,0],0.1,0,[0,0,0,0,0,0,0,0,0],0.05];
+    PERS welddata wdTG_Weld:=[10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]];
+
+    ! ---------------------- predefined recipe library ----------------------
+    ! The AWE1WP<proc> analogue: recipes prepared on the controller, indexed
+    ! by the procedure number the Weld Planner emits / the HMI sends.
+    ! Index = proc number, so wdTG_Lib{7} is proc 7. Size 10 for the
+    ! prototype; the HMI allows 1..99, so tgWeldLibIndex clamps and warns
+    ! rather than letting a bad index raise an array-index error mid-weld.
+    !
+    ! TODO(cell): these are PLACEHOLDER values - all zero except a nominal
+    ! speed. The real seed values must come from the customer together with
+    ! the mapping of proc numbers to Fronius characteristics or jobs (see
+    ! section 5 of the design doc). Zero wirefeed is intentionally obvious
+    ! rather than plausible-but-wrong.
+    ! NOTE: nTG_LibSize and the {10} dimension below must be changed
+    ! together - RAPID array dimensions must be literal.
+    LOCAL CONST num nTG_LibSize:=10;
+    PERS welddata wdTG_Lib{10}:=[
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]],
+        [10,10,[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]]];
+
+    !=======================================================================
+    ! Clamp a Fronius correction value into the range the power source
+    ! accepts. Warns once per clamp so a mis-set HMI field is visible in the
+    ! operator log rather than silently altered.
+    !=======================================================================
+    LOCAL FUNC num tgClampCorr(num nVal,string stField)
+        IF nVal>nTG_CorrMax THEN
+            TPWrite "TG WELD: "+stField+" clamped high, was "\Num:=nVal;
+            RETURN nTG_CorrMax;
+        ENDIF
+        IF nVal<nTG_CorrMin THEN
+            TPWrite "TG WELD: "+stField+" clamped low, was "\Num:=nVal;
+            RETURN nTG_CorrMin;
+        ENDIF
+        RETURN nVal;
+    ENDFUNC
+
+    !=======================================================================
+    ! Resolve a procedure number to a valid recipe-library index.
+    !=======================================================================
+    LOCAL FUNC num tgWeldLibIndex(num nProc)
+        IF nProc<1 OR nProc>nTG_LibSize THEN
+            TPWrite "TG WELD: proc out of library range, using 1; was"\Num:=nProc;
+            RETURN 1;
+        ENDIF
+        RETURN nProc;
+    ENDFUNC
+
+    !=======================================================================
+    ! TG_ApplyWeldParams - the ONE place weld data is built.
+    !
+    ! FANUC parallel (r_w_p.kl): for UDWP=1 the KAREL wrote travel speed,
+    ! wire feed and arc length into AWE1WP<proc> SCH[20] and left arc
+    ! control alone; for UDWP=0 it zeroed R[171..174] and the .ls program
+    ! welded with the predefined WELD START[<proc>,<sched>] from the
+    ! planner. Both branches are reproduced here.
+    !
+    ! nProcDefault is the procedure number the Weld Planner emitted for this
+    ! weld - the direct analogue of the <proc> literal in
+    ! WELD START[<proc>,<sched>]. It is used only when UDWP=0, because in
+    ! that case the HMI sends no proc (KAREL zeroes it), exactly as the
+    ! FANUC .ls carries the number itself.
+    !
+    ! Call AFTER TG_ReqWeldParams and BEFORE ArcLStart.
+    !=======================================================================
+    PROC TG_ApplyWeldParams(num nProcDefault)
+        VAR num nIdx;
+
+        IF nTG_UdwpFlag=1 THEN
+            ! ---- user-defined: HMI values on top of the selected recipe ----
+            nIdx:=tgWeldLibIndex(nTG_WeldProc);
+            wdTG_Weld:=wdTG_Lib{nIdx};
+
+            ! Wire feed. HMI "Wire Speed (IPM)" -> Fronius FeedReference.
+            ! On the TPS/i class that AO is aoFr1WFSpeed (an absolute wire
+            ! feed speed command), which is what the FANUC cell also sends
+            ! in its Special-2-step mode - so this is a like-for-like map.
+            wdTG_Weld.main_arc.wirefeed:=nTG_WireFeed*nTG_IpmToMmS;
+
+            ! Arc length. HMI "Arc Length" -> Fronius VoltReference, which
+            ! is wired to aoFr1ArcLength, i.e. arc-length correction. ABB
+            ! names the welddata component "voltage"; map by INTENT, not by
+            ! name (the mirror image of the mislabelled $CMD_VOLTS/$CMD_WFS
+            ! on FANUC - see abb_weld_params_research_v1.md section 1).
+            wdTG_Weld.main_arc.voltage:=tgClampCorr(nTG_ArcLength,"arc length");
+
+            ! Arc control. HMI "Arc Control" -> Fronius ControlPort
+            ! (aoFr1Dynamic, dynamic/pulse correction). FANUC never applied
+            ! this - the SET_VAR is commented out in r_w_p.kl - and the HMI
+            ! hides the field and always sends 0.0. Writing it is therefore
+            ! behaviourally IDENTICAL to FANUC today while leaving the
+            ! plumbing ready if the field is ever un-hidden.
+            wdTG_Weld.main_arc.control:=tgClampCorr(nTG_ArcControl,"arc control");
+        ELSE
+            ! ---- predefined: the recipe the planner selected ----
+            wdTG_Weld:=wdTG_Lib{tgWeldLibIndex(nProcDefault)};
+        ENDIF
+
+        ! Travel speed is applied in BOTH branches: FANUC always wrote
+        ! $CMD_WSPEED and the HMI always sends travel speed, even when the
+        ! custom-parameters checkbox is off (it then sends the value it
+        ! scraped from the controller schedule).
+        ! VERIFIED: this component, not the instruction speeddata argument,
+        ! governs the weld (0.07 % measurement match, see header).
+        wdTG_Weld.weld_speed:=nTG_TravelSpeed*nTG_IpmToMmS;
+
+        ! Keep the org_* twins in step with what we just applied.
+        ! Rationale: org_weld_speed / org_arc are the reference the
+        ! FlexPendant tuning function resets to. Program assignment does NOT
+        ! update them automatically - verified on the VC, where
+        ! org_weld_speed still read 10 after weld_speed had been set to
+        ! 8.89. Left alone, an operator pressing "reset" on the pendant
+        ! would jump to a stale declared literal instead of the values the
+        ! HMI just sent. In this architecture the HMI is the source of
+        ! truth, so the HMI-applied recipe IS the original.
+        wdTG_Weld.org_weld_speed:=wdTG_Weld.weld_speed;
+        wdTG_Weld.org_arc:=wdTG_Weld.main_arc;
+
+        TPWrite "TG WELD: applied, UDWP="\Num:=nTG_UdwpFlag;
+        TPWrite "  weld_speed mm/s   ="\Num:=wdTG_Weld.weld_speed;
+        TPWrite "  wirefeed          ="\Num:=wdTG_Weld.main_arc.wirefeed;
+        TPWrite "  arc length (volt) ="\Num:=wdTG_Weld.main_arc.voltage;
+        TPWrite "  arc control       ="\Num:=wdTG_Weld.main_arc.control;
+    ENDPROC
+
+ENDMODULE

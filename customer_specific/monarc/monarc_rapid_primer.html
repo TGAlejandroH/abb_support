@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monarc RAPID Primer</title>
+<style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style>
+</head>
+<body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --paper:#ecedf1;
+  --panel:#e2e4ea;
+  --panel-2:#f6f7fa;
+  --code-bg:#f3f4f8;
+  --ink:#16182b;
+  --slate:#565a70;
+  --faint:#7f849b;
+  --rule:#d0d3dd;
+  --rule-hard:#a7abbc;
+  --kw:#2c3f9e;
+  --kw-soft:#2c3f9e14;
+  --lit:#8a5a12;
+  --lit-soft:#8a5a1214;
+  --warn:#9e2f3a;
+  --warn-soft:#9e2f3a12;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#101120;
+    --panel:#191b2d;
+    --panel-2:#151726;
+    --code-bg:#12142100;
+    --code-bg:#181a2b;
+    --ink:#e6e8f2;
+    --slate:#a2a7bd;
+    --faint:#7f85a0;
+    --rule:#282b40;
+    --rule-hard:#3d4159;
+    --kw:#93a6ff;
+    --kw-soft:#93a6ff1c;
+    --lit:#e0a94a;
+    --lit-soft:#e0a94a18;
+    --warn:#ea8592;
+    --warn-soft:#ea859216;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101120;
+  --panel:#191b2d;
+  --panel-2:#151726;
+  --code-bg:#181a2b;
+  --ink:#e6e8f2;
+  --slate:#a2a7bd;
+  --faint:#7f85a0;
+  --rule:#282b40;
+  --rule-hard:#3d4159;
+  --kw:#93a6ff;
+  --kw-soft:#93a6ff1c;
+  --lit:#e0a94a;
+  --lit-soft:#e0a94a18;
+  --warn:#ea8592;
+  --warn-soft:#ea859216;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--paper);color:var(--ink);
+  font-family:"IBM Plex Serif",Georgia,serif;
+  font-size:16.5px;line-height:1.63;-webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,h5,.ui{font-family:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;text-wrap:balance}
+code,pre,.mono,table{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+
+/* shell */
+.shell{display:grid;grid-template-columns:minmax(0,1fr);max-width:1250px;margin:0 auto;padding:0 22px}
+@media (min-width:1020px){.shell{grid-template-columns:236px minmax(0,1fr);gap:54px;padding:0 40px}}
+
+/* rail */
+.rail{display:none}
+@media (min-width:1020px){.rail{display:block;position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:38px 0 48px;border-right:1px solid var(--rule)}}
+.rail .mk{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--kw)}
+.rail .sb{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--faint);line-height:1.5;margin:6px 0 24px}
+.rail nav{display:flex;flex-direction:column;gap:1px}
+.rail a{font-family:"IBM Plex Sans",sans-serif;font-size:13.5px;line-height:1.32;color:var(--slate);text-decoration:none;padding:6px 9px 6px 11px;border-left:2px solid transparent}
+.rail a:hover{color:var(--ink);background:var(--kw-soft);border-left-color:var(--kw)}
+.rail a:focus-visible{outline:2px solid var(--kw);outline-offset:-2px}
+.rail .grp{font-family:"IBM Plex Sans",sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:18px 0 5px 11px}
+
+/* masthead */
+main{padding:38px 0 92px;min-width:0}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11.5px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;color:var(--kw)}
+h1{font-size:clamp(2rem,4.4vw,3.15rem);line-height:1.05;font-weight:600;letter-spacing:-.021em;margin:.34em 0 0}
+.stand{max-width:63ch;font-size:1.12rem;color:var(--slate);margin:1em 0 0}
+
+/* sections */
+section{margin-top:60px;scroll-margin-top:22px}
+h2{font-size:1.55rem;font-weight:600;letter-spacing:-.014em;line-height:1.16;margin:0 0 .12em;padding-bottom:.4em;border-bottom:2px solid var(--ink)}
+.kick{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;letter-spacing:.15em;text-transform:uppercase;color:var(--faint);margin:0 0 9px}
+h3{font-size:1.1rem;font-weight:600;margin:2em 0 .25em;letter-spacing:-.004em}
+h4{font-family:"IBM Plex Mono",monospace;font-size:.83rem;font-weight:600;letter-spacing:.03em;color:var(--slate);margin:1.7em 0 .3em;text-transform:uppercase}
+p{max-width:68ch;margin:.82em 0}
+ul,ol{max-width:68ch;padding-left:1.15em;margin:.8em 0}
+li{margin:.3em 0}
+a{color:var(--kw)}
+strong{font-weight:600}
+code{font-size:.85em;background:var(--panel);padding:.1em .32em;border-radius:2px;word-break:break-word}
+.lede{font-size:1.03rem;color:var(--slate);max-width:66ch}
+
+/* entry blocks */
+.entry{border:1px solid var(--rule);background:var(--panel-2);margin:1.4em 0;overflow:hidden}
+.entry > .sig{font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600;color:var(--kw);background:var(--panel);padding:9px 15px;border-bottom:1px solid var(--rule);overflow-x:auto;white-space:nowrap}
+.entry > .bd{padding:13px 16px 15px}
+.entry > .bd > :first-child{margin-top:0}
+.entry > .bd > :last-child{margin-bottom:0}
+.entry p{max-width:none}
+.gloss{font-family:"IBM Plex Sans",sans-serif;font-size:14.5px}
+
+/* code */
+.code{background:var(--code-bg);border:1px solid var(--rule);padding:13px 15px;margin:1.25em 0;overflow-x:auto}
+.code pre{margin:0;font-size:12.5px;line-height:1.68;white-space:pre;color:var(--ink)}
+.cm{color:var(--faint);font-style:italic}
+.hl{color:var(--kw);font-weight:600}
+.nm{color:var(--lit);font-weight:500}
+.bad{color:var(--warn);font-weight:600}
+.cap{font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--faint);margin:-.85em 0 1.5em;max-width:72ch}
+
+/* notes */
+.note{border:1px solid var(--rule-hard);background:var(--panel-2);padding:13px 17px 15px;margin:1.4em 0;max-width:74ch}
+.note > .lbl{display:block;font-family:"IBM Plex Sans",sans-serif;font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px}
+.note p{margin:.38em 0;max-width:none}
+.note p:first-of-type{margin-top:0}
+.note p:last-child{margin-bottom:0}
+.note.man{border-color:var(--kw);background:var(--kw-soft)}
+.note.man > .lbl{color:var(--kw)}
+.note.yours{border-color:var(--lit);background:var(--lit-soft)}
+.note.yours > .lbl{color:var(--lit)}
+.note.trap{border-color:var(--warn);background:var(--warn-soft)}
+.note.trap > .lbl{color:var(--warn)}
+blockquote{margin:.6em 0;padding-left:13px;border-left:3px solid var(--rule-hard);color:var(--slate);font-style:italic;max-width:70ch}
+
+/* tables */
+.tw{overflow-x:auto;margin:1.4em 0;border:1px solid var(--rule)}
+table{width:100%;border-collapse:collapse;font-size:12.5px;line-height:1.45}
+caption{text-align:left;font-family:"IBM Plex Sans",sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--rule)}
+th{text-align:left;font-weight:600;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--slate);padding:8px 12px;border-bottom:1px solid var(--rule-hard);white-space:nowrap;background:var(--panel-2)}
+td{padding:7px 12px;border-bottom:1px solid var(--rule);vertical-align:top;font-variant-numeric:tabular-nums}
+tbody tr:last-child td{border-bottom:0}
+td.k{white-space:nowrap;font-weight:600;color:var(--kw)}
+td.n{white-space:nowrap;color:var(--slate)}
+td.d{font-family:"IBM Plex Serif",serif;font-size:13.5px;min-width:18em}
+td.v{white-space:nowrap;color:var(--lit);font-weight:500}
+
+/* anatomy diagram */
+figure{margin:1.5em 0;border:1px solid var(--rule);background:var(--panel-2)}
+figure .fw{overflow-x:auto;padding:20px 18px 6px}
+figure svg{display:block;min-width:620px;width:100%;height:auto}
+figcaption{font-family:"IBM Plex Sans",sans-serif;font-size:12px;color:var(--faint);padding:0 18px 15px;line-height:1.5}
+
+footer{margin-top:66px;padding-top:18px;border-top:1px solid var(--rule);font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--faint);max-width:74ch;line-height:1.62}
+footer a{color:var(--kw)}
+footer ul{max-width:none;font-size:12.5px}
+</style>
+
+<div class="shell">
+<aside class="rail">
+  <div class="mk">RAPID</div>
+  <div class="sb">Monarc cell<br>4600-803651<br>RobotWare 6.16</div>
+  <nav>
+    <div class="grp">Foundations</div>
+    <a href="#anatomy">Anatomy of one line</a>
+    <a href="#declare">Declarations &amp; storage</a>
+    <a href="#motion">Motion instructions</a>
+    <div class="grp">External axes</div>
+    <a href="#extax">extax and logical axes</a>
+    <a href="#actunit">ActUnit / DeactUnit</a>
+    <a href="#coord">Coordinated work objects</a>
+    <a href="#walkthrough">The interchange, line by line</a>
+    <div class="grp">Process</div>
+    <a href="#search">SearchL and SearchC</a>
+    <a href="#io">I/O instructions</a>
+    <a href="#arc">Arc welding data</a>
+    <div class="grp">Framework</div>
+    <a href="#zones">World zones</a>
+    <a href="#interrupt">Interrupts and TRAPs</a>
+    <a href="#pm">Production Manager types</a>
+    <a href="#odd">Odd syntax you'll hit</a>
+    <a href="#sources">Sources</a>
+  </nav>
+</aside>
+
+<main>
+  <div class="eyebrow">Learning reference &middot; grounded in D:\ABB\Monarc_RS</div>
+  <h1>Monarc RAPID Primer</h1>
+  <p class="stand">Every RAPID construct that actually appears in this cell's programs, defined from ABB's manuals and then shown doing its job in the customer's own code. Heaviest on external axes, because that is where this cell's difficulty lives.</p>
+
+  <div class="note man"><span class="lbl">How definitions here were checked</span>
+    <p>Instruction and data-type definitions are taken from ABB's <em>Technical reference manual — RAPID Instructions, Functions and Data types</em> (3HAC16581-1 rev P). Record layouts (<code>seamdata</code>, <code>welddata</code>, <code>partdata</code>&hellip;) are read from the descriptor XMLs shipped with <strong>this system's own Arc option</strong>, so the field order matches the controller rather than a generic manual. The logical-axis map comes from the installed Positioner media pool. Full list at the end.</p>
+  </div>
+
+  <!-- ======================================================= -->
+  <section id="anatomy">
+    <p class="kick">Foundations</p>
+    <h2>Anatomy of one line</h2>
+
+    <p class="lede">If you can read this one line, you can read 80% of the cell.</p>
+
+    <figure>
+      <div class="fw">
+      <svg viewBox="0 0 660 210" role="img" aria-label="Labelled breakdown of a MoveL instruction into instruction, destination, speed, zone, tool and work object">
+        <text x="8" y="52" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="var(--kw)">MoveL</text>
+        <text x="66" y="52" font-family="IBM Plex Mono, monospace" font-size="15" fill="var(--ink)">p462509_1_12,</text>
+        <text x="228" y="52" font-family="IBM Plex Mono, monospace" font-size="15" fill="var(--lit)">v1000,</text>
+        <text x="304" y="52" font-family="IBM Plex Mono, monospace" font-size="15" fill="var(--lit)">z10,</text>
+        <text x="352" y="52" font-family="IBM Plex Mono, monospace" font-size="15" fill="var(--ink)">tWeldGun</text>
+        <text x="452" y="52" font-family="IBM Plex Mono, monospace" font-size="15" fill="var(--slate)">\WObj:=</text>
+        <text x="536" y="52" font-family="IBM Plex Mono, monospace" font-size="15" fill="var(--ink)">wobj_Stn1;</text>
+
+        <g stroke="var(--rule-hard)" stroke-width="1" fill="none">
+          <path d="M30 62 L30 78 L18 78"/><path d="M140 62 L140 100 L128 100"/>
+          <path d="M252 62 L252 122 L240 122"/><path d="M368 62 L368 144 L356 144"/>
+          <path d="M395 62 L395 166 L383 166"/><path d="M580 62 L580 188 L568 188"/>
+        </g>
+        <g font-family="IBM Plex Sans, sans-serif" font-size="11.5" fill="var(--slate)">
+          <text x="14" y="82" text-anchor="end">instruction — move in a straight line</text>
+          <text x="124" y="104" text-anchor="end">destination (a robtarget: XYZ + orientation + arm config + external axes)</text>
+          <text x="236" y="126" text-anchor="end">speeddata — 1000 mm/s TCP speed</text>
+          <text x="352" y="148" text-anchor="end">zonedata — pass within 10 mm, don't stop</text>
+          <text x="379" y="170" text-anchor="end">tooldata — where the torch tip is, and its mass</text>
+          <text x="564" y="192" text-anchor="end">optional argument: which frame the destination is measured in</text>
+        </g>
+      </svg>
+      </div>
+      <figcaption>Positional arguments come in a fixed order. Anything starting with a backslash is an <strong>optional argument</strong> (ABB calls these "switches" when they carry no value) and may be omitted.</figcaption>
+    </figure>
+
+    <p>Two conventions to internalise immediately:</p>
+    <ul>
+      <li><strong><code>\Something</code> is optional.</strong> <code>\WObj:=</code> takes a value; <code>\NoEOffs</code> is a bare switch — its presence <em>is</em> the argument.</li>
+      <li><strong><code>fine</code> versus <code>z10</code> is the single most consequential choice on a move line.</strong> <code>fine</code> is a <em>stop point</em>: the robot actually arrives and stands still, and the program waits. <code>z10</code> is a <em>fly-by point</em>: the robot corners through within 10 mm and the program runs ahead. Several real problems in this cell trace back to a fly-by where a stop point was required.</li>
+    </ul>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="declare">
+    <p class="kick">Foundations</p>
+    <h2>Declarations and storage classes</h2>
+
+    <p>A <code>MODULE</code> is a file. Inside it, data declarations first, then routines.</p>
+
+    <div class="tw"><table>
+      <caption>Storage classes, and why the choice matters here</caption>
+      <thead><tr><th>Keyword</th><th>Lifetime</th><th class="d">In this cell</th></tr></thead>
+      <tbody>
+        <tr><td class="k">VAR</td><td class="n">Reset on program start / PP to main</td><td class="d"><code>VAR pos dTrans;</code> — the search correction. Deliberately volatile: a fresh part re-measures it.</td></tr>
+        <tr><td class="k">CONST</td><td class="n">Never changes</td><td class="d"><code>CONST jointtarget jposSafe:=...</code> — the home position. Cannot be modified from the pendant, which is the point.</td></tr>
+        <tr><td class="k">PERS</td><td class="n"><strong>Survives restart and power loss</strong></td><td class="d">All weld data, all part data. When a persistent's value changes, the controller rewrites the declaration's initial value, so what you see in the module <em>is</em> the live value.</td></tr>
+        <tr><td class="k">TASK PERS</td><td class="n">Persistent, but private to one task</td><td class="d"><code>TASK PERS tooldata tWeldGun</code>. A plain <code>PERS</code> of the same name is shared across tasks; <code>TASK PERS</code> is not.</td></tr>
+        <tr><td class="k">LOCAL</td><td class="n">Visible only inside its module</td><td class="d">Used for menu wrappers in <code>Utility.sys</code>.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="note trap"><span class="lbl">Trap — PERS means the file lies to you</span>
+      <p>Because <code>PERS</code> declarations are rewritten with their current value, the numbers you read in <code>mDeclarations.sys</code> are whatever the last operator left there — not what a programmer typed. Never treat a <code>PERS</code> initial value in a backup as intent. <code>CONST</code> values, by contrast, are intent.</p>
+    </div>
+
+    <h4>Module attributes</h4>
+    <p><code>MODULE Utility(SYSMODULE)</code> — a system module: it is not erased by "delete program", and it is not saved as part of the program. <code>(READONLY)</code> blocks edits from the pendant (used on <code>Irbp1Data.sys</code>, <code>IrbpSetup.sys</code>). <code>(NOSTEPIN)</code> makes step-by-step execution treat routines as a single step.</p>
+
+    <h4>Routines</h4>
+    <p><code>PROC</code> does something and returns nothing. <code>FUNC num Name()</code> returns a value. <code>TRAP</code> is an interrupt handler — you never call it, the system does. <code>UNDO</code> and <code>ERROR</code> are optional blocks inside a routine; <code>ERROR</code> is where recovery goes, and its absence is the biggest single weakness in this cell's part programs.</p>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="motion">
+    <p class="kick">Foundations</p>
+    <h2>Motion instructions and their data</h2>
+
+    <div class="entry">
+      <div class="sig">MoveJ ToPoint, Speed, Zone, Tool [\WObj]</div>
+      <div class="bd"><p class="gloss">Joint move. All axes interpolate together; the TCP takes whatever curved path results. Fastest way between two points, but the path is not predictable — never weld with it.</p></div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">MoveL ToPoint, Speed, Zone, Tool [\WObj]</div>
+      <div class="bd"><p class="gloss">Linear move. The TCP travels in a straight line. Used for approach/retract and for any motion where clearance matters.</p></div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">MoveAbsJ ToJointPos [\NoEOffs], Speed, Zone, Tool</div>
+      <div class="bd">
+        <p class="gloss">Move to <em>absolute joint angles</em> rather than a Cartesian pose. The destination is a <code>jointtarget</code>, so there is no inverse-kinematics ambiguity — this is why "go home" is always a <code>MoveAbsJ</code>.</p>
+        <p><code>\NoEOffs</code> is precisely: <em>"If the argument <code>\NoEOffs</code> is set then the movement with MoveAbsJ is not affected by active offsets for external axes."</em> It suppresses any active <code>EOffsSet</code> displacement — it does <strong>not</strong> mean "ignore the external axes".</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">Offs(Point, XOffset, YOffset, ZOffset) → robtarget</div>
+      <div class="bd">
+        <p class="gloss">A <em>function</em>, not an instruction: returns a shifted copy of a position. The shift is applied in the <strong>object coordinate system</strong> of the work object, not in world.</p>
+        <div class="code"><pre><span class="cm">! mRS461117.mod — the whole taught path shifted by the measured error</span>
+ArcLStart <span class="hl">Offs</span>(p461117_1_140, dTrans.x, dTrans.y, dTrans.z), v300,
+          sm3_16_ft_block, wd3_16_ft_block_095, fine, tWeldGun\WObj:=wobj_Stn1;</pre></div>
+        <p>This is the "shift every point by hand" style of correction. RAPID also has <code>PDispSet</code>/<code>PDispOn</code>, which apply a displacement to <em>all</em> subsequent moves until turned off — fewer edits, less risk of missing a point. This cell does not use them.</p>
+      </div>
+    </div>
+
+    <h3>The data types on a move line</h3>
+
+    <div class="tw"><table>
+      <caption>Reading their actual values</caption>
+      <thead><tr><th>Type</th><th>Their value</th><th class="d">Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="k">speeddata</td><td class="v">v1000</td><td class="d">Four numbers: TCP mm/s, reorientation deg/s, linear ext-axis mm/s, rotational ext-axis deg/s. <code>v1000</code> = 1000 mm/s TCP. Their <code>vStation1:=[10,10,5,20]</code> is a slow speed built specifically for positioner moves.</td></tr>
+        <tr><td class="k">zonedata</td><td class="v">z10 / fine</td><td class="d"><code>z10</code> = corner within 10 mm without stopping. <code>fine</code> = stop exactly on the point.</td></tr>
+        <tr><td class="k">tooldata</td><td class="v">tWeldGun</td><td class="d"><code>[robhold, tframe, tload]</code>. Theirs: TCP at <code>[46.013, -18.509, 414.927]</code> mm from the wrist flange, 3.1 kg torch. Every taught point is relative to this — change the TCP and every point moves.</td></tr>
+        <tr><td class="k">robtarget</td><td class="v">p462509_1_12</td><td class="d"><code>[trans, rot, robconf, extax]</code> — position, orientation quaternion, arm configuration, and <strong>external axis positions</strong>. That last field is the whole subject of the next section.</td></tr>
+        <tr><td class="k">jointtarget</td><td class="v">jposSafe</td><td class="d"><code>[robax, extax]</code> — six robot joint angles plus the external axes.</td></tr>
+        <tr><td class="k">loaddata</td><td class="v">ldLoadStn1</td><td class="d"><code>[mass, cog(x,y,z), aom(q1..q4), ix, iy, iz]</code> — mass in kg, centre of gravity in mm, axes-of-moment orientation, moments of inertia in kgm².</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="extax">
+    <p class="kick">External axes</p>
+    <h2><code>extax</code> and logical axes</h2>
+
+    <p class="lede">This is the concept that makes the Monarc programs readable. Get it and the rest follows.</p>
+
+    <p>Both <code>robtarget</code> and <code>jointtarget</code> end with an <code>extax</code> field of type <code>extjoint</code>, which has exactly six slots:</p>
+
+    <div class="code"><pre>RECORD extjoint
+    eax_a  eax_b  eax_c  eax_d  eax_e  eax_f
+ENDRECORD</pre></div>
+
+    <p>The manual is precise about what these are:</p>
+    <blockquote>"Additional axes <code>eax_a</code>&hellip; are <strong>logical</strong> axes. How the logical axis number and the physical axis number are related to each other is defined in the system parameters. The value 9E9 is defined for axes which are not connected."</blockquote>
+
+    <p>So <code>eax_a</code>&hellip;<code>eax_f</code> are slots 7&ndash;12 of the drive module, and which physical motor sits in a slot is a <em>configuration</em> question, not a programming one. In this cell the configuration reuses slots:</p>
+
+    <div class="tw"><table>
+      <caption>Monarc logical-axis map, from the installed Positioner config</caption>
+      <thead><tr><th>Slot</th><th>Logical axis</th><th>When STN1 is active</th><th>When STN2 is active</th><th>When INTERCH is active</th></tr></thead>
+      <tbody>
+        <tr><td class="k">eax_b</td><td class="n">8</td><td class="n">ARM1 (station 1 tilt)</td><td class="n">ARM2 (station 2 tilt)</td><td class="n">INTERCH_PLATE1</td></tr>
+        <tr><td class="k">eax_c</td><td class="n">9</td><td class="n">PLATE1 (turntable 1)</td><td class="n">PLATE2 (turntable 2)</td><td class="n">INTERCH_PLATE2</td></tr>
+        <tr><td class="k">eax_d</td><td class="n">10</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">INTERCH (the 180° index axis)</td></tr>
+        <tr><td class="k">eax_a, eax_e, eax_f</td><td class="n">7, 11, 12</td><td class="n">not connected (9E9)</td><td class="n">not connected</td><td class="n">not connected</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="note trap"><span class="lbl">The single most important gotcha in this cell</span>
+      <p><strong><code>eax_b</code> and <code>eax_c</code> mean different physical motors depending on which mechanical unit is active.</strong> A <code>robtarget</code> copied from a station-1 routine into a station-2 routine will happily drive station 2's tilt and turntable to station 1's angles. Nothing warns you. This is why the two <code>PartR1S1</code>/<code>PartR1S2</code> templates look almost identical yet must never be interchanged.</p>
+    </div>
+
+    <p>Now this line from <code>mRS462509.mod</code> reads cleanly:</p>
+
+    <div class="code"><pre><span class="cm">! read the turntable angle at the moment the wire touched the part</span>
+angularDisp1 := pSearchPt_1W.<span class="hl">extax.eax_c</span>;
+
+<span class="cm">! then write that angle into every taught weld point</span>
+p462509_1_10.<span class="hl">extax.eax_c</span> := angularDisp1;</pre></div>
+    <p class="cap">With <code>STN1</code> active, <code>eax_c</code> is turntable 1. The code is saying: <em>"the feature was found at table angle X, so command the table to X at every weld point."</em></p>
+
+    <h4>The 9E9 rule, and why it bites</h4>
+    <p>9E9 means "this slot is not in play". The manual spells out the consequence:</p>
+    <blockquote>"If the position is not defined in the position data (value 9E9) the value will be ignored, if the axis is connected and not activated. <strong>But if the axis is activated it will result in error.</strong>"</blockquote>
+
+    <p>So a robtarget with <code>[9E+09, 9E+09, ...]</code> in <code>extax</code> is only safe while no positioner unit is active. Their code respects this — <code>jposSafe</code> and all the torch-service positions carry all-9E9 extax and are always reached after a <code>DeactUnit</code>:</p>
+
+    <div class="code"><pre>DeactUnit STN1;
+MoveAbsJ jposSafe\NoEOffs, v1000, z50, tWeldGun;   <span class="cm">! jposSafe extax = all 9E9 — legal only because STN1 is off</span></pre></div>
+
+    <div class="note yours"><span class="lbl">Worth checking on the plant</span>
+      <p><code>TorchClean</code>, <code>ServicePos</code> and <code>WireCutter</code> all move to all-9E9 positions, and <code>TorchClean</code> can be triggered by the <code>EE_SERVICE</code> event or by PLC menu command 101. If either fires while a station is still active, that is the error the manual describes. The part routines always deactivate first, so the normal path is clean — it is the event-driven path that is worth verifying.</p>
+    </div>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="actunit">
+    <p class="kick">External axes</p>
+    <h2><code>ActUnit</code> / <code>DeactUnit</code> and friends</h2>
+
+    <div class="entry">
+      <div class="sig">ActUnit MechUnit;   DeactUnit MechUnit;</div>
+      <div class="bd">
+        <p class="gloss">Bring a mechanical unit under the controller's control, or release it. The manual's own words on why they exist:</p>
+        <blockquote>"It can be used to determine which unit is to be active when, for example, <strong>common drive units</strong> are used."</blockquote>
+        <blockquote>"If several mechanical units share a common drive unit, activation of one of these mechanical units will also <strong>connect that unit to the common drive unit</strong>."</blockquote>
+        <p>That is exactly this cell: five positioner motors, three drive units, contactors <code>K1</code>&ndash;<code>K5</code> doing the switching. An inactive unit "will neither be controlled nor monitored" — brakes on, position still measured, but not commanded.</p>
+      </div>
+    </div>
+
+    <div class="note man"><span class="lbl">Documented limitations — all three apply here</span>
+      <p><strong>1.</strong> "If this instruction is preceded by a move instruction, that move instruction must be programmed with a stop point (zonedata <code>fine</code>), not a fly-by point, otherwise restart after power failure will not be possible."</p>
+      <p><strong>2.</strong> Neither can run in an event routine for <code>PowerOn</code>, <code>Stop</code>, <code>QStop</code>, <code>Restart</code>, <code>Reset</code> or <code>Step</code>.</p>
+      <p><strong>3.</strong> <code>DeactUnit</code> "cannot be used when one of the mechanical units is in independent mode" — relevant because both turntables are configured <code>independent_joint_on</code>.</p>
+    </div>
+
+    <div class="note trap"><span class="lbl">Their code breaks limitation 1</span>
+      <div class="code"><pre>MoveJ p461117_2_240, v1000, <span class="bad">z100</span>, tWeldGun\WObj:=wobj_Stn2;
+DeactUnit STN2;</pre></div>
+      <p>Every part routine ends this way — a 100 mm fly-by immediately before <code>DeactUnit</code>. Per the manual this costs you restart-after-power-failure at that point in the cycle. It will not throw an error and it will not be noticed until a power dip happens mid-cycle. The fix is one character-group: <code>z100</code> → <code>fine</code>.</p>
+    </div>
+
+    <div class="entry">
+      <div class="sig">MechUnitLoad MechUnit, AxisNo, Load;</div>
+      <div class="bd">
+        <p class="gloss">Tell the controller what the positioner is carrying, so its dynamic model is right. Axis numbering starts at 1, and the manual says it "should always be executed <strong>after</strong> execution of the instruction <code>ActUnit</code>".</p>
+        <div class="code"><pre><span class="cm">! Irbp1Prc.ActStn1 — the framework does this for you</span>
+IF (NOT IsMechUnitActive(STN1)) ActUnit STN1;
+<span class="hl">MechUnitLoad</span> STN1, 2, ldLoadStn1;    <span class="cm">! axis 2 of STN1 = PLATE1, the turntable</span></pre></div>
+        <p>The manual warns that wrong load data causes "impaired path accuracy including a risk of overshooting" and "risk of overloading the mechanical structure". Station 1's load in this cell is <code>[250, [0.001,0.001,0.001], ...]</code> — a mass with its centre of gravity at the origin, which is a placeholder, not a measurement.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">IsMechUnitActive(MechUnit) → bool</div>
+      <div class="bd"><p class="gloss">Ask before you act. Lets the framework be idempotent: activate only if not already active.</p></div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">MoveExtJ [\Conc] ToJointPos [\ID] [\UseEOffs] Speed [\T] Zone [\Inpos]</div>
+      <div class="bd">
+        <p class="gloss">Move external axes when there is <em>no robot</em> in the task. The manual: "This instruction can only be used with an actual program task defined as a Motion Task and if the task controls one or several mechanical units <strong>without TCP</strong>."</p>
+        <p>Note there is no <code>Tool</code> and no <code>\WObj</code> — there is no TCP to speak of.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">TaskRunRob() → bool</div>
+      <div class="bd"><p class="gloss">"Check if the program task controls some robot (mechanical unit with TCP)." TRUE in <code>T_ROB1</code> on this system.</p></div>
+    </div>
+
+    <p>Those last two explain a pattern that appears seven times in this cell and looks baffling at first:</p>
+
+    <div class="code"><pre>ActStn1;
+jtCurrent := CJointT();               <span class="cm">! read where all axes are right now</span>
+jtCurrent.extax.eax_b := -20;         <span class="cm">! change only the tilt</span>
+jtCurrent.extax.eax_c := 90;          <span class="cm">! and the turntable</span>
+IF (<span class="hl">TaskRunRob()</span>) THEN
+    MoveAbsJ jtCurrent, vStation1, fine, tool0;      <span class="cm">! this task has a robot → normal move</span>
+ELSE
+    <span class="hl">%"MoveExtJ"%</span> jtCurrent, vStation1, fine;         <span class="cm">! positioner-only task → external-axis move</span>
+ENDIF
+DeactStn1;</pre></div>
+    <p class="cap">From <code>PartR1S1.ProgStn1</code>. This is ABB's <em>"Same task for IRB/IRBP"</em> idiom: one module that works whether the positioner lives in the robot's task or in its own. On the Monarc there is only <code>T_ROB1</code>, so the <code>ELSE</code> branch never runs.</p>
+
+    <p>Read the pattern as a three-step recipe, because you will write it yourself:</p>
+    <ol>
+      <li><code>CJointT()</code> — snapshot every axis, so the robot joints stay exactly where they are.</li>
+      <li>Overwrite only the <code>extax</code> slots you want to move.</li>
+      <li><code>MoveAbsJ</code> the whole snapshot. The robot holds still; the positioner moves.</li>
+    </ol>
+    <p>That is how you say "rotate the table, don't touch the arm" in a language that has no such instruction.</p>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="coord">
+    <p class="kick">External axes</p>
+    <h2>Coordinated work objects — the trick this cell turns on</h2>
+
+    <p>A <code>wobjdata</code> is <code>[robhold, ufprog, ufmec, uframe, oframe]</code>. Two of those fields decide whether the robot <em>follows</em> the positioner:</p>
+
+    <div class="tw"><table>
+      <caption>wobjdata, from the manual</caption>
+      <thead><tr><th>Field</th><th>Value</th><th class="d">Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="k">robhold</td><td class="n">FALSE</td><td class="d">The robot holds the tool, not the work object.</td></tr>
+        <tr><td class="k">ufprog</td><td class="n">TRUE</td><td class="d">"Fixed user coordinate system." The stored <code>uframe</code> is used literally.</td></tr>
+        <tr><td class="k">ufprog</td><td class="n">FALSE</td><td class="d">"Movable user coordinate system, i.e. coordinated external axes are used." And: "For movable user frame, <strong>the user frame is continuously defined by the system</strong>."</td></tr>
+        <tr><td class="k">ufmec</td><td class="n">"STN1"</td><td class="d">"The mechanical unit with which the robot movements are coordinated. Only specified in the case of movable user coordinate systems."</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>The Monarc declares each station frame <strong>twice</strong>, differing in one boolean:</p>
+
+    <div class="code"><pre><span class="cm">! wobj_Database.sys</span>
+PERS wobjdata wobj_Stn1        :=[FALSE,<span class="hl">FALSE</span>,"STN1",[[1278.3,640.454,421.695],[...]],[[0.16,92.37,158.88],[...]]];
+PERS wobjdata wobj_Stn1_NoCoord:=[FALSE,<span class="bad">TRUE </span>,"STN1",[[1278.3,640.454,421.695],[...]],[[0.16,92.37,158.88],[...]]];</pre></div>
+
+    <p>Same geometry, opposite behaviour:</p>
+    <ul>
+      <li><strong><code>wobj_Stn1</code></strong> (coordinated) — the frame rides the turntable. Rotate the table mid-weld and the TCP tracks the part. This is what you want for welding a seam while the part turns.</li>
+      <li><strong><code>wobj_Stn1_NoCoord</code></strong> (not coordinated) — the frame is nailed to the world. The <code>extax</code> in the robtarget still <em>commands</em> the table, but the taught XYZ does not move with it.</li>
+    </ul>
+
+    <div class="note man"><span class="lbl">Why the correction needs the non-coordinated twin</span>
+      <p>The <code>mRS462509</code> correction rotates the table so the found feature lands where the program was taught. With the <strong>coordinated</strong> frame that would cancel itself out: rotate the table, the frame rotates with it, the TCP follows, net zero. With <code>_NoCoord</code> the taught point stays put in world and the table does the correcting. Swapping the two work objects would silently disable the entire part-location scheme while the program still ran and still welded — just in the wrong place.</p>
+    </div>
+
+    <p>Two more work-object families exist in the cell and are <em>not</em> interchangeable with these: <code>wobjStation1</code>/<code>wobjStation2</code> (from the ABB template, coordinated but with a zero object frame) and plain <code>wobj0</code> (world). Check which family a routine uses before copying points out of it.</p>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="walkthrough">
+    <p class="kick">External axes</p>
+    <h2>The interchange, line by line</h2>
+
+    <p class="lede">Everything so far, working together. This is <code>Irbp1Prc.IndexToStn1</code> — ABB's code, not the customer's, and the best worked example in the system.</p>
+
+    <div class="code"><pre>PROC IndexToStn1()
+  IF (NOT bInterchCalib1) CalibIntch1;              <span class="cm">! 1. refuse to index if the axis isn't calibrated</span>
+  Reset soLS_1_INPOS;                               <span class="cm">! 2. clear the simulated "station in position" flags</span>
+  Reset soLS_2_INPOS;
+  bActive := <span class="hl">IsMechUnitActive</span>(INTERCH);
+  IF (NOT bActive) ActInterch1;                     <span class="cm">! 3. take the index unit (all 3 axes) + set payloads</span>
+  jtCurrent := <span class="hl">CJointT</span>();                          <span class="cm">! 4. snapshot every axis</span>
+
+  <span class="hl">GetNextPartAdv</span> 1, padvTmp1 \statusCode:=retCode1;   <span class="cm">! 5. what's queued for each side?</span>
+  <span class="hl">GetNextPartAdv</span> 2, padvTmp2 \statusCode:=retCode2;
+
+  jtCurrent.extax.<span class="hl">eax_b</span> := padvTmp1.procAngle.eax_c;   <span class="cm">! 6. side 1 → its PROCESS angle</span>
+  jtCurrent.extax.<span class="hl">eax_c</span> := padvTmp2.loadAngle.eax_c;   <span class="cm">!    side 2 → its LOAD angle</span>
+  jtCurrent.extax.<span class="hl">eax_d</span> := nInterchStn1;               <span class="cm">! 7. and the index axis to -0.249999°</span>
+
+  IF (<span class="hl">TaskRunRob</span>()) THEN
+    MoveAbsJ jtCurrent, sdInterch1, <span class="hl">fine</span>, tool0;      <span class="cm">! 8. ONE move: swing + both tables together</span>
+  ELSE
+    %"MoveExtJ"% jtCurrent, sdInterch1, fine;
+  ENDIF
+
+  IF (NOT <span class="hl">RobOS</span>()) Set soLS_1_INPOS;               <span class="cm">! 9. fake the limit switch — virtual controller only</span>
+  WaitTime nTorqueTime;                             <span class="cm">! 10. 0.4 s for torque to settle</span>
+  <span class="hl">DeactInterch1</span>;                                   <span class="cm">! 11. release the drives</span>
+  WaitUntil IsMechUnitActive(INTERCH) = FALSE;      <span class="cm">!     and don't continue until it's really off</span>
+ENDPROC</pre></div>
+
+    <p>Things worth pulling out of that:</p>
+    <ul>
+      <li><strong>Step 8 is one instruction.</strong> The 180° swing and both turntable rotations happen in a single coordinated <code>MoveAbsJ</code>, so each side arrives pre-oriented. No separate positioning move afterwards — that is where the cycle time is won.</li>
+      <li><strong>Step 8 ends in <code>fine</code>,</strong> because step 11 is a <code>DeactUnit</code>. ABB's own code obeys the limitation the customer's part routines break.</li>
+      <li><strong>Step 6 mixes slots deliberately.</strong> The part's angle is authored in the <code>partadv</code> record's <code>eax_c</code> field, then written into the <em>interchange unit's</em> <code>eax_b</code> or <code>eax_c</code>. Same physical motor, different slot, because a different mechanical unit is active. Exactly the trap described earlier — handled correctly here.</li>
+      <li><strong><code>RobOS()</code> in step 9</strong> returns TRUE on a real controller, FALSE in a virtual one. The line means "in simulation, pretend the station-in-position switch closed". Useful to know when a behaviour reproduces in RobotStudio but not on the floor, or vice versa.</li>
+    </ul>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="search">
+    <p class="kick">Process</p>
+    <h2><code>SearchL</code> and <code>SearchC</code></h2>
+
+    <div class="entry">
+      <div class="sig">SearchL [\Stop]|[\PStop]|[\SStop]|[\Sup] Signal [\Flanks]|[\PosFlank]|... SearchPoint ToPoint [\ID] Speed [\V]|[\T] Tool [\WObj] [\Corr] [\TLoad]</div>
+      <div class="bd">
+        <p class="gloss">Move toward <code>ToPoint</code> while watching a digital input. The instant it changes, record where the robot was into <code>SearchPoint</code>. <code>SearchC</code> is the same thing along a circular path (it takes a via-point as well).</p>
+        <p>Critically, <code>SearchPoint</code> is a full <code>robtarget</code> — "the position of the TCP <strong>and external axes</strong> when the search signal has been triggered". That external-axis part is what this cell actually uses.</p>
+      </div>
+    </div>
+
+    <div class="tw"><table>
+      <caption>The stop switches — pick one deliberately</caption>
+      <thead><tr><th>Switch</th><th>Behaviour</th><th>Stop distance at 50 mm/s</th></tr></thead>
+      <tbody>
+        <tr><td class="k">\Stop</td><td class="d">Hard stop, TCP leaves the path. Fastest. <strong>Only allowed below 100 mm/s</strong> — above that "some axes can move in unpredictable directions".</td><td class="n">1&ndash;3 mm</td></tr>
+        <tr><td class="k">\PStop</td><td class="d">Decelerates while keeping the TCP on the path.</td><td class="n">15&ndash;25 mm</td></tr>
+        <tr><td class="k">\SStop</td><td class="d">Soft stop, TCP near the path. Faster than <code>\PStop</code>; above 100 mm/s it slides slightly off tangentially.</td><td class="n">4&ndash;8 mm</td></tr>
+        <tr><td class="k">\Sup</td><td class="d">Don't stop at all — "flying search". Keeps watching the whole move and errors if it gets more than one hit.</td><td class="n">n/a</td></tr>
+        <tr><td class="k">(none)</td><td class="d">Flying search, but no error on multiple hits — the first hit is returned.</td><td class="n">n/a</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>In every case the robot overshoots and is <em>not</em> moved back to the found position — but <code>SearchPoint</code> holds the true trigger position, so the recorded value is still good. Documented repeatability is 0.1&ndash;0.3 mm.</p>
+
+    <div class="note yours"><span class="lbl">Their usage, checked against the manual</span>
+      <div class="code"><pre>SetDO doWld1TouchOn, 1;                    <span class="cm">! energise the wire as a probe (SmarTac via the Miller)</span>
+WaitDI diWld1TouchActive, 1;               <span class="cm">! wait for the welder to confirm sensing is live</span>
+MoveJ pSearch_1W_n26, v100, <span class="bad">z100</span>, tWeldGun\WObj:=wobj_Stn1;
+WaitTime 3;
+<span class="hl">SearchC\Stop</span>, diWld1Touched, pSearchPt_1W, pSearch_1W_n22, pSearch_1W_n18, <span class="hl">v5</span>, tWeldGun\WObj:=wobj_Stn1;
+SetDO doWld1TouchOn, 0;</pre></div>
+      <p><strong>Good:</strong> <code>v5</code> is 5 mm/s, far below the 100 mm/s ceiling for <code>\Stop</code>. That part is right.</p>
+      <p><strong>Not good:</strong> the move immediately before the search uses <code>z100</code>. The manual's Limitations section is explicit — "the start of the search, i.e. when the I/O signal is ready to react, is not&hellip; the programmed destination point of the previous positioning instruction but a point along the real robot path" — and illustrates matching on the wrong side of the object, or missing it entirely. It should be <code>fine</code>. Note that <code>Testing.laserTest</code> does use <code>fine</code> here, so the correct form was known.</p>
+      <p><strong>Also:</strong> <code>WaitTime 3</code> waits three seconds of <em>program</em> time, which after a fly-by point is not the same as three seconds of the robot standing still. <code>WaitTime\InPos, 3</code> is the form that guarantees the robot has arrived — and it is used elsewhere in <code>TorchServices.sys</code>, so again the right idiom is in the codebase.</p>
+    </div>
+
+    <div class="note trap"><span class="lbl">Three errors, no handlers</span>
+      <p>The manual lists exactly when a search errors:</p>
+      <ul>
+        <li><strong><code>ERR_WHLSEARCH</code></strong> — no signal detected. Movement continues to the destination; no position returned.</li>
+        <li><strong><code>ERR_WHLSEARCH</code></strong> — more than one detection, but only if <code>\Sup</code> was used.</li>
+        <li><strong><code>ERR_SIGSUPSEARCH</code></strong> — the signal was <em>already</em> high when the search started, or communication with it was lost. This one applies specifically when <code>\Flanks</code> is omitted, which is the case in all 13 searches here. A wire already touching the part, or slag bridging the gap, lands you here.</li>
+      </ul>
+      <p>None of the enclosing routines has an <code>ERROR</code> block, so any of these aborts the part. The standard pattern is short:</p>
+      <div class="code"><pre>SearchC\Stop, diWld1Touched, pSearchPt_1W, ..., v5, tWeldGun\WObj:=wobj_Stn1;
+...
+ERROR
+    IF ERRNO = ERR_WHLSEARCH THEN
+        TPWrite "Search found nothing — retrying";
+        RETRY;                  <span class="cm">! re-run the instruction that failed</span>
+    ELSEIF ERRNO = ERR_SIGSUPSEARCH THEN
+        WireCutter;             <span class="cm">! wire was already touching — re-trim and retry</span>
+        RETRY;
+    ENDIF</pre></div>
+      <p><code>RETRY</code> repeats the failed instruction; <code>TRYNEXT</code> skips past it and continues.</p>
+    </div>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="io">
+    <p class="kick">Process</p>
+    <h2>I/O instructions</h2>
+
+    <div class="entry">
+      <div class="sig">SetDO Signal, Value;</div>
+      <div class="bd"><p class="gloss">Set a digital output to 0 or 1. Used 74 times in this cell — it is how the robot talks to the PLC. <code>Set</code>/<code>Reset</code> are the shorthand forms for 1 and 0.</p></div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">PulseDO [\High] [\PLength:=seconds] Signal;</div>
+      <div class="bd">
+        <p class="gloss">One pulse, default 0.2 s, range 0.001&ndash;2000 s. Execution continues immediately — "the next instruction after <code>PulseDO</code> is executed directly after the pulse starts". <code>\High</code> forces a rising pulse regardless of the signal's current state.</p>
+        <div class="code"><pre>PulseDO\High\PLength:=1, do1_TC_START;   <span class="cm">! 1 s start pulse to the Binzel reamer</span></pre></div>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">WaitDI Signal, Value [\MaxTime] [\TimeFlag] [\Visualize ...];</div>
+      <div class="bd">
+        <p class="gloss">Block until an input reaches a value. Without <code>\MaxTime</code> it waits forever, which is usually what you want for a PLC handshake and never what you want for a device that can fail.</p>
+        <p><code>\Visualize</code> puts an explanatory dialogue on the pendant while waiting — a genuinely nice touch in <code>TorchServices.sys</code>:</p>
+        <div class="code"><pre>WaitDI di2_TC_READY, 1\Visualize
+    \Header:="Waiting for R1 Torch Clean Ready"
+    \MsgArray:=["Movement will not continue until","Stroke is down and","clamp is open."]
+    \Icon:=iconError;</pre></div>
+        <p>Compare with the bare <code>WaitDI diReadyToResumeProg, 1;</code> in the part routines — same indefinite wait, but the operator gets no idea what the robot is waiting for.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="sig">GInput(Signal) → num</div>
+      <div class="bd">
+        <p class="gloss">Read a <em>group</em> input as a number. Group signals bundle consecutive bits into one integer.</p>
+        <div class="code"><pre>nTableAng := <span class="hl">GInput</span>(giTableAngle);        <span class="cm">! PLC sends the requested table angle</span>
+IF diTableAngNeg = 1 nTableAng := nTableAng * (-1);  <span class="cm">! separate bit carries the sign</span></pre></div>
+        <p>The sign-bit workaround is there because group inputs are unsigned.</p>
+      </div>
+    </div>
+
+    <h3>The welder's signals — where they come from</h3>
+    <p>Four signals used in RAPID are not in the controller's saved <code>EIO.cfg</code>; they are created by the Miller EIP add-in. Worth knowing so you don't go looking in the wrong place:</p>
+
+    <div class="tw"><table>
+      <caption>Miller Auto-Axcess E, EtherNet/IP — from the installed add-in config</caption>
+      <thead><tr><th>Signal</th><th>Dir</th><th>Bit</th><th class="d">Function</th></tr></thead>
+      <tbody>
+        <tr><td class="k">doWld1TouchOn</td><td class="n">DO</td><td class="n">11</td><td class="d">Turn on touch sensing (puts sense voltage on the wire)</td></tr>
+        <tr><td class="k">diWld1TouchActive</td><td class="n">DI</td><td class="n">11</td><td class="d">Welder confirms touch sensing is live — always wait for this before searching</td></tr>
+        <tr><td class="k">diWld1Touched</td><td class="n">DI</td><td class="n">4</td><td class="d">Contact detected. This is the signal handed to <code>SearchL</code>/<code>SearchC</code></td></tr>
+        <tr><td class="k">diWld1ArcDetect</td><td class="n">DI</td><td class="n">0</td><td class="d">Arc established. Cross-connected out to the PLC as <code>doR1WeldActive</code></td></tr>
+        <tr><td class="k">soAwManFeedFwd</td><td class="n">DO</td><td class="n">&mdash;</td><td class="d">Manual wire feed forward — standard Arc option signal, used to extend wire before cutting</td></tr>
+        <tr><td class="k">goWld1Wsch</td><td class="n">GO</td><td class="n">64&ndash;79</td><td class="d">Weld schedule number — receives the <code>sched</code> field of your weld data</td></tr>
+        <tr><td class="k">goWld1WireFeedSpeed</td><td class="n">GO</td><td class="n">16&ndash;31</td><td class="d">Receives the <code>wirefeed</code> field</td></tr>
+        <tr><td class="k">goWld1VoltageArcLength</td><td class="n">GO</td><td class="n">32&ndash;47</td><td class="d">Receives the <code>voltage</code> field. The name is the answer to "is it volts or trim?" — it is volts in non-synergic mode and arc length in synergic mode</td></tr>
+        <tr><td class="k">giWld1ArcVoltage</td><td class="n">GI</td><td class="n">48&ndash;63</td><td class="d">Measured arc voltage back from the welder</td></tr>
+        <tr><td class="k">giWld1WeldCurrent</td><td class="n">GI</td><td class="n">32&ndash;47</td><td class="d">Measured welding current</td></tr>
+        <tr><td class="k">goWld1PartId / goWld1WeldId</td><td class="n">GO</td><td class="n">80&ndash;111</td><td class="d">Robot tells the welder which part and seam it is on — this is what feeds weld-data logging</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="arc">
+    <p class="kick">Process</p>
+    <h2>Arc welding: instructions and data, decoded</h2>
+
+    <p>The Arc instructions are ordinary move instructions with process data bolted on. A seam is always a bracketed sequence:</p>
+
+    <div class="tw"><table>
+      <caption>The weld sequence</caption>
+      <thead><tr><th>Instruction</th><th class="d">Role</th></tr></thead>
+      <tbody>
+        <tr><td class="k">ArcLStart</td><td class="d">Move to the seam start and <strong>ignite</strong>. Runs purge, preflow, ignition, scrape start.</td></tr>
+        <tr><td class="k">ArcL / ArcC</td><td class="d">Weld along a line / an arc. Middle of the seam. <code>ArcC</code> takes a via-point then an end-point.</td></tr>
+        <tr><td class="k">ArcLEnd / ArcCEnd</td><td class="d">Last segment, then <strong>extinguish</strong>: crater fill, burnback, postflow.</td></tr>
+        <tr><td class="k">\SeamName:="..."</td><td class="d">Optional label carried into the weld log for traceability.</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>Their arguments are: destination, speed, <code>seamdata</code>, <code>welddata</code>, zone, tool. <code>seamdata</code> describes the <em>start and end</em> of the seam; <code>welddata</code> describes the <em>middle</em>.</p>
+
+    <h3>welddata — 20 components</h3>
+    <div class="code"><pre>PERS welddata wd3_16_ft_tube := [8.04333, 0, [4,0,40,169.333,0,0,0,0,0], [0,0,0,0,0,0,0,0,0]];</pre></div>
+    <div class="tw"><table>
+      <thead><tr><th>#</th><th>Component</th><th>Value</th><th class="d">Reads as</th></tr></thead>
+      <tbody>
+        <tr><td class="n">1</td><td class="k">weld_speed</td><td class="v">8.04333</td><td class="d">mm/s &mdash; but the pendant showed <strong>19 ipm</strong>. See below.</td></tr>
+        <tr><td class="n">2</td><td class="k">org_weld_speed</td><td class="v">0</td><td class="d">The pre-tuning original, kept when an operator hot-edits. 0 = never tuned.</td></tr>
+        <tr><td class="n">3</td><td class="k">main_arc.sched</td><td class="v">4</td><td class="d">Miller weld list 4 &mdash; the one flagged <code>IsSynergic</code>.</td></tr>
+        <tr><td class="n">4</td><td class="k">main_arc.mode</td><td class="v">0</td><td class="d">&mdash;</td></tr>
+        <tr><td class="n">5</td><td class="k">main_arc.voltage</td><td class="v">40</td><td class="d">Goes to <code>goWld1VoltageArcLength</code>.</td></tr>
+        <tr><td class="n">6</td><td class="k">main_arc.wirefeed</td><td class="v">169.333</td><td class="d">mm/s = <strong>400 ipm</strong>.</td></tr>
+        <tr><td class="n">7&ndash;11</td><td class="k">main_arc.control, current, voltage2, wirefeed2, control2</td><td class="v">0</td><td class="d">Unused by this welder configuration.</td></tr>
+        <tr><td class="n">12&ndash;20</td><td class="k">org_arc.*</td><td class="v">0</td><td class="d">Pre-tuning originals for the arc block.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>seamdata — 48 components</h3>
+    <div class="code"><pre>PERS seamdata sm3_16_ft_tube := [0.2, 0.2, [0,0,0,0,0,0,0,0,0], 0,0,0,0,0,
+                                 [4,0,40,158.75,0,0,0,0,0], 0, 0.5,
+                                 [4,0,40,169.333,0,0,0,0,0], 0, 0,
+                                 [0,0,0,0,0,0,0,0,0], 0.5];</pre></div>
+    <div class="tw"><table>
+      <thead><tr><th>#</th><th>Component</th><th>Value</th><th class="d">Reads as</th></tr></thead>
+      <tbody>
+        <tr><td class="n">1</td><td class="k">purge_time</td><td class="v">0.2</td><td class="d">Gas purge before anything else, seconds.</td></tr>
+        <tr><td class="n">2</td><td class="k">preflow_time</td><td class="v">0.2</td><td class="d">Shielding gas ahead of ignition.</td></tr>
+        <tr><td class="n">3&ndash;11</td><td class="k">ign_arc.*</td><td class="v">all 0</td><td class="d">No separate ignition schedule — ignites on the main data.</td></tr>
+        <tr><td class="n">12&ndash;13</td><td class="k">ign_move_delay, scrape_start</td><td class="v">0, 0</td><td class="d">Scrape-start is enabled globally in <code>PROC.cfg</code> instead.</td></tr>
+        <tr><td class="n">14&ndash;16</td><td class="k">heat_speed, heat_time, heat_distance</td><td class="v">0, 0, 0</td><td class="d"><strong>Heat phase disabled</strong> — all three zero.</td></tr>
+        <tr><td class="n">17&ndash;25</td><td class="k">heat_arc.*</td><td class="v">4, 0, 40, 158.75</td><td class="d">Schedule 4, 40 V, 375 ipm — <em>data present but never used</em>, because the times above are zero. Harmless leftover, but confusing.</td></tr>
+        <tr><td class="n">26</td><td class="k">cool_time</td><td class="v">0</td><td class="d">No dwell before crater fill.</td></tr>
+        <tr><td class="n">27</td><td class="k">fill_time</td><td class="v">0.5</td><td class="d">Half-second crater fill at the end of the seam.</td></tr>
+        <tr><td class="n">28&ndash;36</td><td class="k">fill_arc.*</td><td class="v">4, 0, 40, 169.333</td><td class="d">Crater fill at schedule 4, 40 V, 400 ipm.</td></tr>
+        <tr><td class="n">37&ndash;38</td><td class="k">bback_time, rback_time</td><td class="v">0, 0</td><td class="d">No burnback / reverse burnback.</td></tr>
+        <tr><td class="n">39&ndash;47</td><td class="k">bback_arc.*</td><td class="v">all 0</td><td class="d">&mdash;</td></tr>
+        <tr><td class="n">48</td><td class="k">postflow_time</td><td class="v">0.5</td><td class="d">Gas kept flowing 0.5 s after arc off.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>weavedata — 15 components</h3>
+    <div class="code"><pre>TASK PERS weavedata weave1 := [1, 0, 2.032, 4.826, 3.048, 0,0,0, 0,0,0,0, 0,0,0];
+<span class="cm">!                     shape type length width  height  dwells   dir/tilt/ori/bias  org_*</span></pre></div>
+    <p>2.032 / 4.826 / 3.048 mm are 0.080&Prime; / 0.190&Prime; / 0.120&Prime;. Which brings us to the thing you must know before touching any of these numbers:</p>
+
+    <div class="note trap"><span class="lbl">Every weld number in this cell was typed in inches per minute</span>
+      <p><code>PROC.cfg</code> sets <code>arc_velocity_units "ipm"</code> and <code>arc_feed_units "ipm"</code>. The pendant shows ipm; RAPID stores mm/s. Every stored value converts to an exact whole ipm — 169.333 → 400, 158.75 → 375, 8.04333 → 19, 8.89 → 21 — which is how you can tell nobody has hand-edited them.</p>
+      <p>Type <code>8.9</code> where <code>8.89</code> was and you have silently moved 21 ipm to 21.02 ipm. <strong>Edit weld data through the pendant or the RobotStudio arc data editor, never in a text editor.</strong> And treat a suspiciously round number in the file as evidence that someone already did.</p>
+    </div>
+
+    <div class="note yours"><span class="lbl">Reading their naming convention</span>
+      <p><code>sm3_16_ft_tube_095_overlap</code> = seam data, 3/16&Prime; fillet, on the tube member, 0.095&Prime; material, closing pass. <code>_VB</code> is vee-butt; <code>_tack</code>/<code>_tackHI</code> are tacking; <code>_overlap</code> is the tie-in pass at the end of a circumferential weld and always carries a slower travel speed than its parent (19 ipm → 10 ipm) so the closure gets extra fill.</p>
+    </div>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="zones">
+    <p class="kick">Framework</p>
+    <h2>World zones</h2>
+
+    <p>A world zone is standing supervision: define a volume, then have the controller drive an output whenever the robot is inside it. It works during jogging too, not just program execution — that is the point of them.</p>
+
+    <p>Always two steps. First define a shape into a <code>shapedata</code> variable, then activate it:</p>
+
+    <div class="code"><pre>VAR wzstationary WZ_RE;
+VAR shapedata RE_volume;
+
+<span class="hl">WZSphDef</span> \Inside, RE_volume, pAtTrchCln.trans, 250;      <span class="cm">! a 250 mm sphere at the reamer</span>
+<span class="hl">WZDOSet</span> \Stat, WZ_RE \Inside, RE_volume, doR1AtReamer, 1;  <span class="cm">! inside it → tell the PLC</span></pre></div>
+
+    <div class="tw"><table>
+      <thead><tr><th>Construct</th><th class="d">Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="k">\Stat + wzstationary</td><td class="d">Stationary zone: lives until the next controller restart and cannot be freed by the program. The four service zones here are set up by <code>POWER_ON</code> event routines.</td></tr>
+        <tr><td class="k">\Temp + wztemporary</td><td class="d">Temporary zone: can be released with <code>WZFree</code>. Used by <code>m2ndLoadPos</code>, which redefines its zone on every request.</td></tr>
+        <tr><td class="k">\Inside / \Before</td><td class="d"><code>\Inside</code> sets the output while in the volume; <code>\Before</code> sets it as early as possible <em>before</em> reaching it — for warning a PLC in advance.</td></tr>
+        <tr><td class="k">WZHomeJointDef</td><td class="d">A zone in <strong>joint</strong> space rather than Cartesian — "to be used as a HOME or SERVICE position". Takes a centre <code>jointtarget</code> and a per-axis tolerance <code>jointtarget</code>.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="code"><pre><span class="cm">! m2ndLoadPos.sys — is the table within 2° tilt / 3° rotation of the requested load angle?</span>
+PERS jointtarget jdelta_pos := [[2,2,2,2,2,2],[9E+09,<span class="hl">2</span>,<span class="hl">3</span>,9E+09,9E+09,9E+09]];
+WZHomeJointDef \Inside, joint_space_STN1, jSTN1_2ndLoadPos, jdelta_pos;
+WZDOSet \Temp, STN1_worldzone \Inside, joint_space_STN1, soAtSTN1_2ndPos, 1;</pre></div>
+    <p class="cap">The 9E9 entries mean "don't care about this axis" — the same convention as everywhere else.</p>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="interrupt">
+    <p class="kick">Framework</p>
+    <h2>Interrupts and TRAPs</h2>
+
+    <p>Three pieces, always in this order:</p>
+
+    <div class="code"><pre>VAR intnum iSTN1LoadPos2;                            <span class="cm">! 1. a handle</span>
+
+PROC rSTN1LoadPos2()
+    <span class="hl">IDelete</span> iSTN1LoadPos2;                          <span class="cm">! 2. clear any previous subscription</span>
+    <span class="hl">CONNECT</span> iSTN1LoadPos2 <span class="hl">WITH</span> STN1LoadPos2TRAP;      <span class="cm">!    bind the handle to a TRAP</span>
+    <span class="hl">ISignalDI</span> siSTN1LoadPos2, 1, iSTN1LoadPos2;      <span class="cm">!    fire it when this input goes to 1</span>
+ENDPROC
+
+<span class="hl">TRAP</span> STN1LoadPos2TRAP                                <span class="cm">! 3. the handler — never called by you</span>
+    pCurrent := CRobT(\Tool:=tWeldgun);
+    ...
+ENDTRAP</pre></div>
+
+    <p>The <code>IDelete</code>-then-<code>CONNECT</code> pattern is deliberate: <code>CONNECT</code> on an already-connected handle is an error, so you clear first. Add <code>\Single</code> to <code>ISignalDI</code> for a one-shot instead of a recurring interrupt.</p>
+
+    <div class="note trap"><span class="lbl">Motion inside a TRAP</span>
+      <p><code>STN1LoadPos2TRAP</code> does <code>ActUnit</code> → <code>MoveJ</code> → <code>DeactUnit</code>. A TRAP interrupts whatever the program was doing, at any moment, on a PLC signal. Moving machinery from inside one is legal but it means the positioner can start rotating at a time no-one chose. Whatever prevents that firing with the torch inside the part is on the PLC side and is not visible from RAPID.</p>
+    </div>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="pm">
+    <p class="kick">Framework</p>
+    <h2>Production Manager data types</h2>
+
+    <p>These are not core RAPID — they come with option 812-1 and are what turn this from a program into a cell. Component names below are from the descriptors installed on this system.</p>
+
+    <div class="entry">
+      <div class="sig">ExecEngine;</div>
+      <div class="bd"><p class="gloss">The whole of <code>main()</code>. A loop that watches the Production Manager I/O interface and dispatches whichever <em>part</em> the PLC or the pendant selects. You never write the cycle logic yourself; you write parts and hang them off events.</p></div>
+    </div>
+
+    <h4>partdata — 7 components</h4>
+    <div class="code"><pre>PERS partdata pd_r462509st1 := ["RS462509_Stn1", "", "", 1, 1015, "", "padv0Stn1"];</pre></div>
+    <div class="tw"><table>
+      <thead><tr><th>#</th><th>Component</th><th>Value</th><th class="d">Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="n">1</td><td class="k">pathProcName</td><td class="v">"RS462509_Stn1"</td><td class="d">The routine to run. If this routine doesn't exist, selecting the part fails.</td></tr>
+        <tr><td class="n">2</td><td class="k">description</td><td class="v">""</td><td class="d">Text shown on the pendant.</td></tr>
+        <tr><td class="n">3</td><td class="k">taskList</td><td class="v">""</td><td class="d">Which tasks participate.</td></tr>
+        <tr><td class="n">4</td><td class="k">validStation</td><td class="v">1</td><td class="d">Only valid on station 1.</td></tr>
+        <tr><td class="n">5</td><td class="k">plcCode</td><td class="v">1015</td><td class="d"><strong>The number the PLC sends in <code>giJobSel</code></strong> to select this part.</td></tr>
+        <tr><td class="n">6</td><td class="k">Image</td><td class="v">""</td><td class="d">Pendant thumbnail.</td></tr>
+        <tr><td class="n">7</td><td class="k">advPart</td><td class="v">"padv0Stn1"</td><td class="d">Name of the <code>partadv</code> record holding this part's angles and payload.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h4>partadv — the positioner recipe for a part</h4>
+    <div class="code"><pre>PERS partadv padv461117Stn1 := [[0,0,0,0,0,0], [0,0,90,0,0,0], [0,0,0,0,0,0],
+                                [250,[0.001,0.001,0.001],[1,0,0,0],30,30,60]];
+<span class="cm">!                                procAngle      loadAngle       serviceAngle     Load (loaddata)</span></pre></div>
+    <p>Three <code>extjoint</code> angle sets plus a <code>loaddata</code>. Reading this one: weld with the turntable at 0°, rotate to 90° for loading, no special service angle, 250 kg payload. <code>IndexToStn1</code> reads <code>procAngle</code> for the incoming side and <code>loadAngle</code> for the outgoing side — that is the whole handshake between part data and machine motion, and it is <strong>data, not code</strong>. Change a part's load angle from the pendant and the positioner behaves differently with no RAPID edit.</p>
+
+    <h4>menudata — 11 components</h4>
+    <div class="code"><pre>TASK PERS menudata mdPLCToTrchCln :=
+    ["PLC Cmd to Torch Clean", "", "TorchCleanFlag", 255, "T_ROB1", 255, TRUE, 2, 0, FALSE, <span class="hl">101</span>];
+<span class="cm">!    description            image  procName        validStn taskList  validPos allowAfterError type minUserLevel blockOtherTasks plcCode</span></pre></div>
+    <p>That last field again: raise <code>diR1MenuOrder</code> with 101 in <code>giJobSel</code> and the robot runs <code>TorchCleanFlag</code>. The cell's ten service commands are 101&ndash;110, all declared this way in <code>Utility.sys</code>.</p>
+
+    <h4>ee_event — hooking into the cycle</h4>
+    <div class="code"><pre>CONST ee_event ee_ArmsAtZero := [EE_CLOSE_JIG, "ArmsToZero_DPos", "", 1, GAP_STN_1+GAP_STN_2];
+<span class="cm">!                               when            call this            task  which stations</span></pre></div>
+    <p>The engine calls your routine at defined moments. The ones used here are <code>EE_PROC_START</code>, <code>EE_PRE_PROD</code>, <code>EE_WAIT_ORDER</code>, <code>EE_SERVICE</code> and <code>EE_CLOSE_JIG</code>. <code>EE_CLOSE_JIG</code> firing before the jig closes is what levels both tilt axes before the positioner swings — collision avoidance implemented as an event subscription rather than a line of code, which is why you won't find it by reading the part routines.</p>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="odd">
+    <p class="kick">Reference</p>
+    <h2>Odd syntax you'll hit in these files</h2>
+
+    <div class="tw"><table>
+      <thead><tr><th>You see</th><th class="d">It means</th></tr></thead>
+      <tbody>
+        <tr><td class="k">%"MoveExtJ"%</td><td class="d"><strong>Late binding.</strong> The routine name is resolved at runtime from a string instead of at compile time. Used so a module loads even on a system where that instruction or routine doesn't exist. Procedure calls only — not functions.</td></tr>
+        <tr><td class="k">&lt;SMT&gt;</td><td class="d">A <strong>placeholder for a statement</strong> — an unfinished line. It is not an instruction. Executing it raises an error. <code>Utility.declarations()</code> contains one; harmless only because nothing calls it.</td></tr>
+        <tr><td class="k">MoveL *, v100, ...</td><td class="d">An <strong>inline position</strong> — the target is stored in the instruction itself rather than in a named variable. Common in pendant-taught code.</td></tr>
+        <tr><td class="k">\Inpos:=inpos50</td><td class="d">A convergence criterion that replaces the zone: "arrive to within this tolerance and settle" rather than just "get within 50 mm".</td></tr>
+        <tr><td class="k">Stop;</td><td class="d">Halts program execution; the operator must press start. Legitimate in <code>ServicePos</code> (the operator works on the torch). Almost certainly leftover debug at the end of <code>ArmsToZero_DPos</code>, which is bound to a cycle event.</td></tr>
+        <tr><td class="k">\NoEOffs</td><td class="d">Ignore active <em>external axis offsets</em>. Not the same as ignoring the external axes.</td></tr>
+        <tr><td class="k">9E+09</td><td class="d">"This axis is not in play." Legal only while that axis's unit is deactivated.</td></tr>
+        <tr><td class="k">TASK PERS vs PERS</td><td class="d"><code>PERS</code> of the same name is shared across tasks; <code>TASK PERS</code> is private to one. On a single-task system like this one the distinction is cosmetic — until someone adds a task.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>A five-minute exercise</h3>
+    <p>Open <code>mRS462509.mod</code> at <code>RS462509_Stn1</code> and read the first 25 lines. You should now be able to say, for each line, which of these it is: a PLC handshake, a wire-preparation step, a drive-allocation step, a measurement, or a correction. If a line resists classification, it is almost certainly one of the <code>extax</code> assignments — and that is the section to re-read.</p>
+  </section>
+
+  <!-- ======================================================= -->
+  <section id="sources">
+    <p class="kick">Provenance</p>
+    <h2>Sources</h2>
+    <p>Definitions were taken from these, not from memory:</p>
+    <ul>
+      <li><strong>ABB Technical reference manual — RAPID Instructions, Functions and Data types</strong>, 3HAC16581-1 rev P. Used for <code>ActUnit</code>, <code>DeactUnit</code>, <code>MechUnitLoad</code>, <code>MoveExtJ</code>, <code>MoveAbsJ</code>, <code>SearchL</code>, <code>SearchC</code>, <code>IsMechUnitActive</code>, <code>TaskRunRob</code>, <code>Offs</code>, <code>CRobT</code>, <code>CJointT</code>, <code>PulseDO</code>, <code>ISignalDI</code>, <code>WZDOSet</code>, <code>WZSphDef</code>, <code>WZHomeJointDef</code>, and the <code>robtarget</code> / <code>jointtarget</code> / <code>extjoint</code> / <code>wobjdata</code> / <code>loaddata</code> data types. <a href="https://library.e.abb.com/public/688894b98123f87bc1257cc50044e809/Technical%20reference%20manual_RAPID_3HAC16581-1_revJ_en.pdf">library.e.abb.com</a> · the RobotWare 6 edition is <a href="https://robotum.cz/wp-content/uploads/2019/12/Rapid_3HAC050917-TRM-RAPID-RW-6-en.pdf">3HAC050917</a></li>
+      <li><strong>The Arc option installed on this machine</strong> — <code>RobotWare_6.15.8029\options\arc\RS\RapidDataDescriptors\*.xml</code>. Authoritative component order for <code>seamdata</code> (48), <code>welddata</code> (20), <code>weavedata</code> (15), <code>partdata</code> (7), <code>partadv</code> (29), <code>menudata</code> (11).</li>
+      <li><strong>The Miller EIP add-in installed on this machine</strong> — <code>MillerEIP-Welder_6.11.1005.01\Cfg\eIntARC1_EQUIP_T_ROB1.cfg</code>. Complete welder signal map including <code>goWld1VoltageArcLength</code>.</li>
+      <li><strong>The Positioner media pool</strong> — <code>Positioner_6.15.8029\positioners\irbp1_d\irbpcfg\INT_D600_L2000_D1200_TYPEA_STN1.cfg</code>. The <code>logical_axis</code> numbers behind the <code>eax_b</code>/<code>eax_c</code>/<code>eax_d</code> map.</li>
+      <li><strong>ABB Application manual — Production Manager</strong>, 3HAC052855 (RobotWare 6), for <code>ExecEngine</code> and the event model. <a href="https://library.e.abb.com/public/fe355c957d7948a1952e889d78bc191d/3HAC052855%20AM%20Production%20Manager%20RW%206-en.pdf">library.e.abb.com</a></li>
+      <li><strong>ABB Application manual — Arc and Arc Sensor</strong>, 3HAC050988, for the weld sequence instructions.</li>
+    </ul>
+    <p>Where the reference manual to hand is the RobotWare 5.15 edition, the wording is unchanged in the RobotWare 6 edition for every instruction quoted here. Anything marked "worth checking on the plant" is a behaviour a backup cannot tell you.</p>
+  </section>
+
+  <footer>
+    Nothing in <code>D:\ABB\Monarc_RS\Project</code> was modified. Code snippets are quoted from the customer's own modules with positions elided for length; line references are to <code>Controller Data\4600-803651_Virtual\RAPID\TASK1</code>.
+  </footer>
+</main>
+</div>
+
+</body></html>

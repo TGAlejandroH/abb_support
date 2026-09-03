@@ -1,0 +1,634 @@
+MODULE TG_Comms(SYSMODULE)
+    !***********************************************************************
+    ! TetraGen HMI request library for ABB - Phase 1 (comm core)
+    !
+    ! RAPID port of the FANUC KAREL request programs.
+    ! Design & wire protocol: docs/abb_port_plan_v1.md
+    !
+    ! Loaded resident in task T_ROB1. The .tgs program modules (loaded
+    ! dynamically by TG_Main in Phase 3) call the TG_* PROCs and read the
+    ! shared PERS data below directly - RAPID's task-wide global scope makes
+    ! every non-LOCAL symbol of a loaded module visible to all other modules.
+    !
+    ! Naming:  TG_*  = public API (called by TG_Main and .tgs programs)
+    !          tg*   = internal helpers (LOCAL)
+    !
+    ! Wire protocol: byte-compatible with the FANUC TGS HMI protocol
+    ! (request ids, prompts, 1-byte "0" acks, fixed-width scalars) EXCEPT
+    ! frame/pose payloads, which travel as RAPID pose literals
+    ! "[[x,y,z],[q1,q2,q3,q4]]" with a normalized quaternion (plan 4.5).
+    !
+    ! Tool/frame parameter style (plan 7.6, decided 2026-08-28): the pose-
+    ! reporting request PROCs take explicit \Tool/\WObj PERS parameters
+    ! (option b - the frame is visible at every call site, and a PERS
+    ! parameter is itself a persistent reference, so it feeds CRobT
+    ! directly). The FANUC-style modal numbers (nTG_ActTool/nTG_ActFrame)
+    ! remain as a DEPRECATED fallback for calls that omit the arguments -
+    ! kept deliberately as the back-pocket alternative; do not delete.
+    !***********************************************************************
+
+    ! ------------------------------------------------------------------
+    ! Connection config. Edit from FlexPendant/RobotStudio, no code change.
+    ! Virtual controller: keep "127.0.0.1". Real IRC5: the controller LAN IP.
+    PERS string stTG_ServerIP:="127.0.0.1";
+    PERS num nTG_Port:=2000;
+
+    ! Settle time (s) applied after WaitRob and before every reported pose.
+    ! VC measurements (findings doc): WaitRob \InPos alone left up to ~2 mm
+    ! of residual convergence; 0.2 s reaches full settle (and matches the
+    ! FANUC WAIT 0.20 before R_C). Tune from the data view without reloading
+    ! code; on the real cell it also covers mechanical vibration damping.
+    PERS num nTG_SettleTime:=0.2;
+
+    ! ------------------------------------------------------------------
+    ! Shared state: FANUC register-map equivalents (plan 4.3).
+    PERS string stTG_ProgPass:="none";     ! SR[24] program name == project password
+    PERS string stTG_SubName:="none";      ! SR[25] sub-routine token
+    PERS string stTG_RobStatus:="Ok";      ! SR[23] robot status string
+    PERS string stTG_ProgName:="none";     ! prog name received by TG_ReqFileTransfer
+    PERS num nTG_ProgSel:=0;               ! R[188] 1=run .tgs program, 2=camera calibration
+    PERS num nTG_FtpStatus:=0;             ! R[189] file transfer ok
+    PERS num nTG_PassOK:=0;                ! R[200] password correct
+    PERS num nTG_DryRun:=0;                ! R[199] dry-run flag
+    PERS num nTG_DoCapture:=0;             ! R[197] do-capture flag; 2 = robot-side abort sentinel (matrix I4)
+    PERS num nTG_CaptureOK:=0;             ! R[196] capture succeeded
+    PERS num nTG_GlobalCapOK:=0;           ! R[187] global captures done status
+    PERS num nTG_WeldStatus:=0;            ! R[198] 0=skip weld, 1=weld, 2=abort program
+    PERS num nTG_UdwpFlag:=0;              ! R[170] user-defined weld params flag
+    PERS num nTG_WelderType:=0;            ! 1=Miller, 2=FroniusTPSi (KAREL local var)
+    PERS num nTG_WeldProc:=0;              ! R[171] weld procedure number
+    PERS num nTG_WireFeed:=0;              ! R[172] wire feed speed
+    PERS num nTG_ArcLength:=0;             ! R[173] arc length
+    PERS num nTG_ArcControl:=0;            ! R[174] arc control
+    PERS num nTG_TravelSpeed:=0;           ! R[175] travel speed
+
+    ! Phase 6: R_W_S weld statistics. No FANUC register equivalent - KAREL
+    ! read the ArcTool record $AWEWELDSTAT[1] directly (R_W_S.kl). An IRC5
+    ! has no drop-in equivalent of that record, so the .tgs program writes
+    ! these three PERS just before calling TG_ReqWeldStats.
+    ! TODO: DUMMY VALUES - the .tgs programs currently write fixed numbers to
+    ! mimic the sensing. Producing REAL values is its own task; the candidate
+    ! sources are listed in docs/abb_weld_stats_port_v1.md section 6. Only the
+    ! source of the numbers changes then - the wire below is final.
+    ! Units are fixed by the HMI, not by us: distance in mm (it divides by
+    ! 25.4 for its analytics, which take inches) and time in seconds.
+    PERS num nTG_WeldDist:=0;              ! $WELD_DIST   welded distance, mm
+    PERS num nTG_ArcOnTime:=0;             ! $ARC_ON_TIME arc-on time, s
+    ! 1 = the arc really ran. The HMI tests this for equality with 1, so it is
+    ! a FLAG here, never a count - see the doc's 1.4 for why that distinction
+    ! is not merely theoretical on the FANUC side.
+    PERS num nTG_SuccArcEnd:=0;            ! $SUCC_AE
+
+    ! Phase 5 (touch-up/retrieval doc section 4): 1 = an operator-edited
+    ! .tgs module was detected at unload and staged in HOME:/TGS/edited/
+    ! for the HMI's "Retrieve robot program from controller". No FANUC
+    ! register equivalent (FANUC needs none: its MD: memory device serves
+    ! the touched-up program directly). Set by tgSaveEditedModule
+    ! (TG_Main); cleared by the HMI/tg_retrieve.py after a successful
+    ! retrieval (RWS symbol write) - the robot never clears it.
+    PERS num nTG_ProgEdited:=0;
+
+    ! Frames received from the HMI (FANUC PR[5]/UFRAME[5], PR[6]/UFRAME[6]).
+    ! Request PROCs write .uframe; the .tgs program references these wobjs in
+    ! its move instructions - no separate "activate" step exists or is needed.
+    PERS wobjdata wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+    PERS wobjdata wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
+    ! Tools (FANUC UT[2] camera / UT[8] torch).
+    ! TODO: DUMMY VALUES - replace with the calibrated tooldata of the real cell.
+    PERS tooldata tTG_Cam:=[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]];
+    PERS tooldata tTG_Weld:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+
+    ! DEPRECATED (plan 7.6, decided 2026-08-28) - FANUC modal
+    ! UTOOL_NUM/UFRAME_NUM emulation: the .tgs program selects the active
+    ! tool/frame BY NUMBER; tgSendPose resolves the number to the LIVE
+    ! tooldata/wobjdata at read time. Superseded by explicit \Tool/\WObj
+    ! PERS parameters on the request PROCs (style b), which make the frame
+    ! visible at the call site instead of hidden global state. Only used
+    ! when a request is called WITHOUT the arguments. Kept deliberately as
+    ! the back-pocket alternative; do not delete.
+    ! (A PERS-to-PERS copy would go stale when a request updates the frame -
+    ! the same hazard FANUC handles by re-emitting UFRAME[n]=PR[n] after
+    ! every frame-PR-writing routine. Numbers need no refresh.)
+    PERS num nTG_ActTool:=8;               ! UTOOL_NUM:  2=camera, 8=torch
+    PERS num nTG_ActFrame:=0;              ! UFRAME_NUM: 5=camera, 6=weld, else base
+
+    ! Scratch persistents for CRobT: its \Tool/\WObj are PERS parameters
+    ! (a VAR or FUNC result is rejected with Argument error 123). Only the
+    ! DEPRECATED modal fallback needs them (tgActTool/tgActWobj are FUNCs,
+    ! their results are values); the explicit style passes the caller's
+    ! PERS parameters straight to CRobT, no scratch copy involved.
+    ! tgSendPose refreshes them from the live data on every fallback call,
+    ! so they cannot go stale. Internal - never reference in .tgs programs.
+    LOCAL PERS tooldata tTG_Scratch:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+    LOCAL PERS wobjdata wobjTG_Scratch:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
+    ! ------------------------------------------------------------------
+    ! Socket state. Lifecycle owned by TG_Main via TG_SocketCom/TG_SocketDisc;
+    ! .tgs programs must never touch these directly.
+    LOCAL VAR socketdev tg_server_socket;
+    LOCAL VAR socketdev tg_client_socket;
+    LOCAL VAR string tg_client_ip:="";
+
+
+    !===================================================================
+    ! Socket lifecycle (FANUC: SOCKET_COM / SOCKET_DISC)
+    !===================================================================
+
+    PROC TG_SocketCom()
+        ! FANUC: SOCKET_COM - (re)start the server and wait for the HMI client.
+        ! SocketClose is safe on sockets that were never opened (RoboDK driver
+        ! uses the same close-before-create pattern on RW5/6).
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        SocketCreate tg_server_socket;
+        SocketBind tg_server_socket,stTG_ServerIP,nTG_Port;
+        SocketListen tg_server_socket;
+        TPWrite "TG: waiting for HMI on port "\Num:=nTG_Port;
+        SocketAccept tg_server_socket,tg_client_socket\ClientAddress:=tg_client_ip,\Time:=WAIT_MAX;
+        TPWrite "TG: HMI connected: "+tg_client_ip;
+    ERROR
+        ! Error matrix F-A/I1: RAPID's retry counter is bounded by the
+        ! system parameter "No Of Retry" (default 4) - without
+        ! ResetRetryCount a handful of consecutive failures would stop the
+        ! whole server loop. Resetting makes this reconnect loop indefinite
+        ! (same idiom as the RoboDK driver). Pacing comes from WaitTime /
+        ! the blocking SocketAccept, so this cannot busy-loop.
+        IF ERRNO=ERR_SOCK_TIMEOUT THEN
+            ResetRetryCount;
+            RETRY;
+        ELSEIF ERRNO=ERR_SOCK_CLOSED THEN
+            SocketClose tg_server_socket;
+            SocketClose tg_client_socket;
+            WaitTime 2;
+            ResetRetryCount;
+            RETRY;
+        ENDIF
+    ENDPROC
+
+    PROC TG_SocketDisc()
+        ! FANUC: SOCKET_DISC - drop the HMI connection (and the listener; it is
+        ! re-created by the next TG_SocketCom). WaitTime lets the TCP stack
+        ! release the port before rebinding (RoboDK COM_End pattern).
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        WaitTime 2;
+        TPWrite "TG: socket disconnected";
+    ENDPROC
+
+
+    !===================================================================
+    ! Wire-protocol helpers (plan 4.4)
+    !===================================================================
+
+    LOCAL PROC tgCycleAbort()
+        ! FIX 2026-08-28 (error-recovery matrix F-F): bottom-level recovery
+        ! for wire errors. VC evidence (kill test, RW 6.15): an unhandled
+        ! error does NOT propagate through the late-binding call
+        ! (%stTG_ProgName%) - the program STOPPED at the failing
+        ! SocketReceive (events 41595/40228), so the tgRunTgsProgram /
+        ! tgMainCycle handlers can never see a wire error raised inside a
+        ! .tgs run. Recover where the error is born instead: log, drop the
+        ! sockets, ExitCycle. PP moves to the start of main, which begins
+        ! with TG_SocketDisc and loops back to accept - no propagation
+        ! involved, works from any call depth (VC-validated 2026-08-28).
+        ! VC-observed: ExitCycle's PP move does NOT drop \Dynamic modules
+        ! (unlike a FlexPendant/RobotStudio PP-to-main) - the leftover is
+        ! handled next cycle by the ERR_LOADED reload path (matrix I2),
+        ! also VC-validated in exactly this scenario.
+        ! Called ONLY from the wire helpers' ERROR handlers below.
+        ! To stop instead of recovering, replace ExitCycle below with:
+        !   EXIT             - terminates execution (FANUC abort)
+        !   Stop             - halts, resumable with Start (FANUC pause)
+        !   Stop; ExitCycle; - halt for the operator, clean restart on Start
+        TPWrite "TG: cycle error, ERRNO = "\Num:=ERRNO;
+        TPWrite "TG: wire lost - restarting cycle";
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        ExitCycle;
+    ENDPROC
+
+    LOCAL PROC tgSendAck(string data)
+        ! Robot->HMI message: send, then wait for the HMI 1-byte ack ("0").
+        ! KAREL: WRITE comm_file(data) ; READ comm_file(cmd::1)
+        VAR string ack;
+        SocketSend tg_client_socket,\Str:=data;
+        SocketReceive tg_client_socket,\Str:=ack,\Time:=WAIT_MAX;
+    ERROR
+        ! FIX 2026-08-28 (F-F): catch-all - any error on the wire aborts
+        ! the cycle from here (see tgCycleAbort; propagation upward cannot
+        ! be relied on inside a late-bound .tgs run).
+        tgCycleAbort;
+    ENDPROC
+
+    LOCAL FUNC string tgPromptRecv(string prompt)
+        ! HMI->robot value: send the sync prompt, then receive the payload.
+        ! KAREL: WRITE comm_file(prompt) ; READ comm_file(cmd::N)
+        VAR string reply;
+        SocketSend tg_client_socket,\Str:=prompt;
+        SocketReceive tg_client_socket,\Str:=reply,\Time:=WAIT_MAX;
+        RETURN reply;
+    ERROR
+        ! FIX 2026-08-28 (F-F): catch-all - see tgSendAck.
+        tgCycleAbort;
+    ENDFUNC
+
+    LOCAL FUNC string tgFmtReal(num v)
+        ! FANUC fixed-width real: sign + 8 chars, 3 decimals, zero-padded.
+        ! e.g. 905.216 -> "+0905.216", -12.5 -> "-0012.500"
+        VAR string s;
+        VAR num av;
+        VAR num dotpos;
+        av:=Abs(v);
+        ! FANUC HMI rejects values >= 10000 anyway (frame limit check)
+        IF av>9999.999 av:=9999.999;
+        s:=NumToStr(av,3);
+        ! ensure exactly 3 decimals (NumToStr may drop trailing zeros)
+        dotpos:=StrFind(s,1,".");
+        IF dotpos>StrLen(s) THEN
+            s:=s+".000";
+            dotpos:=StrFind(s,1,".");
+        ENDIF
+        WHILE StrLen(s)-dotpos<3 DO
+            s:=s+"0";
+        ENDWHILE
+        ! zero-pad the integer part to a total of 8 chars
+        WHILE StrLen(s)<8 DO
+            s:="0"+s;
+        ENDWHILE
+        IF v<0 THEN
+            RETURN "-"+s;
+        ENDIF
+        RETURN "+"+s;
+    ENDFUNC
+
+    LOCAL FUNC num tgParseReal(string s)
+        ! Tolerant scalar parse; returns 0 on garbage (and reports it).
+        ! Strips the FANUC-format leading "+" ("+0017.500"): an explicit plus
+        ! sign is not part of a RAPID num literal, so StrToVal may reject it.
+        ! (Nested IFs: RAPID AND does not short-circuit; local copy: IN
+        ! parameters are not writable.)
+        VAR string s2;
+        VAR num v:=0;
+        VAR bool ok;
+        s2:=s;
+        IF StrLen(s2)>0 THEN
+            IF StrPart(s2,1,1)="+" THEN
+                s2:=StrPart(s2,2,StrLen(s2)-1);
+            ENDIF
+        ENDIF
+        ok:=StrToVal(s2,v);
+        IF NOT ok THEN
+            TPWrite "TG ERROR: bad number payload:";
+            TPWrite s2;
+            v:=0;
+        ENDIF
+        RETURN v;
+    ENDFUNC
+
+    LOCAL FUNC string tgPoseToStr(pose p)
+        ! RAPID pose literal, guaranteed <= 80 chars for |trans| < 10000 mm
+        ! (plan 4.5): translations 2 decimals, quaternions 6 decimals.
+        VAR string s;
+        s:="[["+NumToStr(p.trans.x,2)+","+NumToStr(p.trans.y,2)+","+NumToStr(p.trans.z,2)+"],[";
+        s:=s+NumToStr(p.rot.q1,6)+","+NumToStr(p.rot.q2,6)+",";
+        s:=s+NumToStr(p.rot.q3,6)+","+NumToStr(p.rot.q4,6)+"]]";
+        RETURN s;
+    ENDFUNC
+
+    LOCAL FUNC bool tgTryStrToPose(string s,INOUT pose p)
+        ! Parse "[[x,y,z],[q1,q2,q3,q4]]" into a pose; re-normalize the
+        ! quaternion defensively (non-normalized orients raise error 50076
+        ! when used in motion). Leaves p untouched on parse failure.
+        VAR pose ptmp;
+        VAR bool ok;
+        ok:=StrToVal(s,ptmp);
+        IF ok THEN
+            ptmp.rot:=NOrient(ptmp.rot);
+            p:=ptmp;
+        ELSE
+            TPWrite "TG ERROR: bad pose payload:";
+            TPWrite s;
+        ENDIF
+        RETURN ok;
+    ENDFUNC
+
+    LOCAL FUNC tooldata tgActTool()
+        ! DEPRECATED (plan 7.6) - modal fallback only, see nTG_ActTool.
+        ! Resolve the FANUC-style active tool number to live tooldata.
+        IF nTG_ActTool=2 THEN
+            RETURN tTG_Cam;
+        ENDIF
+        RETURN tTG_Weld;
+    ENDFUNC
+
+    LOCAL FUNC wobjdata tgActWobj()
+        ! DEPRECATED (plan 7.6) - modal fallback only, see nTG_ActFrame.
+        ! Resolve the FANUC-style active frame number to live wobjdata.
+        IF nTG_ActFrame=5 THEN
+            RETURN wobjTG_Cam;
+        ELSEIF nTG_ActFrame=6 THEN
+            RETURN wobjTG_Weld;
+        ENDIF
+        RETURN wobj0;
+    ENDFUNC
+
+    LOCAL PROC tgSendPose(\PERS tooldata Tool,\PERS wobjdata WObj)
+        ! Robot->HMI: current pose of the given tool in the given frame,
+        ! sent as a pose literal (plan 4.5). KAREL sent Euler x,y,z,w,p,r;
+        ! the Euler<->quaternion conversion now lives on the PC side.
+        ! \Tool/\WObj (pass BOTH): PERS parameters are persistent
+        ! references - handed to CRobT directly, so a frame updated by a
+        ! request is used by the very next pose report (FANUC
+        ! UFRAME[n]=PR[n] semantics included, plan 7.6 style b).
+        ! Omitted -> DEPRECATED modal fallback via nTG_ActTool/nTG_ActFrame.
+        VAR robtarget rt;
+        VAR pose p;
+        ! Never report a pose while the servos are still converging: on the
+        ! VC, CRobT read right after a fine point was 1-3 mm / ~0.08 deg off
+        ! the settled position (rapid_validation_findings_v1.md, 'related
+        ! observation'). Captures register against this reported pose, so
+        ! the error would flow into registration.
+        ! Measured escalation (2026-08-28): \InPos alone shrank the error
+        ! 1.3 mm -> 0.28 mm but left ~2 mm right after a move, so all three
+        ! stages are applied: stop point reached, true standstill, then a
+        ! settle time for residual servo creep / mechanical vibration
+        ! (FANUC used WAIT 0.20 + DELAY in the same places).
+        WaitRob \InPos;
+        WaitRob \ZeroSpeed;
+        IF nTG_SettleTime>0 WaitTime nTG_SettleTime;
+        IF Present(Tool) AND Present(WObj) THEN
+            rt:=CRobT(\Tool:=Tool \WObj:=WObj);
+        ELSE
+            ! DEPRECATED modal path (plan 7.6) - resolve the FANUC-style
+            ! numbers; FUNC results are values, hence the scratch copies.
+            IF Present(Tool) XOR Present(WObj) THEN
+                TPWrite "TG WARNING: tgSendPose needs BOTH Tool and WObj - using modal numbers";
+            ENDIF
+            tTG_Scratch:=tgActTool();
+            wobjTG_Scratch:=tgActWobj();
+            rt:=CRobT(\Tool:=tTG_Scratch \WObj:=wobjTG_Scratch);
+        ENDIF
+        p.trans:=rt.trans;
+        p.rot:=rt.rot;
+        tgSendAck tgPoseToStr(p);
+    ENDPROC
+
+
+    !===================================================================
+    ! Request PROCs (priority set, plan section 1.4)
+    !===================================================================
+
+    PROC TG_ReqProgSel()
+        ! FANUC: REQ_PROG_SEL - receive the mode/program selection from the
+        ! HMI right after it connects. -> nTG_ProgSel (R[188])
+        VAR string reply;
+        VAR bool ok;
+        reply:=tgPromptRecv("Give me the program ID");
+        ok:=StrToVal(reply,nTG_ProgSel);
+        IF NOT ok THEN
+            nTG_ProgSel:=0;
+            TPWrite "TG ERROR: bad program ID:";
+            TPWrite reply;
+        ENDIF
+        TPWrite "TG: program ID = "\Num:=nTG_ProgSel;
+    ENDPROC
+
+    PROC TG_ReqEnd(\PERS tooldata Tool,\PERS wobjdata WObj)
+        ! FANUC: R_E (HMI request id 100) - program end notification.
+        ! Sequence: id -> current pose -> sub-routine token.
+        ! \Tool/\WObj: report tool/frame for the pose (plan 7.6 style b);
+        ! omitted -> DEPRECATED modal fallback. The HMI ignores every R_E
+        ! pose (plan 1.4.1), so any defensible frame is acceptable here.
+        ! stTG_SubName must never be empty: an empty SocketSend transmits
+        ! zero bytes and the HMI recv would block forever (default "none").
+        tgSendAck "100";
+        tgSendPose \Tool?Tool \WObj?WObj;
+        tgSendAck stTG_SubName;
+        TPWrite "TG: end request served";
+    ENDPROC
+
+    PROC TG_ReqFileTransfer()
+        ! FANUC: R_F_T (HMI request id 10) - the HMI transfers the .tgs
+        ! program module now, then reports the transfer status and the
+        ! program name. -> nTG_FtpStatus (R[189]), stTG_ProgName (SR[24];
+        ! on FANUC the program name doubles as the project password).
+        VAR string reply;
+        tgSendAck "10";
+        ! Free space on the program storage. FANUC sent VOL_SPACE of tpp:.
+        ! TODO Phase 4: real value via FSSize("HOME:" ...) - dnum territory,
+        ! num only holds exact integers to 2^23. Dummy is safe: the HMI just
+        ! checks the program fits.
+        tgSendAck "99999999";
+        reply:=tgPromptRecv("Give me FTP status");
+        nTG_FtpStatus:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me prog name");
+        stTG_ProgName:=reply;
+        TPWrite "TG: ftp status = "\Num:=nTG_FtpStatus;
+        TPWrite "TG: prog name = "+stTG_ProgName;
+    ENDPROC
+
+    PROC TG_ReqPassCheck(\PERS tooldata Tool,\PERS wobjdata WObj)
+        ! FANUC: R_P_C (HMI request id 5) - password / dry-run check.
+        ! Sequence: id -> pose -> sub token -> password -> recv 2 chars
+        ! (char 1 = password correct, char 2 = dry run).
+        ! \Tool/\WObj: report tool/frame for the pose (plan 7.6 style b);
+        ! omitted -> DEPRECATED modal fallback.
+        ! -> nTG_PassOK (R[200]), nTG_DryRun (R[199])
+        VAR string reply;
+        tgSendAck "5";
+        tgSendPose \Tool?Tool \WObj?WObj;
+        tgSendAck stTG_SubName;
+        tgSendAck stTG_ProgPass;
+        reply:=tgPromptRecv("Give me the status");
+        IF StrLen(reply)>=2 THEN
+            nTG_PassOK:=tgParseReal(StrPart(reply,1,1));
+            nTG_DryRun:=tgParseReal(StrPart(reply,2,1));
+        ELSE
+            nTG_PassOK:=0;
+            nTG_DryRun:=0;
+            TPWrite "TG ERROR: bad pass-check payload:";
+            TPWrite reply;
+        ENDIF
+        TPWrite "TG: pass ok = "\Num:=nTG_PassOK;
+        TPWrite "TG: dry run = "\Num:=nTG_DryRun;
+    ENDPROC
+
+    PROC TG_ReqCamFrame(\PERS tooldata Tool,\PERS wobjdata WObj)
+        ! FANUC: R_C_F (HMI request id 1) - request camera frame.
+        ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal,
+        ! plan 4.5; KAREL received 6 prompted reals) -> recv capture flag.
+        ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
+        ! the outgoing pose (which goes out in the frame's PREVIOUS value -
+        ! FANUC parity, plan 1.4.1) AND the wobj whose .uframe receives the
+        ! served frame, written through the PERS reference. Omitted ->
+        ! DEPRECATED modal fallback; the frame lands in wobjTG_Cam.
+        ! -> WObj.uframe (PR[5]/UFRAME[5]), nTG_DoCapture (R[197]; forced
+        ! to 2 = abort sentinel on a bad frame payload, matrix I4)
+        VAR string reply;
+        VAR pose pFrame;
+        VAR bool frame_ok;
+        tgSendAck "1";
+        tgSendPose \Tool?Tool \WObj?WObj;
+        tgSendAck stTG_SubName;
+        reply:=tgPromptRecv("Give me the frame");
+        frame_ok:=tgTryStrToPose(reply,pFrame);
+        IF frame_ok THEN
+            IF Present(WObj) THEN
+                WObj.uframe:=pFrame;
+            ELSE
+                wobjTG_Cam.uframe:=pFrame;
+            ENDIF
+        ENDIF
+        ! The capture-status exchange must ALWAYS complete: the HMI's R_C_F
+        ! handler serves the full sequence and would desync if cut short.
+        reply:=tgPromptRecv("Give me capture status");
+        nTG_DoCapture:=tgParseReal(reply);
+        IF NOT frame_ok THEN
+            ! Error matrix F-C/I4 (revised 2026-08-28: ABORT, not skip -
+            ! same policy as the weld case): never proceed against a stale
+            ! frame. 2 is a robot-side sentinel the HMI never sends (the
+            ! wire carries only 0/1); the .tgs program checks it and aborts
+            ! to R_E (FANUC LBL[101] parity).
+            nTG_DoCapture:=2;
+            TPWrite "TG ERROR: bad cam frame payload - aborting program";
+        ENDIF
+        TPWrite "TG: cam frame set, do capture = "\Num:=nTG_DoCapture;
+    ENDPROC
+
+    PROC TG_ReqCapture(\PERS tooldata Tool,\PERS wobjdata WObj)
+        ! FANUC: R_C (HMI request id 2) - request camera capture at the
+        ! current position. This is the ONE pose the HMI consumes (plan
+        ! 1.4.1) - registration depends on Tool/WObj being the camera tool
+        ! and the served camera frame.
+        ! \Tool/\WObj: report tool/frame (plan 7.6 style b); omitted ->
+        ! DEPRECATED modal fallback. -> nTG_CaptureOK (R[196])
+        VAR string reply;
+        ! FANUC: DELAY 5 (ms) "to wait for vibrations to dampen. Adjust as
+        ! needed." Increase for the real cell if captures come out blurred.
+        WaitTime 0.005;
+        tgSendAck "2";
+        tgSendPose \Tool?Tool \WObj?WObj;
+        tgSendAck stTG_SubName;
+        reply:=tgPromptRecv("Give me capture status");
+        nTG_CaptureOK:=tgParseReal(reply);
+        TPWrite "TG: capture ok = "\Num:=nTG_CaptureOK;
+    ENDPROC
+
+    PROC TG_ReqGlobalCapDone()
+        ! FANUC: R_G_C_D (HMI request id 11) - all global captures done;
+        ! the HMI runs global localization. -> nTG_GlobalCapOK (R[187])
+        VAR string reply;
+        tgSendAck "11";
+        reply:=tgPromptRecv("Give me global loc status");
+        nTG_GlobalCapOK:=tgParseReal(reply);
+        TPWrite "TG: global loc ok = "\Num:=nTG_GlobalCapOK;
+    ENDPROC
+
+    PROC TG_ReqWeldFrame(\PERS tooldata Tool,\PERS wobjdata WObj)
+        ! FANUC: R_W_F (HMI request id 4) - request weld frame.
+        ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal)
+        ! -> recv weld status (0=skip, 1=weld, 2=abort program).
+        ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
+        ! the outgoing pose AND the wobj whose .uframe receives the served
+        ! frame, written through the PERS reference. Omitted -> DEPRECATED
+        ! modal fallback; the frame lands in wobjTG_Weld.
+        ! -> WObj.uframe (PR[6]/UFRAME[6]), nTG_WeldStatus (R[198])
+        VAR string reply;
+        VAR pose pFrame;
+        VAR bool frame_ok;
+        tgSendAck "4";
+        tgSendPose \Tool?Tool \WObj?WObj;
+        tgSendAck stTG_SubName;
+        reply:=tgPromptRecv("Give me the frame");
+        frame_ok:=tgTryStrToPose(reply,pFrame);
+        IF frame_ok THEN
+            IF Present(WObj) THEN
+                WObj.uframe:=pFrame;
+            ELSE
+                wobjTG_Weld.uframe:=pFrame;
+            ENDIF
+        ENDIF
+        ! The weld-status exchange must ALWAYS complete: the HMI's R_W_F
+        ! handler serves the full sequence and would desync if cut short.
+        reply:=tgPromptRecv("Give me weld status");
+        nTG_WeldStatus:=tgParseReal(reply);
+        IF NOT frame_ok THEN
+            ! Error matrix F-C/I4: never weld against a stale frame. A
+            ! malformed frame payload forces the abort path (decision:
+            ! abort program, not skip weld - safer for welding). The .tgs
+            ! program sees nTG_WeldStatus=2 -> R_E, FANUC LBL[101] parity.
+            nTG_WeldStatus:=2;
+            TPWrite "TG ERROR: bad weld frame payload - aborting program";
+        ENDIF
+        TPWrite "TG: weld frame set, weld status = "\Num:=nTG_WeldStatus;
+    ENDPROC
+
+    PROC TG_ReqWeldParams()
+        ! FANUC: R_W_P (HMI request id 14) - welding parameters.
+        ! -> nTG_UdwpFlag (R[170]), nTG_TravelSpeed (R[175]); when the flag
+        ! is set also nTG_WelderType, nTG_WeldProc (R[171]), nTG_WireFeed
+        ! (R[172]), nTG_ArcLength (R[173]), nTG_ArcControl (R[174]).
+        ! KAREL additionally wrote the values into the ArcTool schedule
+        ! (SET_VAR AWE1WP*/SCH[20]) - the RobotWare Arc welddata mapping is
+        ! deferred (plan, phase 4); values are only stored in PERS here.
+        ! KAREL's two welder-type branches were byte-identical; collapsed.
+        VAR string reply;
+        tgSendAck "14";
+        reply:=tgPromptRecv("Give me UDWP flag");
+        nTG_UdwpFlag:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me travel speed");
+        nTG_TravelSpeed:=tgParseReal(reply);
+        IF nTG_UdwpFlag=1 THEN
+            reply:=tgPromptRecv("Give me welder type");
+            nTG_WelderType:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me proc");
+            nTG_WeldProc:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me wire feed speed");
+            nTG_WireFeed:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me arc length");
+            nTG_ArcLength:=tgParseReal(reply);
+            reply:=tgPromptRecv("Give me arc control");
+            nTG_ArcControl:=tgParseReal(reply);
+        ELSE
+            ! KAREL resets the schedule registers when not user-defined
+            nTG_WeldProc:=0;
+            nTG_WireFeed:=0;
+            nTG_ArcLength:=0;
+            nTG_ArcControl:=0;
+        ENDIF
+        TPWrite "TG: weld params, UDWP = "\Num:=nTG_UdwpFlag;
+    ENDPROC
+
+    PROC TG_ReqWeldStats()
+        ! FANUC: R_W_S (HMI request id 13) - welding stats, called once per
+        ! weld right after WELD END (sample TD05tRJYQd.ls lines 223 / 392).
+        ! Sequence: id -> "dist,arc_on_time,succ_ae" as ONE message. No pose,
+        ! no sub token - the simplest request in the family.
+        !
+        ! The three values are read from the PERS above (set by the .tgs
+        ! program just before the call), mirroring KAREL's three GET_VARs of
+        ! $AWEWELDSTAT[1].
+        !
+        ! Number format: tgFmtReal ("+0200.000") - the signed zero-padded
+        ! field every other scalar on this wire already uses. KAREL used
+        ! CNV_REAL_STR(v,8,3), which blank-pads to a MINIMUM width with at
+        ! least one leading blank (" 200.000") and emits no "+". Deliberate
+        ! deviation, safe in both consumers: the HMI parses this CSV with
+        ! std::stringstream >> double (FANUCRobot::ReceiveWeldingStats),
+        ! which skips leading whitespace and accepts a leading "+", and so
+        ! does Python float(). Keeping one real format across the port is
+        ! worth more than byte parity on a field nobody compares bytewise.
+        !
+        ! What the HMI does with it (RobotCell.cpp case RequestWeldingStats):
+        ! converts dist mm -> inches (/25.4) and, ONLY IF succ_ae equals 1,
+        ! inserts a weld-analytics row (length_in, arc_on_sec). succ_ae = 0
+        ! is received and discarded - that is the dry-run / no-arc path.
+        VAR string stats;
+        stats:=tgFmtReal(nTG_WeldDist)+","+tgFmtReal(nTG_ArcOnTime)+","+tgFmtReal(nTG_SuccArcEnd);
+        tgSendAck "13";
+        tgSendAck stats;
+        TPWrite "TG: weld stats "+stats;
+    ENDPROC
+
+ENDMODULE

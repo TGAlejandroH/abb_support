@@ -1,0 +1,515 @@
+{
+  "units": "metres",
+  "frame": "each mesh is authored in its own URDF link frame; visual/collision origin is identity",
+  "naming": "the _m.stl suffix is the app's deterministic metres hint",
+  "parts": [
+    {
+      "file": "abb_base_m.stl",
+      "link": "base_link",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\BASE\\Base.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 7514,
+      "triangles_out": 7514,
+      "bbox_min_m": [
+        -0.400973,
+        -0.257268,
+        -0.0
+      ],
+      "bbox_max_m": [
+        0.274261,
+        0.257268,
+        0.213
+      ]
+    },
+    {
+      "file": "abb_link_1_m.stl",
+      "link": "link_1",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\LINK1\\IRB4600_20kg-250_LINK1_CAD_rev04.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 12586,
+      "triangles_out": 12586,
+      "bbox_min_m": [
+        -0.264,
+        -0.221706,
+        -0.3415
+      ],
+      "bbox_max_m": [
+        0.3575,
+        0.3195,
+        0.211
+      ]
+    },
+    {
+      "file": "abb_link_2_m.stl",
+      "link": "link_2",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\LINK2\\IRB4600_20kg-250_LINK2_CAD_rev04.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 8650,
+      "triangles_out": 8650,
+      "bbox_min_m": [
+        -0.14,
+        -0.14,
+        -0.312706
+      ],
+      "bbox_max_m": [
+        1.1965,
+        0.14,
+        -0.0555
+      ]
+    },
+    {
+      "file": "abb_link_3_m.stl",
+      "link": "link_3",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\LINK3\\IRB4600_20kg-250_LINK3_CAD_rev04.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 14482,
+      "triangles_out": 14482,
+      "bbox_min_m": [
+        -0.142721,
+        -0.181,
+        -0.1492
+      ],
+      "bbox_max_m": [
+        0.332,
+        0.3526,
+        0.249408
+      ]
+    },
+    {
+      "file": "abb_link_4_m.stl",
+      "link": "link_4",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\LINK4\\Link4.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 24774,
+      "triangles_out": 24772,
+      "bbox_min_m": [
+        -0.086,
+        -0.085789,
+        -0.899
+      ],
+      "bbox_max_m": [
+        0.085977,
+        0.0875,
+        0.076
+      ]
+    },
+    {
+      "file": "abb_link_5_m.stl",
+      "link": "link_5",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\LINK5\\Link5.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 2872,
+      "triangles_out": 2872,
+      "bbox_min_m": [
+        -0.0573,
+        -0.0573,
+        -0.0205
+      ],
+      "bbox_max_m": [
+        0.0573,
+        0.0573,
+        0.0205
+      ]
+    },
+    {
+      "file": "abb_link_6_m.stl",
+      "link": "link_6",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\LINK6\\Link6.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 1034,
+      "triangles_out": 1034,
+      "bbox_min_m": [
+        -0.031327,
+        -0.0315,
+        0.051
+      ],
+      "bbox_max_m": [
+        0.031327,
+        0.0315,
+        0.085
+      ]
+    },
+    {
+      "file": "torch_m.stl",
+      "link": "torch",
+      "source": "IRB4600_20_250_C_01_3\\OBJ\\TORCH\\BinzelTorch.obj",
+      "colour_rgb": [
+        0.7922,
+        0.8196,
+        0.9333
+      ],
+      "triangles_in": 81624,
+      "triangles_out": 81624,
+      "bbox_min_m": [
+        -0.239441,
+        -0.04,
+        -0.005
+      ],
+      "bbox_max_m": [
+        0.039899,
+        0.04,
+        0.424838
+      ]
+    },
+    {
+      "file": "pos_interchange_base_m.stl",
+      "link": "positioner_base",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\BASE\\Intch2000.obj",
+      "colour_rgb": [
+        0.2824,
+        0.3294,
+        0.349
+      ],
+      "triangles_in": 22788,
+      "triangles_out": 22788,
+      "bbox_min_m": [
+        1.001812,
+        -1.2445,
+        -0.0065
+      ],
+      "bbox_max_m": [
+        1.618188,
+        -0.155388,
+        0.481
+      ]
+    },
+    {
+      "file": "pos_turntable_m.stl",
+      "link": "positioner_index",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK1\\Turntable500D.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 2358,
+      "triangles_out": 2358,
+      "bbox_min_m": [
+        -0.498446,
+        -0.359,
+        -0.773
+      ],
+      "bbox_max_m": [
+        0.498446,
+        0.359,
+        -0.402
+      ]
+    },
+    {
+      "file": "pos_bearing_stn1_m.stl",
+      "link": "positioner_index",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK1\\MTD2000.obj",
+      "colour_rgb": [
+        0.498,
+        0.498,
+        0.498
+      ],
+      "triangles_in": 17248,
+      "triangles_out": 17230,
+      "bbox_min_m": [
+        0.079,
+        -0.363,
+        -0.402
+      ],
+      "bbox_max_m": [
+        0.521986,
+        0.161,
+        0.21
+      ]
+    },
+    {
+      "file": "pos_bearing_stn2_m.stl",
+      "link": "positioner_index",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK1\\MTD2000_2.obj",
+      "colour_rgb": [
+        0.498,
+        0.498,
+        0.498
+      ],
+      "triangles_in": 17248,
+      "triangles_out": 17230,
+      "bbox_min_m": [
+        -0.521986,
+        -0.161,
+        -0.402
+      ],
+      "bbox_max_m": [
+        -0.079,
+        0.363,
+        0.21
+      ]
+    },
+    {
+      "file": "pos_cover_m.stl",
+      "link": "positioner_index",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK1\\Cover600D_D1200_L2000.obj",
+      "colour_rgb": [
+        0.2824,
+        0.3294,
+        0.349
+      ],
+      "triangles_in": 3640,
+      "triangles_out": 3640,
+      "bbox_min_m": [
+        -2.164,
+        -0.39,
+        -0.757
+      ],
+      "bbox_max_m": [
+        2.38,
+        0.26,
+        0.75
+      ]
+    },
+    {
+      "file": "stn1_arm_m.stl",
+      "link": "stn1_tilt",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK2\\Arm500D_2000.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 2816,
+      "triangles_out": 2816,
+      "bbox_min_m": [
+        -0.483,
+        -1.2515,
+        -0.951
+      ],
+      "bbox_max_m": [
+        0.431,
+        1.3905,
+        -0.515
+      ]
+    },
+    {
+      "file": "stn1_bed_m.stl",
+      "link": "stn1_tilt",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK2\\Bed.obj",
+      "colour_rgb": [
+        0.5294,
+        0.549,
+        0.549
+      ],
+      "triangles_in": 753734,
+      "triangles_out": 19999,
+      "bbox_min_m": [
+        0.0849,
+        -1.2396,
+        -0.515
+      ],
+      "bbox_max_m": [
+        0.4151,
+        1.402,
+        -0.326441
+      ]
+    },
+    {
+      "file": "stn1_rotate_drive_m.stl",
+      "link": "stn1_tilt",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK2\\MTD750.obj",
+      "colour_rgb": [
+        0.498,
+        0.498,
+        0.498
+      ],
+      "triangles_in": 14212,
+      "triangles_out": 14164,
+      "bbox_min_m": [
+        0.044256,
+        -1.4055,
+        -0.35
+      ],
+      "bbox_max_m": [
+        0.4375,
+        -0.975,
+        0.19
+      ]
+    },
+    {
+      "file": "stn1_headstock_m.stl",
+      "link": "stn1_plate",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK3\\Headstock.obj",
+      "colour_rgb": [
+        0.7529,
+        0.7529,
+        0.0
+      ],
+      "triangles_in": 328500,
+      "triangles_out": 15000,
+      "bbox_min_m": [
+        -0.166688,
+        -0.166688,
+        -1.00219
+      ],
+      "bbox_max_m": [
+        0.273143,
+        0.273579,
+        -0.738542
+      ]
+    },
+    {
+      "file": "stn2_arm_m.stl",
+      "link": "stn2_tilt",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK4\\Arm500D_2000.obj",
+      "colour_rgb": [
+        0.8431,
+        0.8431,
+        0.8431
+      ],
+      "triangles_in": 2816,
+      "triangles_out": 2816,
+      "bbox_min_m": [
+        -0.483,
+        -1.2515,
+        -0.95
+      ],
+      "bbox_max_m": [
+        0.431,
+        1.3905,
+        -0.514
+      ]
+    },
+    {
+      "file": "stn2_bed_m.stl",
+      "link": "stn2_tilt",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK4\\Bed.obj",
+      "colour_rgb": [
+        0.5294,
+        0.549,
+        0.549
+      ],
+      "triangles_in": 753734,
+      "triangles_out": 20000,
+      "bbox_min_m": [
+        0.0849,
+        -1.2396,
+        -0.514
+      ],
+      "bbox_max_m": [
+        0.4151,
+        1.402,
+        -0.325441
+      ]
+    },
+    {
+      "file": "stn2_rotate_drive_m.stl",
+      "link": "stn2_tilt",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK4\\MTD750.obj",
+      "colour_rgb": [
+        0.498,
+        0.498,
+        0.498
+      ],
+      "triangles_in": 14212,
+      "triangles_out": 14164,
+      "bbox_min_m": [
+        0.044256,
+        -1.4045,
+        -0.35
+      ],
+      "bbox_max_m": [
+        0.4375,
+        -0.974,
+        0.19
+      ]
+    },
+    {
+      "file": "stn2_headstock_m.stl",
+      "link": "stn2_plate",
+      "source": "IRBP_D600_D1200-L2000_M2009_REV1_01\\OBJ\\LINK5\\Headstock.obj",
+      "colour_rgb": [
+        0.7529,
+        0.7529,
+        0.0
+      ],
+      "triangles_in": 328500,
+      "triangles_out": 15000,
+      "bbox_min_m": [
+        -0.166688,
+        -0.166688,
+        -1.00219
+      ],
+      "bbox_max_m": [
+        0.273143,
+        0.273579,
+        -0.738542
+      ]
+    },
+    {
+      "file": "stn1_tailstock_m.stl",
+      "link": "stn1_tailstock",
+      "source": "SYNTHESIZED placeholder box - no tailstock exists in the ABB CAD",
+      "placeholder": true,
+      "colour_rgb": [
+        0.85,
+        0.45,
+        0.1
+      ],
+      "triangles_in": 12,
+      "triangles_out": 12,
+      "bbox_min_m": [
+        -0.15,
+        -0.125,
+        -0.325
+      ],
+      "bbox_max_m": [
+        0.15,
+        0.125,
+        0.125
+      ]
+    },
+    {
+      "file": "stn2_tailstock_m.stl",
+      "link": "stn2_tailstock",
+      "source": "SYNTHESIZED placeholder box - no tailstock exists in the ABB CAD",
+      "placeholder": true,
+      "colour_rgb": [
+        0.85,
+        0.45,
+        0.1
+      ],
+      "triangles_in": 12,
+      "triangles_out": 12,
+      "bbox_min_m": [
+        -0.15,
+        -0.125,
+        -0.325
+      ],
+      "bbox_max_m": [
+        0.15,
+        0.125,
+        0.125
+      ]
+    }
+  ]
+}
