@@ -205,6 +205,13 @@ class AbbTgsHmi:
         self.global_ok = 1                 # R_G_C_D
         self.weld_frame_xyzwpr = [900.0, 80.0, 350.0, -2.5, 3.5, 90.0]
         self.weld_status = 1               # R_W_F: 0=skip, 1=weld, 2=abort
+        # R_W_F touch-up push (Phase 7, FANUC r_w_f.kl 2026-09-04): the HMI's
+        # stored per-weld touch-up offset X/Y/Z in INCHES, sent on EVERY
+        # weld-frame reply - weld/skip/abort alike. Unconditional for ABB
+        # (ROBOT_PUSH_TOUCHUP_OFFSETS_TO_PENDANT assumed True from day one).
+        # Non-zero defaults so a VC run proves the values land in
+        # posTG_Touchup rather than matching its [0,0,0] initializer.
+        self.touchup_offsets_in = [0.045, -0.12, 0.005]
         self.udwp_flag = 1                 # R_W_P: 1 = user-defined parameters
         self.travel_speed = 17.5           # R_W_P (always sent)
         self.welder_type = 1               # R_W_P: 1=Miller, 2=FroniusTPSi
@@ -328,13 +335,20 @@ class AbbTgsHmi:
         self.do_send(str(self.capture_ok))
 
     def handle_weld_frame_req(self):
-        """FANUC R_W_F (id 4): pose + sub in; weld frame + weld status out."""
+        """FANUC R_W_F (id 4): pose + sub in; weld frame + weld status +
+        touch-up offset (x/y/z, inches) out.
+
+        The touch-up push always completes, corrupt-frame injection included:
+        the RAPID side receives the full sequence on every reply mode.
+        """
         self._recv_pose_and_sub()
         if self.corrupt_weld_frame:
             self.do_send(CORRUPT_FRAME_PAYLOAD)
         else:
             self.do_send(xyzwpr_to_pose_literal(self.weld_frame_xyzwpr))
         self.do_send(str(self.weld_status))
+        for value in self.touchup_offsets_in:
+            self.do_send(fmt_real(value))
 
     def handle_pass_check_req(self):
         """FANUC R_P_C (id 5): pose + sub + password in; 2-char status out

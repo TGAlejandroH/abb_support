@@ -62,6 +62,16 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ArcControl:=0;            ! R[174] arc control
     PERS num nTG_TravelSpeed:=0;           ! R[175] travel speed
 
+    ! Phase 7 (2026-09-04): pendant touch-up offset mirror (FANUC R[180..182],
+    ! r_w_f.kl of the same date). The HMI pushes its stored per-weld touch-up
+    ! offset on EVERY weld-frame reply - weld, skip and abort alike -
+    ! so this always mirrors HMI state for the weld last served ("registers
+    ! are a mirror, never a store", HMI docs/pendant_touchup_hmi_plan_v1.md).
+    ! RECEIVE-AND-STORE ONLY: nothing on the ABB side consumes it yet - the
+    ! FlexPendant entry/send path (FANUC R_O_T, id 20) is not ported.
+    ! Units: INCHES verbatim off the wire (their D4), converted nowhere.
+    PERS pos posTG_Touchup:=[0,0,0];       ! R[180..182] X/Y/Z, inches
+
     ! Phase 6: R_W_S weld statistics. No FANUC register equivalent - KAREL
     ! read the ArcTool record $AWEWELDSTAT[1] directly (R_W_S.kl). An IRC5
     ! has no drop-in equivalent of that record, so the .tgs program writes
@@ -676,7 +686,9 @@ MODULE TG_Comms(SYSMODULE)
     PROC TG_ReqWeldFrame(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_W_F (HMI request id 4) - request weld frame.
         ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal)
-        ! -> recv weld status (0=skip, 1=weld, 2=abort program).
+        ! -> recv weld status (0=skip, 1=weld, 2=abort program)
+        ! -> recv touch-up offset x/y/z (3 x 9-char reals, INCHES) into
+        !    posTG_Touchup (Phase 7, 2026-09-04: receive-and-store only).
         ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
         ! the outgoing pose AND the wobj whose .oframe receives the served
         ! frame, written through the PERS reference. Omitted -> DEPRECATED
@@ -712,10 +724,20 @@ MODULE TG_Comms(SYSMODULE)
                 wobjTG_Weld.oframe:=pFrame;
             ENDIF
         ENDIF
-        ! The weld-status exchange must ALWAYS complete: the HMI's R_W_F
-        ! handler serves the full sequence and would desync if cut short.
+        ! The weld-status and touch-up exchanges must ALWAYS complete: the
+        ! HMI's R_W_F handler serves the full sequence and would desync if
+        ! cut short - the abort path included.
         reply:=tgPromptRecv("Give me weld status");
         nTG_WeldStatus:=tgParseReal(reply);
+        ! Phase 7: the HMI's stored touch-up offset for the weld just served
+        ! (INCHES, FANUC R[180..182] parity). Stored only - nothing consumes
+        ! posTG_Touchup until the FlexPendant entry path (R_O_T) is ported.
+        reply:=tgPromptRecv("Give me touchup x");
+        posTG_Touchup.x:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me touchup y");
+        posTG_Touchup.y:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me touchup z");
+        posTG_Touchup.z:=tgParseReal(reply);
         IF NOT frame_ok THEN
             ! Error matrix F-C/I4: never weld against a stale frame. A
             ! malformed frame payload forces the abort path (decision:
@@ -725,6 +747,7 @@ MODULE TG_Comms(SYSMODULE)
             TPWrite "TG ERROR: bad weld frame payload - aborting program";
         ENDIF
         TPWrite "TG: weld frame set, weld status = "\Num:=nTG_WeldStatus;
+        TPWrite "TG: touchup offset (in) = "\Pos:=posTG_Touchup;
     ENDPROC
 
     PROC TG_ReqWeldParams()

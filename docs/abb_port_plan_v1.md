@@ -73,6 +73,7 @@ Read from `resources/FANUC/KAREL/*.kl`, `resources/FANUC/LS/*.ls`,
 | R[170] | R_W_P | .tgs program | user-defined weld params flag |
 | R[171..174] | R_W_P | .tgs / weld schedule | proc no, wire feed, arc length, arc control |
 | R[175] | R_W_P | .tgs program | travel speed (used as motion speed of the weld move) |
+| R[180..182] | R_W_F (mirror push), R_O_T (save reply) | custom iPendant touch-up screen | pendant touch-up offset X/Y/Z, **INCHES** — a mirror of HMI state, never a store (added 2026-09-04, HMI repo `docs/pendant_touchup_hmi_plan_v1.md`) |
 
 ### 1.4 Per-request message sequences (priority set)
 
@@ -86,9 +87,10 @@ Read from `resources/FANUC/KAREL/*.kl`, `resources/FANUC/LS/*.ls`,
 | `R_C_F` | 1 | `> id` · `> pose` · `> sub_name` · `< "Give me the frame x"`…`r` → 6 × 9 chars → PR[5] · `< "Give me capture status"` → 1 char |
 | `R_C` | 2 | `> id` · `> pose` · `> sub_name` · `< "Give me capture status"` → 1 char |
 | `R_G_C_D` | 11 | `> id` · `< "Give me global loc status"` → 1 char |
-| `R_W_F` | 4 | `> id` · `> pose` · `> sub_name` · `< frame x..r` → 6 × 9 chars → PR[6] · `< "Give me weld status"` → 1 char |
+| `R_W_F` | 4 | `> id` · `> pose` · `> sub_name` · `< frame x..r` → 6 × 9 chars → PR[6] · `< "Give me weld status"` → 1 char · `< "Give me touchup x"`…`z` → 3 × 9 chars → R[180..182] (added 2026-09-04; the HMI serves these only when its `ROBOT_PUSH_TOUCHUP_OFFSETS_TO_PENDANT` config key is on — `.pc` and config are a paired deploy) |
 | `R_W_P` | 14 | `> id` · `< "Give me UDWP flag"` → 1 char · `< "Give me travel speed"` → 9 chars · if flag=1: `< welder type` → 2 chars · `< proc` → 2 chars · `< wire feed speed` → 9 · `< arc length` → 9 · `< arc control` → 9 |
 | `R_E` | 100 | `> id` · `> pose` · `> sub_name` |
+| `R_O_T` | 20 | `> id` · `> sub_name (SR25)` · `> touchup x/y/z` (3 × 9 chars, from R[180..182]) · `< "Give me save status"` → 1 char · `< "Give me touchup x"`…`z` → 3 × 9 chars → R[180..182] (added 2026-09-04; pendant-initiated save from a macro-launched task — **not in the ABB port**, see Phase 7) |
 | `SOCKET_COM` / `SOCKET_DISC` | — | connection open (server accept) / close |
 
 Pose sent in every "frame-ish" request = current TCP of the **currently active
@@ -270,7 +272,8 @@ NormalModule  <TgsName>.mod     ← one per .tgs program (dynamically loaded fro
 | R_C_F | `TG_ReqCamFrame` | updates `wobjTG_Cam`, fills `nTG_DoCapture`; frame arrives as ONE pose-literal message, not 6 prompted reals (§4.5) |
 | R_C | `TG_ReqCapture` | fills `nTG_CaptureOK` |
 | R_G_C_D | `TG_ReqGlobalCapDone` | fills `nTG_GlobalCapOK` |
-| R_W_F | `TG_ReqWeldFrame` | updates `wobjTG_Weld`, fills `nTG_WeldStatus`; frame arrives as ONE pose-literal message (§4.5) |
+| R_W_F | `TG_ReqWeldFrame` | updates `wobjTG_Weld`, fills `nTG_WeldStatus`; frame arrives as ONE pose-literal message (§4.5). Phase 7 extension: also receives 3 × 9-char touch-up reals into `posTG_Touchup` (inches; stored only, nothing consumes them) — unconditional, like the KAREL: the HMI push is assumed ON for ABB from day one (Phase 7) |
+| R_O_T | **not ported** | pendant-initiated touch-up save (id 20). Blocked on the FlexPendant side of the workflow — how the operator enters offsets and triggers the send has no chosen mechanism yet (no iPendant-style `.stm` screen / macro key on IRC5). Port only once that path is decided (Phase 7) |
 | R_W_P | `TG_ReqWeldParams` | fills `nTG_UdwpFlag`, `nTG_WeldProc`, `nTG_WireFeed`, `nTG_ArcLength`, `nTG_ArcControl`, `nTG_TravelSpeed` |
 | R_E | `TG_ReqEnd` | |
 | SET_PASS_SR / SET_SUB_ROUTINE_SR / SET_ROB_S_SR | plain `PERS string` assignment in the .tgs program (`stTG_ProgPass := "...";`) — no PROC needed | |
@@ -299,6 +302,13 @@ PERS num    nTG_WireFeed     := 0;       ! R[172]
 PERS num    nTG_ArcLength    := 0;       ! R[173]
 PERS num    nTG_ArcControl   := 0;       ! R[174]
 PERS num    nTG_TravelSpeed  := 0;       ! R[175]
+
+! Phase 7 (2026-09-04): pendant touch-up mirror. Receive-and-store ONLY —
+! nothing on the ABB side consumes these yet.
+PERS pos    posTG_Touchup    := [0,0,0]; ! R[180..182] — HMI's stored per-weld
+                                         ! touch-up offset, INCHES (their D4);
+                                         ! served unconditionally on every id-4
+                                         ! reply (see Phase 7)
 
 PERS wobjdata wobjTG_Cam  := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]]; ! PR[5]/UFRAME[5]
 PERS wobjdata wobjTG_Weld := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]]; ! PR[6]/UFRAME[6]
@@ -620,6 +630,57 @@ discontinued WebWare, so it serves as the spec to match rather than something
 to buy. ⚠ Two earlier assumptions corrected there: **[637-1] Production Screen
 holds no statistics** (it is a launcher, already bundled in [633-4]), and
 `ArcRefresh` is a tuning write-path.*
+
+**Phase 7 — pendant touch-up offsets (FANUC protocol extension of 2026-09-04).**
+The FANUC side grew two things (HMI repo,
+`docs/pendant_touchup_hmi_plan_v1.md`, decisions D1–D15): (a) `r_w_f.kl` now
+ends with three unconditional `Give me touchup x/y/z` receives into
+R[180..182] — on every weld-frame reply, all modes, the HMI pushes its stored
+per-weld touch-up offset (inches) so the custom iPendant screen always mirrors
+HMI state ("registers are a mirror, never a store", their §2); (b) new
+`R_O_T.kl` (id 20), a macro-launched task that sends operator-entered offsets
+to the HMI and writes the authoritative stored value back.
+
+ABB scope, deliberately minimal:
+
+- **`TG_ReqWeldFrame` gains the same three receives into `posTG_Touchup` —
+  received and stored only.** Nothing consumes the values; this exists to keep
+  the id-4 wire sequence and state map consistent with FANUC. Wire shape is
+  FANUC parity (three prompted 9-char reals, not a §4.5 literal — these are
+  scalars, not a pose) and the unit stays inches (their D4), converted nowhere.
+- **Unconditional, exactly like the KAREL. No robot-side flag** (decided
+  2026-09-04). No ABB system is deployed, so there is no fleet to protect and
+  RAPID on the VC is trivially updatable; `ROBOT_PUSH_TOUCHUP_OFFSETS_TO_PENDANT`
+  is assumed **True for ABB from day one**. Consequence for the eventual C++
+  `ABBRobot` class: it must override `handle_weld_frame_req_sending` to always
+  push the three values on id 4 (the base default sends the frame WITHOUT them,
+  their D13, which would strand RAPID on `Give me touchup x`) — the id-4 wire
+  shape below IS the ABB contract, not an option.
+- Once the exchanges start they must ALWAYS complete — same desync rule as the
+  weld-status exchange (a short read would strand the HMI mid-serve).
+- `hmi_prototype/abb_server.py` request-4 handler always pushes the three
+  values (dummy/stored), matching the contract.
+- **`R_O_T` (id 20) is NOT ported.** It exists to serve the custom iPendant
+  entry screen; the FlexPendant equivalent — how an operator enters offsets
+  and triggers the send on an IRC5 — is an open investigation. Port id 20 only
+  once that path is chosen. Candidate directions to evaluate when the time
+  comes: a FlexPendant Operator-Dialog/TPReadNum loop in a background task, a
+  ScreenMaker/[617-1] FlexPendant app, or RWS symbol writes from outside; each
+  changes where the id-20 exchange would run from.
+
+Related FANUC-side note (owner call, 2026-09-04): the
+`ROBOT_PUSH_TOUCHUP_OFFSETS_TO_PENDANT` kill-switch may be removed on FANUC
+too — there is a single robot in production, which gets the paired `r_w_f.pc`
+in the next HMI update. If that happens the push becomes unconditional on
+both brands and the config key disappears; nothing on the ABB side depends
+on it either way.
+
+*Status 2026-09-04: R_W_F extension implemented — `posTG_Touchup` +
+unconditional receives in `TG_ReqWeldFrame` (`TG_Comms.sys`), fake-HMI push
+with non-zero defaults (`abb_server.py`), fake-robot specs and tests updated
+(86 green, including abort-path and corrupt-frame push coverage). VC checks:
+[robotstudio_setup.md](robotstudio_setup.md) §18. `R_O_T`/id 20 not started
+(blocked on the FlexPendant entry mechanism).*
 
 ---
 
