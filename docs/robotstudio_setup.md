@@ -1090,3 +1090,76 @@ The arc-on times match the speeds actually served in the same transcript:
 with `weld_speed 8.89 / wirefeed 220.133 / arc length 10 / arc control 0`;
 weld 2 `UDWP=0` with `weld_speed 12.7` and library zeros. Inserting R_W_S did
 not disturb the phase-4 choreography.
+
+## 18. Phase 7: R_W_F touch-up push (id 4 extension)
+
+What is being checked: every id-4 (weld frame) reply now ends with three
+touch-up exchanges — `Give me touchup x/y/z`, one 9-char real each, INCHES —
+and the RAPID side stores them in `posTG_Touchup` and does **nothing else**
+with them. This mirrors the FANUC `r_w_f.kl` of 2026-09-04 (HMI repo,
+`docs/pendant_touchup_hmi_plan_v1.md`); on ABB the push is unconditional
+(no `bTG_TouchupPush`, no HMI kill-switch — decided 2026-09-04, plan Phase 7).
+
+The fake HMI serves non-zero defaults `[0.045, -0.12, 0.005]` on purpose, so a
+pass proves the values landed rather than matching the `[0,0,0]` initializer.
+
+### 18.1 Check A — non-Arc VC, `TD05Test` (comms + choreography)
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 <VC-HOME>
+```
+
+**Expected**, in each cycle, inside `serving request 4`, right after the
+weld-status exchange and before the next request id:
+
+```
+  robot prompts 'Give me weld status'
+  hmi   -> '1'
+  robot prompts 'Give me touchup x'
+  hmi   -> '+0000.045'
+  robot prompts 'Give me touchup y'
+  hmi   -> '-0000.120'
+  robot prompts 'Give me touchup z'
+  hmi   -> '+0000.005'
+```
+
+FlexPendant, right after `TG: weld frame set, weld status = 1`:
+`TG: touchup offset (in) = [0.045,-0.12,0.005]`
+
+**Pass criteria**
+1. The three prompts arrive in x, y, z order **inside** request 4 — after
+   `Give me weld status`, before request 14 — and each payload is the exact
+   9-char field above (`fmt_real` parity with FANUC `CNV_REAL_STR(v,8,3)`).
+2. The FlexPendant line prints the served values, and the RAPID data view
+   shows `posTG_Touchup = [0.045,-0.12,0.005]` after the cycle — the PERS
+   holds the wire values verbatim (inches, no conversion anywhere).
+3. The request log is unchanged apart from the three exchanges inside id 4:
+   `… 11, 4, 14, 13, 100` — the push must not disturb the choreography.
+4. Both cycles identical (PERS survives the cycle; the second serving
+   overwrites, not accumulates).
+
+### 18.2 Check B — abort reply still pushes (`corrupt-weld`)
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 <VC-HOME> corrupt-weld
+```
+
+**Expected:** the corrupt frame payload, then weld status `1`, then the three
+touch-up exchanges served to completion, then the robot aborts to request 100
+(`TG ERROR: bad weld frame payload` on the pendant, `nTG_WeldStatus = 2`).
+
+**Pass:** request log tail `… 4, 100` AND all three touch-up prompts appear in
+the transcript before the id-100 message. This is the desync rule: once the
+id-4 serving starts, the full sequence completes even on the abort path
+(the weld-status/skip/abort branch happens only after the wire is drained).
+
+### 18.3 Check C — Arc VC, `weld-demo` (regression)
+
+```
+python hmi_prototype/abb_server.py 127.0.0.1 2000 2 <VC-HOME> weld-demo
+```
+
+**Pass:** two id-4 servings per cycle, each carrying the three touch-up
+exchanges, and **the §15.4 and §17.3 criteria still hold** (speeds, clamp,
+stats payloads byte-identical to the earlier passes) — the insertion must not
+disturb the phase-4/6 choreography.

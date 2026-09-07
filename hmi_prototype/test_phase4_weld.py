@@ -45,6 +45,7 @@ class FakeWeldRobot(threading.Thread):
         super().__init__(daemon=True)
         self.weld_params = []      # one dict per R_W_P round, as received
         self.weld_stats_sent = []  # one payload per R_W_S round, as sent
+        self.touchups = []         # one (x, y, z) inches per R_W_F round
         self.sub_names = []
         self.pass_status = ""
         self.errors = []
@@ -74,7 +75,13 @@ class FakeWeldRobot(threading.Thread):
         self._send_ack(conn, sub_name)
         self.sub_names.append(sub_name)
         self._prompt(conn, "Give me the frame")
-        return int(self._prompt(conn, "Give me weld status"))
+        status = int(self._prompt(conn, "Give me weld status"))
+        # Phase 7: touch-up push - served on EVERY reply mode, received
+        # before branching (RAPID stores it in posTG_Touchup, nothing more).
+        self.touchups.append(tuple(
+            float(self._prompt(conn, f"Give me touchup {axis}"))
+            for axis in "xyz"))
+        return status
 
     def _req_weld_params(self, conn):                        # TG_ReqWeldParams
         self._send_ack(conn, "14")
@@ -193,6 +200,15 @@ class TestTwoWeldCycle(unittest.TestCase):
         run_cycle(robot)
         self.assertAlmostEqual(robot.weld_params[1]["travel_speed"], 30.0,
                                places=3)
+
+    def test_touchup_pushed_once_per_weld_frame(self):
+        """Phase 7: every R_W_F reply carries the stored touch-up offset."""
+        robot = FakeWeldRobot()
+        hmi = run_cycle(robot)
+        self.assertEqual(len(robot.touchups), 2)
+        for got in robot.touchups:
+            for g, w in zip(got, hmi.touchup_offsets_in):
+                self.assertAlmostEqual(g, w, places=3)
 
     def test_weld_abort_skips_the_second_weld(self):
         """nTG_WeldStatus=2 -> GOTO abort_end, so no further R_W_P."""

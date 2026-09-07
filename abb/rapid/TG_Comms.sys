@@ -62,6 +62,16 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ArcControl:=0;            ! R[174] arc control
     PERS num nTG_TravelSpeed:=0;           ! R[175] travel speed
 
+    ! Phase 7 (2026-09-04): pendant touch-up offset mirror (FANUC R[180..182],
+    ! r_w_f.kl of the same date). The HMI pushes its stored per-weld touch-up
+    ! offset on EVERY weld-frame reply - weld, skip and abort alike -
+    ! so this always mirrors HMI state for the weld last served ("registers
+    ! are a mirror, never a store", HMI docs/pendant_touchup_hmi_plan_v1.md).
+    ! RECEIVE-AND-STORE ONLY: nothing on the ABB side consumes it yet - the
+    ! FlexPendant entry/send path (FANUC R_O_T, id 20) is not ported.
+    ! Units: INCHES verbatim off the wire (their D4), converted nowhere.
+    PERS pos posTG_Touchup:=[0,0,0];       ! R[180..182] X/Y/Z, inches
+
     ! Phase 6: R_W_S weld statistics. No FANUC register equivalent - KAREL
     ! read the ArcTool record $AWEWELDSTAT[1] directly (R_W_S.kl). An IRC5
     ! has no drop-in equivalent of that record, so the .tgs program writes
@@ -516,6 +526,66 @@ MODULE TG_Comms(SYSMODULE)
     ENDPROC
 
 
+    LOCAL FUNC dnum tgHomeFreeBytes()
+        ! Free bytes on HOME:, or -1 if it cannot be measured.
+        ! \Mbyte then scaled in dnum: a num holds exact integers only to
+        ! 8388608 (RAPID ref 3.49), far below any real byte count.
+        CONST dnum BYTES_PER_MB:=1048576;
+        RETURN NumToDnum(FSSize("HOME:"\Free\Mbyte))*BYTES_PER_MB;
+    ERROR
+        ! ERR_FILESIZE and ERR_FILEACC are recoverable (VC-proven), and
+        ! losing the disk figure must not fail the cycle: ProgMemFree still
+        ! answers, and it is the tighter constraint anyway.
+        TPWrite "TG WARN: HOME: free space unreadable, ERRNO ="\Num:=ERRNO;
+        RETURN -1;
+    ENDFUNC
+
+    LOCAL FUNC string tgFreeMemStr()
+        ! The R_F_T free-space answer, in BYTES, as plain digits. The HMI
+        ! parses it with std::stoull and aborts the weld session below 40000
+        ! bytes (config.json,
+        ! HMI_MINIMUM_STORAGE_IN_TPP_CONTROLLER_MEMORY_IN_BYTES).
+        !
+        ! FANUC sent VOL_SPACE of tpp:. That single FANUC resource is TWO on
+        ! ABB - the disk the module is PUT to (HOME:) and the program memory
+        ! TG_Main then Loads it into - so report whichever is smaller.
+        ! ProgMemFree is normally the binding one by a wide margin (VC: 35 MB
+        ! against 1.9 GB of HOME:), and it is what Load consumes, so a low
+        ! value here is precisely the ERR_PRGMEMFULL that the HMI's check
+        ! exists to pre-empt.
+        !
+        ! VC-proven 2026-09-04 with abb/rapid/TGFsProbe.mod:
+        !   - FSSize REQUIRES \Total or \Free. A bare call raises 40764, an
+        !     UNRECOVERABLE argument error no ERROR handler can catch. The
+        !     manual's syntax (2.71) prints both switches as optional and is
+        !     simply wrong.
+        !   - the ERR_FILESIZE ceiling (8388608, the num exact-integer max)
+        !     is applied AFTER the \Kbyte/\Mbyte division, and IS
+        !     recoverable (ERRNO 1121). \Mbyte therefore has 8 TB of
+        !     headroom; asking for bytes raises on any file system with more
+        !     than 8 MB free.
+        !   - FSSize does not need the path to exist, only the device prefix
+        !     resolves - so plain "HOME:" cannot fail on a missing file the
+        !     way HOME:/TGS/<prog>.mod could.
+        VAR dnum dnFree;
+        VAR dnum dnDisk;
+        CONST dnum MAX_REPORT:=999999999;
+        dnFree:=NumToDnum(ProgMemFree());
+        dnDisk:=tgHomeFreeBytes();
+        IF dnDisk>=0 AND dnDisk<dnFree dnFree:=dnDisk;
+        ! Clamp before formatting. The HMI only compares this against 40000
+        ! and logs it as KB, so the true magnitude buys it nothing - while a
+        ! bad string is silent and fatal: std::stoull reads "3.5185E+7" as 3,
+        ! and std::stoull("-1") does not fail, it returns 1.8e19. Capping at
+        ! 9 digits keeps DnumToStr inside the range actually measured on the
+        ! VC (plain digits at 3.5e7 and at 1.9e9) rather than trusting it at
+        ! magnitudes nobody has tested.
+        IF dnFree>MAX_REPORT dnFree:=MAX_REPORT;
+        IF dnFree<0 dnFree:=0;
+        RETURN DnumToStr(dnFree,0);
+    ENDFUNC
+
+
     !===================================================================
     ! Request PROCs (priority set, plan section 1.4)
     !===================================================================
@@ -556,11 +626,11 @@ MODULE TG_Comms(SYSMODULE)
         ! on FANUC the program name doubles as the project password).
         VAR string reply;
         tgSendAck "10";
-        ! Free space on the program storage. FANUC sent VOL_SPACE of tpp:.
-        ! TODO Phase 4: real value via FSSize("HOME:" ...) - dnum territory,
-        ! num only holds exact integers to 2^23. Dummy is safe: the HMI just
-        ! checks the program fits.
-        tgSendAck "99999999";
+        ! Free space on the program storage. FANUC sent VOL_SPACE of tpp:;
+        ! on ABB that is min(program memory, HOME: disk) - see
+        ! tgFreeMemStr, which also owns the formatting rules.
+        ! In case it needs to be skipped, instead use: tgSendAck "99999999";
+        tgSendAck tgFreeMemStr();
         reply:=tgPromptRecv("Give me FTP status");
         nTG_FtpStatus:=tgParseReal(reply);
         reply:=tgPromptRecv("Give me prog name");
@@ -676,7 +746,9 @@ MODULE TG_Comms(SYSMODULE)
     PROC TG_ReqWeldFrame(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_W_F (HMI request id 4) - request weld frame.
         ! Sequence: id -> pose -> sub token -> recv frame (ONE pose literal)
-        ! -> recv weld status (0=skip, 1=weld, 2=abort program).
+        ! -> recv weld status (0=skip, 1=weld, 2=abort program)
+        ! -> recv touch-up offset x/y/z (3 x 9-char reals, INCHES) into
+        !    posTG_Touchup (Phase 7, 2026-09-04: receive-and-store only).
         ! \Tool/\WObj (plan 7.6 style b): WObj is BOTH the report frame for
         ! the outgoing pose AND the wobj whose .oframe receives the served
         ! frame, written through the PERS reference. Omitted -> DEPRECATED
@@ -712,10 +784,20 @@ MODULE TG_Comms(SYSMODULE)
                 wobjTG_Weld.oframe:=pFrame;
             ENDIF
         ENDIF
-        ! The weld-status exchange must ALWAYS complete: the HMI's R_W_F
-        ! handler serves the full sequence and would desync if cut short.
+        ! The weld-status and touch-up exchanges must ALWAYS complete: the
+        ! HMI's R_W_F handler serves the full sequence and would desync if
+        ! cut short - the abort path included.
         reply:=tgPromptRecv("Give me weld status");
         nTG_WeldStatus:=tgParseReal(reply);
+        ! Phase 7: the HMI's stored touch-up offset for the weld just served
+        ! (INCHES, FANUC R[180..182] parity). Stored only - nothing consumes
+        ! posTG_Touchup until the FlexPendant entry path (R_O_T) is ported.
+        reply:=tgPromptRecv("Give me touchup x");
+        posTG_Touchup.x:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me touchup y");
+        posTG_Touchup.y:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me touchup z");
+        posTG_Touchup.z:=tgParseReal(reply);
         IF NOT frame_ok THEN
             ! Error matrix F-C/I4: never weld against a stale frame. A
             ! malformed frame payload forces the abort path (decision:
@@ -725,6 +807,7 @@ MODULE TG_Comms(SYSMODULE)
             TPWrite "TG ERROR: bad weld frame payload - aborting program";
         ENDIF
         TPWrite "TG: weld frame set, weld status = "\Num:=nTG_WeldStatus;
+        TPWrite "TG: touchup offset (in) = "\Pos:=posTG_Touchup;
     ENDPROC
 
     PROC TG_ReqWeldParams()

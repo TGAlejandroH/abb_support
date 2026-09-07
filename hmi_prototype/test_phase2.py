@@ -143,6 +143,12 @@ class FakeTgsRobot(threading.Thread):
         self.received["weld_frame"] = weld_frame_raw
         weld_status = self._prompt(conn, "Give me weld status")
         self.received["weld_status"] = weld_status
+        # Phase 7: touch-up push, served on EVERY reply mode - the robot
+        # receives it BEFORE branching (mirrors TG_ReqWeldFrame, which
+        # stores into posTG_Touchup and does nothing else with it).
+        for axis in "xyz":
+            self.received[f"touchup_{axis}"] = self._prompt(
+                conn, f"Give me touchup {axis}")
         if not self._pose_parses(weld_frame_raw):
             weld_status = "2"  # RAPID I4: malformed frame forces program abort
         if weld_status == "2":
@@ -235,6 +241,13 @@ class TestFullCycle(unittest.TestCase):
         for g, w in zip(self.hmi.last_pose_xyzwpr, ROBOT_POSE_XYZWPR):
             self.assertAlmostEqual(g, w, places=2)
 
+    def test_touchup_push_formats(self):
+        # Phase 7: three 9-char fixed-width reals, inches, FANUC parity.
+        for axis, expected in zip("xyz", self.hmi.touchup_offsets_in):
+            raw = self.robot.received[f"touchup_{axis}"]
+            self.assertEqual(len(raw), 9, axis)
+            self.assertEqual(raw, fmt_real(expected))
+
     def test_weld_params_formats(self):
         r = self.robot.received
         self.assertEqual(r["udwp"], "1")
@@ -273,6 +286,8 @@ class TestBranchScenarios(unittest.TestCase):
         robot, hmi = run_one_cycle({"weld_status": 2})
         self.assertEqual(hmi.request_log,
                          ["10", "5", "1", "2", "1", "2", "11", "4", "100"])
+        # Phase 7: the touch-up push completes even on the abort reply
+        self.assertIn("touchup_z", robot.received)
 
     def test_corrupt_cam_frame_aborts_program(self):
         # Error matrix I4 (revised 2026-08-28: abort, not skip): a malformed
@@ -294,6 +309,8 @@ class TestBranchScenarios(unittest.TestCase):
         # the HMI did say "weld" - the abort came from the robot side
         self.assertEqual(robot.received["weld_status"], "1")
         self.assertNotIn("udwp", robot.received)
+        # Phase 7: the touch-up push completes even after a corrupt frame
+        self.assertIn("touchup_z", robot.received)
 
     def test_predefined_schedule_sends_only_flag_and_speed(self):
         robot, hmi = run_one_cycle({"udwp_flag": 0})
