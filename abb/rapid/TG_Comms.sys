@@ -526,6 +526,66 @@ MODULE TG_Comms(SYSMODULE)
     ENDPROC
 
 
+    LOCAL FUNC dnum tgHomeFreeBytes()
+        ! Free bytes on HOME:, or -1 if it cannot be measured.
+        ! \Mbyte then scaled in dnum: a num holds exact integers only to
+        ! 8388608 (RAPID ref 3.49), far below any real byte count.
+        CONST dnum BYTES_PER_MB:=1048576;
+        RETURN NumToDnum(FSSize("HOME:"\Free\Mbyte))*BYTES_PER_MB;
+    ERROR
+        ! ERR_FILESIZE and ERR_FILEACC are recoverable (VC-proven), and
+        ! losing the disk figure must not fail the cycle: ProgMemFree still
+        ! answers, and it is the tighter constraint anyway.
+        TPWrite "TG WARN: HOME: free space unreadable, ERRNO ="\Num:=ERRNO;
+        RETURN -1;
+    ENDFUNC
+
+    LOCAL FUNC string tgFreeMemStr()
+        ! The R_F_T free-space answer, in BYTES, as plain digits. The HMI
+        ! parses it with std::stoull and aborts the weld session below 40000
+        ! bytes (config.json,
+        ! HMI_MINIMUM_STORAGE_IN_TPP_CONTROLLER_MEMORY_IN_BYTES).
+        !
+        ! FANUC sent VOL_SPACE of tpp:. That single FANUC resource is TWO on
+        ! ABB - the disk the module is PUT to (HOME:) and the program memory
+        ! TG_Main then Loads it into - so report whichever is smaller.
+        ! ProgMemFree is normally the binding one by a wide margin (VC: 35 MB
+        ! against 1.9 GB of HOME:), and it is what Load consumes, so a low
+        ! value here is precisely the ERR_PRGMEMFULL that the HMI's check
+        ! exists to pre-empt.
+        !
+        ! VC-proven 2026-09-04 with abb/rapid/TGFsProbe.mod:
+        !   - FSSize REQUIRES \Total or \Free. A bare call raises 40764, an
+        !     UNRECOVERABLE argument error no ERROR handler can catch. The
+        !     manual's syntax (2.71) prints both switches as optional and is
+        !     simply wrong.
+        !   - the ERR_FILESIZE ceiling (8388608, the num exact-integer max)
+        !     is applied AFTER the \Kbyte/\Mbyte division, and IS
+        !     recoverable (ERRNO 1121). \Mbyte therefore has 8 TB of
+        !     headroom; asking for bytes raises on any file system with more
+        !     than 8 MB free.
+        !   - FSSize does not need the path to exist, only the device prefix
+        !     resolves - so plain "HOME:" cannot fail on a missing file the
+        !     way HOME:/TGS/<prog>.mod could.
+        VAR dnum dnFree;
+        VAR dnum dnDisk;
+        CONST dnum MAX_REPORT:=999999999;
+        dnFree:=NumToDnum(ProgMemFree());
+        dnDisk:=tgHomeFreeBytes();
+        IF dnDisk>=0 AND dnDisk<dnFree dnFree:=dnDisk;
+        ! Clamp before formatting. The HMI only compares this against 40000
+        ! and logs it as KB, so the true magnitude buys it nothing - while a
+        ! bad string is silent and fatal: std::stoull reads "3.5185E+7" as 3,
+        ! and std::stoull("-1") does not fail, it returns 1.8e19. Capping at
+        ! 9 digits keeps DnumToStr inside the range actually measured on the
+        ! VC (plain digits at 3.5e7 and at 1.9e9) rather than trusting it at
+        ! magnitudes nobody has tested.
+        IF dnFree>MAX_REPORT dnFree:=MAX_REPORT;
+        IF dnFree<0 dnFree:=0;
+        RETURN DnumToStr(dnFree,0);
+    ENDFUNC
+
+
     !===================================================================
     ! Request PROCs (priority set, plan section 1.4)
     !===================================================================
@@ -566,11 +626,11 @@ MODULE TG_Comms(SYSMODULE)
         ! on FANUC the program name doubles as the project password).
         VAR string reply;
         tgSendAck "10";
-        ! Free space on the program storage. FANUC sent VOL_SPACE of tpp:.
-        ! TODO Phase 4: real value via FSSize("HOME:" ...) - dnum territory,
-        ! num only holds exact integers to 2^23. Dummy is safe: the HMI just
-        ! checks the program fits.
-        tgSendAck "99999999";
+        ! Free space on the program storage. FANUC sent VOL_SPACE of tpp:;
+        ! on ABB that is min(program memory, HOME: disk) - see
+        ! tgFreeMemStr, which also owns the formatting rules.
+        ! In case it needs to be skipped, instead use: tgSendAck "99999999";
+        tgSendAck tgFreeMemStr();
         reply:=tgPromptRecv("Give me FTP status");
         nTG_FtpStatus:=tgParseReal(reply);
         reply:=tgPromptRecv("Give me prog name");
