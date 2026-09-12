@@ -328,7 +328,8 @@ PERS num nTG_ActFrame := 0;   ! UFRAME_NUM: 5=camera, 6=weld, else base
 ```
 
 The received frames land in `wobjTG_Cam.oframe` / `wobjTG_Weld.oframe` — or, for a
-coordinated weld, `wobjTG_WeldStn1.oframe`
+coordinated weld, the `.oframe` of that weld's station object
+(`wobjTG_WeldStn1` / `wobjTG_WeldStn2`, one declared per station)
 (**`oframe`, not `uframe`**, in every case — see
 [weld_frame_update_strategy_v1.md](weld_frame_update_strategy_v1.md). A non-coordinated
 weld — static table, or indexed on a positioner — keeps an identity `uframe` and receives

@@ -63,8 +63,9 @@ MODULE TD05Test_Mod
         ! uses - .uframe is assumed identity everywhere downstream.
         !
         ! This demo is not coordinated, so the weld uses the
-        ! base-referenced wobjTG_Weld. A coordinated weld would pass
-        ! wobjTG_WeldStn1 instead - see TD05Weld.mod - and would NOT reset
+        ! base-referenced wobjTG_Weld. A coordinated weld would pass its
+        ! station's object instead - wobjTG_WeldStn1 or wobjTG_WeldStn2,
+        ! see TD05Weld.mod - and would NOT reset
         ! uframe: the controller derives that one itself and ignores the
         ! declared value.
         ! The CAMERA object is always wobjTG_Cam, base-referenced, for a

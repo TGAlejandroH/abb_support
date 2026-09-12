@@ -182,25 +182,31 @@ MODULE TG_Comms(SYSMODULE)
     PERS wobjdata wobjTG_Cam:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
     PERS wobjdata wobjTG_Weld:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
-    ! ---- Coordinated motion, station 1 -----------------------------------
-    ! WORK IN PROGRESS on both sides of the wire, 2026-09-03. This is the
-    ! declared shape only; nothing in this repo references it yet, and the
+    ! ---- Coordinated motion, one work object per station -----------------
+    ! WORK IN PROGRESS on both sides of the wire, 2026-09-03. These are the
+    ! declared shapes only; nothing in this repo references them yet, and the
     ! prerequisites listed at the end of this block are all still open.
     !
     ! ufprog FALSE + ufmec => the controller derives uframe live from the
     ! station angles and IGNORES the declared uframe, which is why it is
     ! left identity. oframe is the component TG_ReqWeldFrame writes.
     !
-    ! COMMENT THIS DECLARATION OUT WHEN THE TEST CELL HAS NO EXTERNAL AXIS,
-    ! or change "STN1" to the mechanical unit of the setup being tested.
-    ! The name must exist in this controller's MOC configuration, and the
+    ! COMMENT THESE DECLARATIONS OUT WHEN THE TEST CELL HAS NO EXTERNAL AXIS,
+    ! or change "STN1"/"STN2" to the mechanical units of the setup being
+    ! tested - and comment out the second one on a single-station cell.
+    ! Each name must exist in this controller's MOC configuration, and the
     ! phase 1-6 validation VC (RW6.15.08/IRB4600) has no positioner at all.
     ! THIS FILE IS THE SHARED SYSMODULE: if a controller rejects an
     ! unresolvable ufmec at load or at Check Program, it takes the ALREADY
-    ! VALIDATED non-coordinated path down with it. One "!" in front of the
-    ! declaration line is the whole rollback. Note the asymmetry - an
-    ! unresolvable name fails loudly, while a wrong-but-resolvable one is a
-    ! silent wrong-station weld, so verify the name at commissioning.
+    ! VALIDATED non-coordinated path down with it - and there are now TWO
+    ! names that can do that. One "!" in front of each declaration line is
+    ! the whole rollback. Note the asymmetry - an unresolvable name fails
+    ! loudly, while a wrong-but-resolvable one is a silent wrong-station
+    ! weld, so verify BOTH names at commissioning. Two declared stations
+    ! make that silent case reachable on a correctly built cell for the
+    ! first time: STN1/STN2 transposed welds the right geometry on the
+    ! wrong table, where with one station declared a mix-up could only ever
+    ! fail loudly.
     ! NOTE NOT YET LOADED ON A CONTROLLER. Only the static shape above has been
     ! (LOCAL PERS wobjdata accepted as a \WObj argument, RW6.15.08/IRB4600,
     ! Check Program clean). Bundle this with the coordinated VC load-check.
@@ -223,14 +229,50 @@ MODULE TG_Comms(SYSMODULE)
     !     the robot's own motion task or a MultiMove group (SyncMoveOn);
     !   - real extjoint values for the station axes in every robtarget -
     !     the exporter writes 9E9 for axes it does not command (plan D5);
-    !   - the controller's STN1 BASE FRAME must agree with the positioner
-    !     calibration the PC uses. A disagreement is a silent rigid offset
-    !     on EVERY coordinated weld - E47 one level up, and a bigger risk
-    !     than a mistyped ufmec.
-    ! D4 / second station: add wobjTG_WeldStn2 with ufmec:="STN2" - deferred
-    ! until the two-station template lands, so the resident set does not grow
-    ! symbols nothing references yet.
+    !   - the controller's STN1 and STN2 BASE FRAMES must EACH agree with
+    !     the positioner calibration the PC uses. A disagreement is a silent
+    !     rigid offset on every coordinated weld on THAT station - E47 one
+    !     level up, and a bigger risk than a mistyped ufmec. Two stations is
+    !     two independent calibrations to verify, not one checked twice.
     PERS wobjdata wobjTG_WeldStn1:=[FALSE,FALSE,"STN1",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+    ! Station 2 (D4's two-station template). Same shape, different ufmec, and
+    ! a SEPARATE resident symbol for exactly the reason Stn1 is separate from
+    ! wobjTG_Weld: ufmec is baked into the record and is never re-bound at
+    ! runtime, so one work object cannot serve both stations. Each station is
+    ! declared once here and an exported program picks one BY PASSING IT -
+    ! TG_ReqWeldFrame writes .oframe on whatever it is handed - so which
+    ! station a weld belongs to is expressed entirely at the call site:
+    !     TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn2;
+    ! The two oframes are independent slots and serving one never touches the
+    ! other, so a program alternating stations does not disturb a frame it
+    ! already holds for the other one. Everything above applies unchanged:
+    ! same open oframe convention, same prerequisites, same rollback.
+    !
+    ! TWO PREREQUISITES THAT ONLY EXIST ONCE THERE ARE TWO STATIONS, both
+    ! read off the MONARC teardown of a real IRBP D600 two-station cell
+    ! (customer_specific/monarc/, joint_limits.md and monarc_cell_teardown.html):
+    !   - THE STATIONS CANNOT BOTH BE ACTIVE. Five positioner motors share
+    !     three drives through contactors K1-K5, so ActUnit STN2 requires
+    !     DeactUnit STN1 first. Declaring both work objects is fine -
+    !     declaring is not activating - but only the ACTIVE station's object
+    !     resolves for a move or a CRobT. A two-station program brackets
+    !     each station's work in ActUnit/DeactUnit.
+    !   - THE extjoint SLOTS ARE SHARED. eax_b/eax_c are ARM1/PLATE1 or
+    !     ARM2/PLATE2 depending on which unit is active, because the logical
+    !     axis numbers are reused. A robtarget carried from a station-1
+    !     program into a station-2 one commands station 2's axes to station
+    !     1's angles WITHOUT COMPLAINT. That lands on the exporter (plan
+    !     D5), not here, but it is the same silent-wrong-station family as
+    !     a transposed ufmec.
+    ! NOTE "STN1"/"STN2" are the actual configured unit names in that cell,
+    ! which is the best evidence available that these are the right strings -
+    ! but neither has been checked against the target controller's MOC, so
+    ! treat both as unverified until commissioning.
+    ! NOTE The MONARC feasibility note proposes moving the coordinated objects
+    ! out into a per-cell TG_Frames.sys adapter, on the grounds that station
+    ! names are cell configuration rather than generic core. That split has
+    ! not been taken; if it is, both declarations move together.
+    PERS wobjdata wobjTG_WeldStn2:=[FALSE,FALSE,"STN2",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
     ! No coordinated CAMERA work object, deliberately. Captures stay
     ! base-referenced on ABB exactly as on FANUC, so the HMI's scan and
@@ -760,7 +802,8 @@ MODULE TG_Comms(SYSMODULE)
         ! is in - and cannot, by construction: it writes .oframe on
         ! WHATEVER IT WAS HANDED, and the call site chooses.
         !     TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;      ! indexed
-        !     TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;  ! coordinated
+        !     TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;  ! coord, stn 1
+        !     TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn2;  ! coord, stn 2
         ! What the served pose is RELATIVE TO does differ - the robot base
         ! for a non-coordinated weld (FANUC parity), the positioner frame
         ! for a coordinated one - but that follows from which work object

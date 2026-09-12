@@ -322,13 +322,13 @@ New syntax exercised (⚠ first VC contact for these, plan §2.14): optional
 parameter (`WObj.oframe:=...`).
 
 ⚠ **Before loading `TG_Comms.sys` on this VC — it has no external axis.** The
-file declares `wobjTG_WeldStn1` with `ufmec:="STN1"`, a mechanical unit that
-does not exist here. Nothing references it, but if the controller resolves
-`ufmec` at load or at Check Program rather than at first use, the whole shared
-SYSMODULE is refused and the validated non-coordinated path goes with it.
-**Comment that one declaration out** (or rename the station to this cell's
-unit) if the load or the program check complains about it, and record which it
-was — that answers a live question in
+file declares `wobjTG_WeldStn1` with `ufmec:="STN1"` and `wobjTG_WeldStn2` with
+`ufmec:="STN2"`, mechanical units that do not exist here. Nothing references
+them, but if the controller resolves `ufmec` at load or at Check Program rather
+than at first use, the whole shared SYSMODULE is refused and the validated
+non-coordinated path goes with it. **Comment out both declarations** (or rename
+the stations to this cell's units) if the load or the program check complains,
+and record which it was — that answers a live question in
 `weld_frame_update_strategy_v1.md` §5.3.
 
 **Pass criteria:**

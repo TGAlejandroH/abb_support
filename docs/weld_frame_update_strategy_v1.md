@@ -4,7 +4,8 @@ Summary: **the request PROCs write `oframe`, always** — one write target, no c
 **What the HMI sends is decided by one thing: whether the weld is coordinated.** A weld the
 positioner does not move during — a static table, or a part held at an index on a 1- or 2-axis
 positioner — gets an identity `uframe` and the CAD frame **w.r.t. the robot base**, exactly what the
-HMI sends FANUC today. Only a genuine coordinated-motion weld gets `ufprog:=FALSE`/`ufmec:="STN1"`.
+HMI sends FANUC today. Only a genuine coordinated-motion weld gets `ufprog:=FALSE`/`ufmec:="STN<n>"`,
+one declared work object per station.
 
 ⚠ **The coordinated half is not settled, and this summary used to claim it was.** *What* a
 coordinated weld serves — the part **w.r.t. the positioner frame**, or a **displacement** in that
@@ -19,8 +20,8 @@ target open and assumed `TG_ReqWeldFrame` would have to detect which case it was
 `TGS/TD05Test.mod`, `TGS/TD05Weld.mod`); the coordinated case is **work in progress on both sides of
 the wire** (§5). **Not yet run on a controller** — the `oframe` write is numerically inert *provided
 the live `uframe` is identity*, which is a property of the controller's persistent values and not of
-the declarations (§4), and `wobjTG_WeldStn1` — the coordinated shape — has never been loaded and will
-not load at all on a system with no external axis (§5.3).
+the declarations (§4), and `wobjTG_WeldStn1`/`wobjTG_WeldStn2` — the coordinated shapes — have never
+been loaded and will not load at all on a system with no external axis (§5.3).
 
 ⚠ **This document was revised twice the day it was written.** The first version branched on
 *mounting* ("is the part bolted to the chuck?") rather than on *coordination*, which put every
@@ -41,12 +42,12 @@ reason was wrong, though its conclusion was not (§3).
 | | Not coordinated — static table, **or indexed on a positioner** | Coordinated motion |
 |---|---|---|
 | `ufprog` | `TRUE` | `FALSE` |
-| `ufmec` | `""` | `"STN1"` (the station) |
+| `ufmec` | `""` | `"STN1"` / `"STN2"` (the station) |
 | `uframe` | **identity — and the program must assign it, not just inherit it (§4)** | computed live by the controller from the station angles; the declared value is ignored |
 | `oframe` | the CAD/part frame **w.r.t. the robot base** | ⚠ **open (§5.1)** — the part w.r.t. the positioner frame, or a displacement in it |
 | What the HMI sends | base-referenced — **identical to FANUC today** | ⚠ **open (§5.1)** — the HMI's coordinated path is unfinished and untested |
 | What a request writes | `oframe` | `oframe` |
-| Work object | `wobjTG_Weld` | `wobjTG_WeldStn1` (per station) |
+| Work object | `wobjTG_Weld` | `wobjTG_WeldStn1` / `wobjTG_WeldStn2` — one per station |
 
 **The branch is coordinated-vs-not, and nothing else.** Not brand, not whether the part sits on a
 positioner, not whether the cell has one. A part indexed on a 2-axis positioner and a part clamped
@@ -78,9 +79,10 @@ to test. Keep it dumb.
 The two shapes are **separate resident symbols**, not one record that changes kind:
 
 ```rapid
-! TG_Comms.sys — declared once, per cell
+! TG_Comms.sys — declared once, per cell; one coordinated object per station
 PERS wobjdata wobjTG_Weld     := [FALSE, TRUE,  "",     <identity>, <oframe>];
 PERS wobjdata wobjTG_WeldStn1 := [FALSE, FALSE, "STN1", <identity>, <oframe>];
+PERS wobjdata wobjTG_WeldStn2 := [FALSE, FALSE, "STN2", <identity>, <oframe>];
 ```
 
 An exported program **picks one by passing it**, and assigns its frame nominals at entry:
@@ -90,7 +92,8 @@ wobjTG_Weld.uframe := <identity>;                  ! normalize the assumption (�
 wobjTG_Weld.oframe := <part w.r.t. robot base>;    ! the nominal the points were divided by
 ...
 TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;       ! indexed / static
-TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;   ! coordinated
+TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;   ! coordinated, station 1
+TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn2;   ! coordinated, station 2
 ```
 
 **`TG_ReqWeldFrame` needs no branch, and cannot have one.** It writes `.oframe` on *whatever it was
@@ -142,9 +145,41 @@ both numbers come from the same weld record. Keep the safe order regardless — 
 frame, then weld — and once a frame has been served, do not re-assign either component before the
 weld that consumes it. The failure is silent and geometric either way.
 
-**Station 2 (D4) is deliberately not declared yet.** `wobjTG_WeldStn2` with `ufmec:="STN2"` is a
-one-line addition when the two-station template lands; declaring it now would add a resident symbol
-nothing references.
+**Station 2 is declared** (2026-09-12) — `wobjTG_WeldStn2` with `ufmec:="STN2"`, the same shape next
+to station 1 in `TG_Comms.sys`. It is a separate symbol for reason 1 above and nothing weaker:
+`ufmec` is baked into the record, so **one work object cannot serve both stations**, and the rule
+generalizes to *one resident coordinated work object per station*, picked at the call site.
+
+Two consequences worth stating, both small:
+
+- **The two `oframe`s are independent slots.** Serving one never touches the other, so a program that
+  alternates stations does not disturb a frame it already holds for the other one, and the sequencing
+  rule above applies per station rather than per program.
+- ⚠ **A transposed station is now a reachable silent failure.** With one station declared, a `ufmec`
+  mix-up could only name a unit that does not exist, which fails loudly. With both declared on a
+  correctly built two-station cell, `STN1`↔`STN2` resolves fine and welds the right geometry on the
+  wrong table. That moves the commissioning check from "does the name resolve" to "does *each* name
+  resolve to the table you think it does" — see §5.3.
+
+And two prerequisites that **only exist once there are two stations**, both read off the MONARC
+teardown of a real IRBP D600 two-station cell
+([`customer_specific/monarc/`](../customer_specific/monarc/) — `joint_limits.md`,
+`monarc_cell_teardown.html`):
+
+- ⚠ **The stations cannot both be active.** Five positioner motors share three drives through
+  contactors K1–K5, so `ActUnit STN2` requires `DeactUnit STN1` first. Declaring both work objects is
+  fine — declaring is not activating — but only the *active* station's object resolves for a move or a
+  `CRobT`, so a two-station program brackets each station's work in `ActUnit`/`DeactUnit`. This sharpens
+  the existing `ActUnit` item in §5.3 from "is there one?" to "which one, when?".
+- ⚠ **The `extjoint` slots are shared.** `eax_b`/`eax_c` are `ARM1`/`PLATE1` *or* `ARM2`/`PLATE2`
+  depending on which unit is active, because the logical axis numbers are reused. A robtarget carried
+  from a station-1 program into a station-2 one commands station 2's axes to station 1's angles
+  without complaint. That lands on the exporter (plan **D5**), not on RAPID, but it is the same
+  silent-wrong-station family as a transposed `ufmec`.
+
+`"STN1"`/`"STN2"` are the actual configured unit names in that cell, which is the best evidence
+available that these are the right strings — but neither has been checked against the target
+controller's `MOC`, so both stay unverified until commissioning.
 
 ## 4. Why the `oframe` switch is free — provided `uframe` really is identity
 
@@ -250,8 +285,8 @@ and it is measurable independently of this decision.
 1. **Ask the controller for the plate pose.** At a standstill, have the program report the same pose
    in both conventions and let the HMI difference them to obtain the *controller's* `plate(θ)`
    instead of using its own model. One extra exchange, no change to how captures are reported.
-2. **Report a coordinated weld's captures in a station work object** (`wobjTG_CamStn1`, the symmetric
-   pair to `wobjTG_WeldStn1`). Registration output is then already plate-relative and no PC model
+2. **Report a coordinated weld's captures in a station work object** (`wobjTG_CamStn1`/`wobjTG_CamStn2`,
+   the symmetric pair per station). Registration output is then already plate-relative and no PC model
    enters at all — but it splits the capture convention, which is precisely what the owner call above
    declined. ⚠ This is *not* "capturing while the positioner moves" — no such capture exists.
    `ufprog:=FALSE` describes how the controller **derives** the frame (from the station's current
@@ -265,7 +300,9 @@ are being worked on as of 2026-09-03:
 
 - **`ActUnit`.** A `ufmec` station must be an **active mechanical unit** before a move — or a `CRobT`
   — in its work object resolves. Nothing in this repo activates one, and §2's "no activate step exists
-  or is needed" is true only of the base-referenced objects.
+  or is needed" is true only of the base-referenced objects. ⚠ With two stations declared this stops
+  being a missing line and becomes an *ordering constraint*: on a shared-drive cell the two stations
+  are mutually exclusive, so the program must `DeactUnit` one before activating the other (§3).
 - **Which motion task the station lives in.** Coordination is straightforward for a mechanical unit in
   the robot's own task; a MultiMove group needs `SyncMoveOn` and a different option set. The Weld
   Planner models the station as `independent_group` today (`_MOTION_ROLE_EXTJOINT_SLOTS`), which is
@@ -275,11 +312,16 @@ are being worked on as of 2026-09-03:
 - **The station's base frame.** `uframe(θ)` is derived from the station's `MOC` calibration, so that
   must agree with the `bTpos` the PC uses. A disagreement is a silent rigid offset on **every**
   coordinated weld — **E47** one level up, and a larger risk than a mistyped `ufmec`.
-- **The declaration is not loadable everywhere.** `wobjTG_WeldStn1` lives in the shared
-  `TG_Comms.sys`, and the phase 1–6 validation VC (RW6.15.08 / IRB4600) has no external axis at all.
-  If a controller rejects an unresolvable `ufmec` at load or at Check Program, it takes the *already
-  validated* non-coordinated path down with it. The declaration carries the instruction to comment it
-  out, or to rename the station, per test cell — treat that one `!` as the rollback.
+- **The declarations are not loadable everywhere.** `wobjTG_WeldStn1` and `wobjTG_WeldStn2` live in
+  the shared `TG_Comms.sys`, and the phase 1–6 validation VC (RW6.15.08 / IRB4600) has no external
+  axis at all. If a controller rejects an unresolvable `ufmec` at load or at Check Program, it takes
+  the *already validated* non-coordinated path down with it — and there are now **two** names that can
+  do that, so a single-station cell should comment out the station it does not have. The declarations
+  carry the instruction to comment them out, or to rename the stations, per test cell — treat those
+  two `!` as the rollback.
+- **Which name is which table.** Both names resolving is not the same as both being right: on a
+  two-station cell `STN1`↔`STN2` transposed resolves cleanly and welds on the wrong table (§3). Check
+  each name against `MOC` and against the physical station, not just that the load succeeds.
 
 ### 5.4 Two requirements that do stand
 
@@ -363,12 +405,15 @@ frame convention. Do not let this decision be read as having solved it.
   decision to make rather than a contract to mirror.
 - **The controller-side prerequisites** (§5.3) — `ActUnit`, motion-task vs MultiMove, real `extjoint`
   values in place of `9E9`, and the station base-frame calibration.
-- **`wobjTG_WeldStn1` has never been loaded**, and will not load on a system with no external axis.
-  The declaration carries the comment-out instruction; bundle the load-check with the Weld Planner's
-  outstanding coordinated `633-4` Arc VC check and confirm the station name against `MOC` while there.
+- **`wobjTG_WeldStn1`/`wobjTG_WeldStn2` have never been loaded**, and will not load on a system with
+  no external axis. The declarations carry the comment-out instruction; bundle the load-check with the
+  Weld Planner's outstanding coordinated `633-4` Arc VC check and confirm **both** station names
+  against `MOC` while there — including which name is which physical table (§3).
 - **Measure the robot↔positioner calibration error** (§5.2) — it sizes the accepted cost of keeping
   captures base-referenced, and its magnitude depends on which convention §5.1 lands on.
-- **Station 2** — `wobjTG_WeldStn2` when D4's two-station template lands.
+- ~~**Station 2** — `wobjTG_WeldStn2` when D4's two-station template lands.~~ **Declared 2026-09-12**
+  (§3). What remains is per-station, not per-declaration: `ActUnit` for whichever station a program
+  uses, `extjoint` values for its axes, and its own base-frame calibration.
 - **Look-ahead (contract O-3) is unchanged** by this rule. `ufprog`/`ufmec` are never written at
   runtime and the frame nominals are assigned ahead of all motion, so only the per-weld `oframe`
   write is exposed, exactly as before.

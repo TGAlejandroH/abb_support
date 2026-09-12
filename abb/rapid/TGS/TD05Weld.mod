@@ -102,9 +102,15 @@ MODULE TD05Weld_Mod
         ! then weld.
         !
         ! A COORDINATED weld changes the nominal below and the \WObj on
-        ! every motion and request:
+        ! every motion and request, using THAT WELD'S STATION OBJECT -
+        ! wobjTG_WeldStn1 or wobjTG_WeldStn2, one declared per station:
         !   wobjTG_WeldStn1.oframe:=[<see the open note in TG_Comms.sys>];
         !   TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_WeldStn1;
+        ! A program welding both stations holds both objects and switches
+        ! by argument - but see TG_Comms.sys: on a shared-drive positioner
+        ! the stations are mutually exclusive, so each station's work is
+        ! bracketed in ActUnit/DeactUnit and the extjoint slots mean
+        ! different motors on either side of that switch.
         ! The request PROC itself is identical, because .oframe is the
         ! write target either way and the call site chooses the object. No
         ! uframe reset there - the controller derives that one from the
