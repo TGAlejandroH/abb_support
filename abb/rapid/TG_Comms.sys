@@ -186,6 +186,10 @@ MODULE TG_Comms(SYSMODULE)
     ! WORK IN PROGRESS on both sides of the wire, 2026-09-03. These are the
     ! declared shapes only; nothing in this repo references them yet, and the
     ! prerequisites listed at the end of this block are all still open.
+    ! UPDATE 2026-09-12: the oframe CONVENTION is no longer open - it is
+    ! ABSOLUTE, see below - and the PC-side exporter now passes these records
+    ! by name (curobo_suite D47). The prerequisites below are unchanged and
+    ! still open, and nothing here has been loaded on a controller.
     !
     ! ufprog FALSE + ufmec => the controller derives uframe live from the
     ! station angles and IGNORES the declared uframe, which is why it is
@@ -211,18 +215,42 @@ MODULE TG_Comms(SYSMODULE)
     ! (LOCAL PERS wobjdata accepted as a \WObj argument, RW6.15.08/IRB4600,
     ! Check Program clean). Bundle this with the coordinated VC load-check.
     !
-    ! WHAT THIS oframe CARRIES IS STILL OPEN. The absolute reading is "the
-    ! part w.r.t. the positioner frame". What the HMI's coordinated FANUC
-    ! path computes today is instead a DISPLACEMENT in the positioner frame
-    ! (RobotCell::getWeldFrameToSendToRobot ->
-    ! Weld::GetCoordinatedOffsetInPositionerFrame, destined for FANUC's
-    ! OFFSET,PR[n]) - a different quantity, differing by the nominal
-    ! part-on-plate mount. That HMI path is itself unfinished and untested,
-    ! so this is a decision still to be made, not a defect to fix here.
-    ! Either way TG_ReqWeldFrame is unaffected: it writes .oframe on
-    ! whatever it is handed. What the convention changes is what the
-    ! exporter divides the robtargets by. See section 5 of
-    ! weld_frame_update_strategy_v1.md for the two shapes side by side.
+    ! WHAT THIS oframe CARRIES - RESOLVED 2026-09-12 as ABSOLUTE: the
+    ! CORRECTED PART POSE IN THE WORK OBJECT'S USER FRAME, which for these
+    ! records is the station. Not a displacement. Decision is curobo_suite
+    ! plan D47; full reasoning and the rejected alternative are in
+    ! curobo_suite docs/abb_coordinated_hmi_frame_contract_v1.md.
+    !
+    ! The deciding argument is SLOT COUNT, not geometry. FANUC can afford a
+    ! displacement because it has TWO runtime registers - the absolute goes
+    ! to the UFRAME PR and the delta to the OFFSET PR, two slots with two
+    ! meanings that cannot collide. Here there is ONE writable frame, and
+    ! .oframe is ALSO where the non-coordinated absolute lands, because
+    ! TG_ReqWeldFrame writes it unconditionally on whatever it is handed
+    ! (the O-1 resolution). Under a displacement convention that one slot
+    ! would mean "absolute" for wobjTG_Weld and "delta" for
+    ! wobjTG_WeldStn<n>, with NO ERROR when the two are swapped. Absolute
+    ! gives one sentence covering both records and keeps RAPID free of case
+    ! detection. ABB's own MultiMove manual reads the same way: its
+    ! wobj_stn1 example puts the part's mounting offset in oframe.
+    !
+    ! A displacement is NOT geometrically impossible - it works if the
+    ! exporter re-encodes the robtargets into the positioner flange frame,
+    ! which is exactly what the FANUC path does. So this was a cost and
+    ! coupling decision, not a correctness one, and section 7 of
+    ! docs/abb_coordinated_weld_hmi_plan_v1.md (curobo_suite) records what
+    ! would reopen it: a decision to keep getWeldFrameToSendToRobot
+    ! brand-blind.
+    !
+    ! WHAT THE HMI STILL HAS TO DO. RobotCell::getWeldFrameToSendToRobot is
+    ! brand-agnostic today and returns
+    ! Weld::GetCoordinatedOffsetInPositionerFrame - the FANUC DISPLACEMENT -
+    ! for every coordinated weld. Fed to TG_ReqWeldFrame that produces a
+    ! module which loads, runs, and welds in the wrong place with no error.
+    ! That call site must branch on brand IN THE SAME CHANGE that enables
+    ! coordinated ABB welds. The correct value is the existing offset
+    ! composed onto the nominal: offset_in_pos * (inv(P) * C_nom) =
+    ! inv(P) * C_cor, exact, and C_nom cancels.
     !
     ! Prerequisites, none of them closed (all WIP):
     !   - ActUnit for the station, and whether it is a mechanical unit in
@@ -246,7 +274,8 @@ MODULE TG_Comms(SYSMODULE)
     ! The two oframes are independent slots and serving one never touches the
     ! other, so a program alternating stations does not disturb a frame it
     ! already holds for the other one. Everything above applies unchanged:
-    ! same open oframe convention, same prerequisites, same rollback.
+    ! same oframe convention (ABSOLUTE, resolved 2026-09-12), same
+    ! prerequisites, same rollback.
     !
     ! TWO PREREQUISITES THAT ONLY EXIST ONCE THERE ARE TWO STATIONS, both
     ! read off the MONARC teardown of a real IRBP D600 two-station cell
@@ -277,15 +306,43 @@ MODULE TG_Comms(SYSMODULE)
     ! No coordinated CAMERA work object, deliberately. Captures stay
     ! base-referenced on ABB exactly as on FANUC, so the HMI's scan and
     ! registration path is one code path across both brands (owner call,
-    ! 2026-09-03). NOTE What that costs depends on the open convention
-    ! question above. Under the ABSOLUTE reading the PC's positioner model
-    ! enters as a single left-multiply - inverse(plate_pc(theta_s)) * P_base
-    ! - so a calibration error there lands on the weld at full magnitude.
-    ! Under the DISPLACEMENT reading it enters as a conjugation that cancels
-    ! at zero correction, which is the better-conditioned arithmetic. Either
-    ! way it is a known, accepted accuracy item, not an oversight. See
-    ! weld_frame_update_strategy_v1.md section 5 for both, and for the two
-    ! ways in if measurement later says it matters.
+    ! 2026-09-03). What that costs is a known, accepted accuracy item, not an
+    ! oversight. See weld_frame_update_strategy_v1.md section 5, and for the
+    ! two ways in if measurement later says it matters.
+    !
+    ! CORRECTION 2026-09-12 - the conditioning argument this note used to
+    ! make does not survive measurement, and the convention it hedged on is
+    ! now settled (see the coordinated block above). It read:
+    !
+    !   "What that costs depends on the open convention question above.
+    !    Under the ABSOLUTE reading the PC's positioner model enters as a
+    !    single left-multiply - inverse(plate_pc(theta_s)) * P_base - so a
+    !    calibration error there lands on the weld at full magnitude. Under
+    !    the DISPLACEMENT reading it enters as a conjugation that cancels at
+    !    zero correction, which is the better-conditioned arithmetic."
+    !
+    ! Tested rather than argued. Model the station miscalibration as
+    ! plate_ctrl(theta) = Y * plate_pc(theta) with Y = 3 mm + 0.2 deg, over a
+    ! 7-sample 2-axis sweep with the tilt parked at 37 deg. Both conventions
+    ! are wrong by EXACTLY THE SAME AMOUNT - 7.047 mm with no correction,
+    ! 7.056 mm with a 2.6 mm correction - and both are exact (1e-12 mm) on a
+    ! calibrated station. They are algebraically identical under that error
+    ! mode, because Y left-multiplies the whole chain either way:
+    ! plate_ctrl(theta) * oframe * p == plate_ctrl(theta) * delta * q for the
+    ! corresponding point encodings.
+    !
+    ! The conjugation DOES cancel at zero correction - but what it cancels is
+    ! the CORRECTION term, and the dominant term is the part's nominal
+    ! placement, which crosses the PC/controller frame boundary exactly once
+    ! in both conventions. So displacement buys no robustness here, and the
+    ! absolute convention costs none.
+    !
+    ! WHAT THIS DOES NOT COVER, and is still open: an error in how the PC
+    ! models the plate's MOTION - axis direction or offset, i.e. a
+    ! theta-DEPENDENT mismatch rather than a constant Y. That was not tested
+    ! and is a different question. If that is the real concern, measure it
+    ! the same way before acting on it; the constant-Y result says nothing
+    ! about it either way.
 
     ! Tools (FANUC UT[2] camera / UT[8] torch).
     ! TODO: DUMMY VALUES - replace with the calibrated tooldata of the real cell.
