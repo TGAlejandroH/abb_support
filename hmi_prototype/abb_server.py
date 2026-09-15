@@ -77,14 +77,50 @@ def euler_wpr_to_quat(w_deg, p_deg, r_deg):
 
 
 def quat_to_euler_wpr(q1, q2, q3, q4):
-    """ABB quaternion (w, x, y, z) -> FANUC W,P,R in degrees (see above)."""
+    """ABB quaternion (w, x, y, z) -> FANUC W,P,R in degrees (see above).
+
+    The generic ZYX formulas carry cos(P) as a common factor in BOTH atan2 terms
+    of W (R32 = cos(P) sin(W), R33 = cos(P) cos(W)) and of R (R21, R11) - it
+    cancels inside atan2, so they are exact for every cos(P) != 0.  At
+    cos(P) == 0 exactly they degenerate to atan2(0, 0) and return a triple whose
+    W - R (at P = +90) or W + R (at P = -90) is zero whatever the input was.
+    Only that combination is determined at the pole, so the result is a
+    DIFFERENT ROTATION, not one of several valid splits: measured against truth,
+    (W, P, R) = (13.932, 90, 109.244) came back rotated by 95.312 deg, silently.
+    Recorded as L3 in TG_RoboCal/docs/lessons_learned.md, and aimed at exactly
+    the poses an overhead capture uses (P = +/-90 is tool X vertical).
+
+    The pole branch states the convention the degeneracy leaves free - W := 0,
+    the whole determined combination reported as R - which IS rotation
+    preserving.  Kept numerically identical to
+    tg_robocal.robots.abb.quat_to_euler_zyx and to the HMI's
+    AbbPoseCodec::FanucWprFromQuat (same 1e-12 threshold, same wrap) so the
+    repos carrying this function cannot drift.  The wrap is needed because
+    nothing here canonicalizes the incoming quaternion sign, and -q shifts
+    atan2(x, w) by pi, which would report R as -330 deg where +q reports 30:
+    the same rotation, but outside the range the generic branch returns.
+
+    Away from the pole the arithmetic is untouched, so ordinary poses are
+    bit-identical to the previous version.
+    """
     n = math.sqrt(q1 * q1 + q2 * q2 + q3 * q3 + q4 * q4)
     w, x, y, z = q1 / n, q2 / n, q3 / n, q4 / n
-    rx = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
     sp = 2.0 * (w * y - z * x)
     sp = max(-1.0, min(1.0, sp))  # clamp against rounding at the gimbal poles
-    ry = math.asin(sp)
-    rz = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    if abs(sp) >= 1.0 - 1e-12:
+        ry = math.copysign(math.pi / 2.0, sp)
+        rz = (-2.0 if sp > 0.0 else 2.0) * math.atan2(x, w)
+        rx = 0.0
+        # atan2 spans (-pi, pi], so rz spans [-2pi, 2pi) before this; one pass
+        # is enough to land it in (-pi, pi].
+        if rz > math.pi:
+            rz -= 2.0 * math.pi
+        elif rz <= -math.pi:
+            rz += 2.0 * math.pi
+    else:
+        rx = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+        ry = math.asin(sp)
+        rz = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
     return math.degrees(rx), math.degrees(ry), math.degrees(rz)
 
 

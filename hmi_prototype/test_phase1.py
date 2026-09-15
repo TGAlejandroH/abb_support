@@ -104,7 +104,7 @@ class TestPoseCodec(unittest.TestCase):
             self.assert_mats_close(m_euler, m_quat)
 
     def test_round_trip(self):
-        """quat->euler inverts euler->quat away from the p = +-90 poles."""
+        """quat->euler inverts euler->quat, poles included (see L3)."""
         cases = [(0, 0, 0), (30, 40, 50), (159.464, -40.967, 29.743),
                  (-90, 10, 170), (5, -80, -5), (179, 0, -179)]
         for angles in cases:
@@ -114,6 +114,61 @@ class TestPoseCodec(unittest.TestCase):
             # compare via matrices: euler triples are only unique mod the
             # representation, the rotation itself must match exactly
             self.assert_mats_close(m1, m2, tol=1e-9)
+
+    def test_round_trip_at_the_gimbal_poles(self):
+        """Exactly P = +/-90, which every suite here used to stop short of.
+
+        Before the L3 fix these returned a DIFFERENT rotation - the generic ZYX
+        atan2 terms both degenerate to atan2(0, 0) there, and only W - R (north)
+        or W + R (south) is determined.  Cases carry their pre-fix rotation
+        error so a regression is recognisable rather than just red.  Asserted on
+        the matrix, never on the triple: at the pole many triples are the same
+        rotation, and the pre-fix triple was not even portable across
+        implementations (whether 1 - 2(x*x + y*y) lands on +0.0 or -0.0 flips
+        atan2(0, -0) between 0 and pi).
+        """
+        cases = [
+            (0.0, 90.0, 30.0),        # 30.000 deg of error before the fix
+            (13.932, 90.0, 109.244),  # demo-cell family: 95.312 deg
+            (45.0, -90.0, 0.0),       # south pole: 45.000 deg
+            (0.0, 90.0, 0.0),         # the one pole pose the old code got right
+            (0.0, 90.0, 180.0),       # R on the wrap boundary
+            (90.0, 90.0, 90.0),
+            (-73.0, -90.0, 150.0),
+        ]
+        for angles in cases:
+            quat = euler_wpr_to_quat(*angles)
+            # Both signs: q and -q are the same rotation, and nothing in the
+            # codec canonicalizes the sign a controller reports.
+            for sign in (1.0, -1.0):
+                with self.subTest(angles=angles, sign=sign):
+                    back = quat_to_euler_wpr(*[sign * c for c in quat])
+                    self.assert_mats_close(_mat_from_wpr(*angles),
+                                           _mat_from_wpr(*back), tol=1e-9)
+                    w, p, r = back
+                    self.assertAlmostEqual(w, 0.0, places=9)       # W := 0
+                    self.assertAlmostEqual(abs(p), 90.0, places=9)
+                    # The wrap: without it -q reports R = -330 where +q reports 30.
+                    self.assertGreaterEqual(r, -180.0 - 1e-9)
+                    self.assertLessEqual(r, 180.0 + 1e-9)
+
+    def test_generic_branch_untouched_away_from_the_pole(self):
+        """The pole branch must not reach ordinary poses.
+
+        Everything outside |sin(P)| >= 1 - 1e-12 still runs the arithmetic that
+        the HMI codec and the RAPID side were validated against, so these
+        recover the input triple exactly.
+        """
+        cases = [(-2.5, 3.5, 90.0),
+                 (30.0, 89.99, 0.0),          # 0.01 deg off: conditioning intact
+                 (13.932, 88.175, 109.244),   # demo cell measured camera pose (L4)
+                 (1.652, 47.442, -0.114),
+                 (-73.0, -89.999, 150.0)]     # 1 - |sin(P)| = 1.5e-10, still generic
+        for angles in cases:
+            with self.subTest(angles=angles):
+                back = quat_to_euler_wpr(*euler_wpr_to_quat(*angles))
+                for got, want in zip(back, angles):
+                    self.assertAlmostEqual(got, want, places=7)
 
     def test_pose_literal_round_trip(self):
         frame = [81.125, -129.068, 28.281, 159.464, -40.967, 29.743]  # TD05 P[52]
