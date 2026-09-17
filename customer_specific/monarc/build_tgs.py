@@ -92,6 +92,85 @@ def stations():
         }
 
 
+#: **D53 (curobo_suite): the controller's calibrated station frame, per station.** The
+#: customer cell's `ARM_TYPE.<plate>.rot_axis_pose` (SYSPAR/MOC.cfg of the MonarchRS
+#: controller backup -- the same records `build_urdf.py`'s placement was fitted to, and the
+#: same file `monarc_station_axis_calibration.cfg` loads onto a VC). RobotWare's ufmec station
+#: frame IS this pose (VC-measured 2026-09-16 to 0.10 mm: the bench-proven coordinated
+#: `.oframe` serve equals `inv(this)`; TGuideWeldingHMI docs/abb_coordinated_vc_test_log_v1.md
+#: session 10). The exporter states the coordinated seed in this frame instead of the URDF
+#: plate frame -- the two differ by 180 deg about the plate axis plus the table offset, and a
+#: seed stated in the wrong one welds a phantom part ~2 m away with no error. Meters, (w,x,y,z).
+STATION_FRAME_POSE = {
+    "STN1": {"xyz_m": [1.37036, 0.800883, 0.409268],
+             "quat_wxyz": [0.535299, 0.53563, -0.459753, 0.463878]},
+    "STN2": {"xyz_m": [1.37014, 0.79792, 0.41657],
+             "quat_wxyz": [0.536457, 0.537943, -0.460038, 0.459561]},
+}
+
+
+def _mat_mul(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
+
+
+def _mat_from_xyz_rpy(xyz, rpy):
+    import math
+    r, p, y = rpy
+    cr, sr, cp, sp, cy, sy = (math.cos(r), math.sin(r), math.cos(p), math.sin(p),
+                              math.cos(y), math.sin(y))
+    # URDF fixed-axis convention: R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
+    rot = [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+    return [[rot[0][0], rot[0][1], rot[0][2], xyz[0]],
+            [rot[1][0], rot[1][1], rot[1][2], xyz[1]],
+            [rot[2][0], rot[2][1], rot[2][2], xyz[2]],
+            [0.0, 0.0, 0.0, 1.0]]
+
+
+def _quat_wxyz(m):
+    import math
+    w = math.sqrt(max(0.0, 1.0 + m[0][0] + m[1][1] + m[2][2])) / 2.0
+    x = math.copysign(math.sqrt(max(0.0, 1.0 + m[0][0] - m[1][1] - m[2][2])) / 2.0,
+                      m[2][1] - m[1][2])
+    y = math.copysign(math.sqrt(max(0.0, 1.0 - m[0][0] + m[1][1] - m[2][2])) / 2.0,
+                      m[0][2] - m[2][0])
+    z = math.copysign(math.sqrt(max(0.0, 1.0 - m[0][0] - m[1][1] + m[2][2])) / 2.0,
+                      m[1][0] - m[0][1])
+    return [w, x, y, z]
+
+
+def station_frame_pose_urdf(st):
+    """The URDF plate frame at the calibration reference (all axes zero), from the station's
+    own bundled URDF -- **F18 (curobo_suite)**: the exporter composes the coordinated seed as
+    ``inv(STATION_FRAME_POSE) @ this @ oframe``, i.e. session 10's `G . N` on the record the
+    per-point encoding divides by. The pair (controller pose above, URDF pose here) IS the
+    measured convention constant G (MONARC STN1: 180 deg about the plate axis + 862.1 mm along
+    it, recovered from the run-15 module to 0.07 mm). At axes-zero every joint contributes only
+    its fixed origin, so the FK is the origin chain root -> plate link."""
+    import xml.etree.ElementTree as ET
+    root = ET.parse(str(st["urdf"])).getroot()
+    joint_by_child = {}
+    for joint in root.findall("joint"):
+        child = joint.find("child").get("link")
+        origin = joint.find("origin")
+        xyz = [float(v) for v in (origin.get("xyz", "0 0 0") if origin is not None else "0 0 0").split()]
+        rpy = [float(v) for v in (origin.get("rpy", "0 0 0") if origin is not None else "0 0 0").split()]
+        joint_by_child[child] = (joint.find("parent").get("link"), xyz, rpy)
+    chain, link = [], st["ee_link"]
+    while link in joint_by_child:
+        parent, xyz, rpy = joint_by_child[link]
+        chain.append((xyz, rpy))
+        link = parent
+    m = [[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]]
+    for xyz, rpy in reversed(chain):
+        m = _mat_mul(m, _mat_from_xyz_rpy(xyz, rpy))
+    return {"xyz_m": [round(m[i][3], 6) for i in range(3)],
+            "quat_wxyz": [round(v, 6) for v in _quat_wxyz(m)]}
+
+
 def export_metadata(st):
     """ABB external-axis mapping (D23) for the two real station axes.
 
@@ -106,6 +185,11 @@ def export_metadata(st):
             "brands": {
                 "abb": {
                     "controller_group": st["mech_unit"],
+                    # D53: the calibrated controller station frame (see STATION_FRAME_POSE).
+                    "station_frame_pose": STATION_FRAME_POSE[st["mech_unit"]],
+                    # F18: the URDF plate frame at the same reference; the exporter needs the
+                    # PAIR to compose the convention (see station_frame_pose_urdf above).
+                    "station_frame_pose_urdf": station_frame_pose_urdf(st),
                     "axes": [
                         {"joint_name": st["tilt"], "label": "eax_b", "unit": "deg",
                          "export": "embedded_in_pose"},
