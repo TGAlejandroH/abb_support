@@ -156,6 +156,43 @@ def fmt_real(value):
     return f"{float(value):+09.3f}"
 
 
+#: The nine seam-phase values, in the order the wire carries them. Matches
+#: `WELD_PROCESS_PARAMETER_KEYS` in the planner (weld_library_qtsql.py) and the
+#: fan-out in `TG_ReqWeldParams`; all three must agree or the values land in
+#: the wrong components silently. Times in SECONDS, wire feeds in IPM, volts
+#: absolute -- the same units the rest of this wire uses.
+SEAM_PHASE_ORDER = (
+    "purge_time_s",
+    "preflow_time_s",
+    "postflow_time_s",
+    "burnback_time_s",
+    "craterfill_time_s",
+    "craterfill_wire_feed_speed",
+    "craterfill_volts",
+    "ignition_wire_feed_speed",
+    "ignition_volts",
+)
+
+#: "no seam phases" -- what a preset that never authored them serves.
+DEFAULT_SEAM_PHASES = (0.0,) * len(SEAM_PHASE_ORDER)
+
+
+def fmt_seam_phases(values):
+    """The nine seam phases as ONE bracketed message RAPID `StrToVal` parses
+    straight into a `num{9}` -- the batching "Give me the frame" established.
+
+    Raises on the wrong count rather than padding: a short list would silently
+    shift every later value into the wrong seamdata component.
+    """
+    row = [float(v) for v in values]
+    if len(row) != len(SEAM_PHASE_ORDER):
+        raise ValueError(
+            f"seam phases must have {len(SEAM_PHASE_ORDER)} values "
+            f"({', '.join(SEAM_PHASE_ORDER)}), got {len(row)}"
+        )
+    return "[" + ",".join(f"{v:.3f}" for v in row) + "]"
+
+
 # ---------------------------------------------------------------------------
 # The HMI prototype
 # ---------------------------------------------------------------------------
@@ -184,10 +221,26 @@ WELD_DEMO_SEQUENCE = [
         "wire_feed_speed": 520.0,  # IPM -> expect wirefeed 220.133 mm/s
         "arc_length": 49.0,      # out of range -> expect CLAMP to 10
         "arc_control": 0.0,      # HMI hides this field and always sends 0.0
+        "weld_sched": 4,         # MONARCH uses 1, 2 and 4
+        # Seam phases in SEAM_PHASE_ORDER. Shaped after MONARCH's own
+        # sm3_16_ft_tack: a short purge/preflow, a real crater fill.
+        "seam_phases": [0.5, 0.2, 0.5, 0.08, 0.25, 350.0, 3.0, 300.0, 2.0],
     },
     {
-        "udwp_flag": 0,          # predefined: only travel speed is sent
+        # The weld that used to break: bound to a PRESET, not to operator
+        # overrides. Under the pre-WS3 wire it received travel speed and
+        # nothing else and welded at weld_speed 0. It must now be served the
+        # full set exactly like the weld above -- different values, same
+        # completeness -- which is the whole point of the change.
+        "udwp_flag": 0,
+        "welder_type": 2,
+        "weld_proc": 2,
         "travel_speed": 30.0,    # IPM -> expect weld_speed 12.700 mm/s
+        "wire_feed_speed": 400.0,  # IPM -> expect wirefeed 169.333 mm/s
+        "arc_length": 3.0,       # in range -> NOT clamped
+        "arc_control": 0.0,
+        "weld_sched": 1,
+        "seam_phases": list(DEFAULT_SEAM_PHASES),  # a preset with none authored
     },
 ]
 
@@ -196,8 +249,16 @@ WELD_DEMO_SEQUENCE = [
 IPM_TO_MM_S = 25.4 / 60.0
 WELD_DEMO_EXPECTED_MM_S = [
     {"weld_speed": 21.0 * IPM_TO_MM_S, "wirefeed": 520.0 * IPM_TO_MM_S,
-     "arc_length_clamped": 10.0, "arc_control": 0.0},
-    {"weld_speed": 30.0 * IPM_TO_MM_S},
+     "arc_length_clamped": 10.0, "arc_control": 0.0, "sched": 4,
+     "fill_time": 0.25, "fill_wirefeed": 350.0 * IPM_TO_MM_S,
+     "preflow_time": 0.2, "postflow_time": 0.5},
+    # The preset-bound weld: a real speed and a real wire feed, where the
+    # pre-WS3 wire gave it weld_speed 0 and left the previous weld's crater
+    # fill standing in the PERS seamdata.
+    {"weld_speed": 30.0 * IPM_TO_MM_S, "wirefeed": 400.0 * IPM_TO_MM_S,
+     "arc_length_clamped": 3.0, "arc_control": 0.0, "sched": 1,
+     "fill_time": 0.0, "fill_wirefeed": 0.0,
+     "preflow_time": 0.0, "postflow_time": 0.0},
 ]
 
 
@@ -248,13 +309,18 @@ class AbbTgsHmi:
         # Non-zero defaults so a VC run proves the values land in
         # posTG_Touchup rather than matching its [0,0,0] initializer.
         self.touchup_offsets_in = [0.045, -0.12, 0.005]
-        self.udwp_flag = 1                 # R_W_P: 1 = user-defined parameters
-        self.travel_speed = 17.5           # R_W_P (always sent)
+        self.udwp_flag = 1                 # R_W_P: 1 = operator overrides, 0 = preset
+        self.travel_speed = 17.5           # R_W_P
         self.welder_type = 1               # R_W_P: 1=Miller, 2=FroniusTPSi
         self.weld_proc = 5                 # R_W_P
         self.wire_feed_speed = 250.0       # R_W_P
         self.arc_length = 2.5              # R_W_P
         self.arc_control = 0.0             # R_W_P
+        # WS3/WS4: the power source's program / characteristic number
+        # (-> welddata main_arc.sched) and the seam phases, both served on
+        # every weld. See handle_weld_params_req.
+        self.weld_sched = 0                # R_W_P
+        self.seam_phases = list(DEFAULT_SEAM_PHASES)  # R_W_P, 9 values
 
         # Optional per-call script for R_W_P, so ONE run can exercise both
         # branches of TG_ApplyWeldParams (user-defined, then predefined).
@@ -476,14 +542,29 @@ class AbbTgsHmi:
                   f"{recorded}")
 
     def handle_weld_params_req(self):
-        """FANUC R_W_P (id 14): UDWP flag + travel speed, then (if the flag
-        is set) welder type, procedure and the schedule values - all in the
-        FANUC fixed-width formats.
+        """R_W_P (id 14): every weld parameter, on every weld.
 
-        Wire format is unchanged from phase 2. The only addition is
+        ⚠ **This is where the ABB wire departs from FANUC's (WS3/WS4,
+        2026-09-20).** It used to send welder type, proc and the schedule
+        values only `if self.udwp_flag == 1`, because on FANUC the values
+        live in an ArcTool schedule file on the controller and the HMI only
+        had to speak up when the operator overrode them.
+
+        ABB has no such file - welddata/seamdata are ordinary RAPID data - so
+        whatever is not sent, nothing supplies. Under the old shape a weld
+        bound to a preset got travel speed and nothing else, and welded at
+        weld_speed 0. Now the flag is provenance only: it tells the robot
+        (and the pendant log) whether these numbers came from the operator's
+        overrides or from the weld's preset, and the values arrive either way.
+
+        Two additions beyond the old set: `weld_sched` (the power source's
+        program / characteristic number, -> main_arc.sched) and the nine
+        `seam_phases`, which go out as ONE bracketed message rather than nine
+        round trips - the same batching "Give me the frame" already uses.
+
         `weld_param_sequence`: when set, entry N is applied before the Nth
         call of this cycle, which lets a two-weld program be served with
-        different parameters per weld (e.g. user-defined then predefined).
+        different parameters per weld.
         """
         if self.weld_param_sequence:
             idx = min(self._weld_param_calls, len(self.weld_param_sequence) - 1)
@@ -496,12 +577,13 @@ class AbbTgsHmi:
 
         self.do_send(str(self.udwp_flag))
         self.do_send(fmt_real(self.travel_speed))
-        if self.udwp_flag == 1:
-            self.do_send(f"{self.welder_type:02d}")
-            self.do_send(f"{self.weld_proc:02d}")
-            self.do_send(fmt_real(self.wire_feed_speed))
-            self.do_send(fmt_real(self.arc_length))
-            self.do_send(fmt_real(self.arc_control))
+        self.do_send(f"{self.welder_type:02d}")
+        self.do_send(f"{self.weld_proc:02d}")
+        self.do_send(fmt_real(self.wire_feed_speed))
+        self.do_send(fmt_real(self.arc_length))
+        self.do_send(fmt_real(self.arc_control))
+        self.do_send(f"{int(self.weld_sched):02d}")
+        self.do_send(fmt_seam_phases(self.seam_phases))
 
     # -- main loop -----------------------------------------------------------
 

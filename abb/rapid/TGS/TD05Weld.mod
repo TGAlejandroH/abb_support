@@ -33,8 +33,12 @@ MODULE TD05Weld_Mod
 
     ! Procedure numbers the Weld Planner emitted for these welds - the
     ! analogue of the <proc> literal in FANUC WELD START[<proc>,<sched>].
-    ! Used only when the HMI reports UDWP=0 (then it sends no proc number,
-    ! exactly as KAREL zeroes R[171..174]).
+    !
+    ! WARNING: Their job SHRANK on 2026-09-20 (WS3/WS4). The HMI used to send no
+    ! proc number when it reported UDWP=0, so this literal was the only proc
+    ! the robot had for a preset-bound weld. The HMI now serves every value
+    ! on every weld, so this is just the fallback index TG_ApplyWeldParams
+    ! uses when the SERVED proc is out of the recipe library's range.
     LOCAL CONST num nProcWeld2:=1;
     LOCAL CONST num nProcWeld3:=2;
 

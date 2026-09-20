@@ -84,15 +84,25 @@ class FakeWeldRobot(threading.Thread):
         return status
 
     def _req_weld_params(self, conn):                        # TG_ReqWeldParams
+        # WS3/WS4: UNCONDITIONAL. The `if udwp == 1` that used to wrap
+        # everything below the travel speed is gone -- ABB has no controller
+        # schedule to fall back on, so a preset-bound weld that is not served
+        # its values has none. `udwp` is provenance now, not a branch.
         self._send_ack(conn, "14")
-        got = {"udwp": int(self._prompt(conn, "Give me UDWP flag")),
-               "travel_speed": float(self._prompt(conn, "Give me travel speed"))}
-        if got["udwp"] == 1:
-            got["welder_type"] = int(self._prompt(conn, "Give me welder type"))
-            got["proc"] = int(self._prompt(conn, "Give me proc"))
-            got["wire_feed"] = float(self._prompt(conn, "Give me wire feed speed"))
-            got["arc_length"] = float(self._prompt(conn, "Give me arc length"))
-            got["arc_control"] = float(self._prompt(conn, "Give me arc control"))
+        got = {
+            "udwp": int(self._prompt(conn, "Give me UDWP flag")),
+            "travel_speed": float(self._prompt(conn, "Give me travel speed")),
+            "welder_type": int(self._prompt(conn, "Give me welder type")),
+            "proc": int(self._prompt(conn, "Give me proc")),
+            "wire_feed": float(self._prompt(conn, "Give me wire feed speed")),
+            "arc_length": float(self._prompt(conn, "Give me arc length")),
+            "arc_control": float(self._prompt(conn, "Give me arc control")),
+            "weld_sched": int(self._prompt(conn, "Give me weld schedule")),
+        }
+        # The nine seam phases arrive as one bracketed message.
+        raw = self._prompt(conn, "Give me seam phases")
+        got["seam_phases_raw"] = raw
+        got["seam_phases"] = [float(v) for v in raw.strip("[]").split(",")]
         self.weld_params.append(got)
         return got
 
@@ -171,16 +181,36 @@ class TestTwoWeldCycle(unittest.TestCase):
         self.assertEqual(len(robot.weld_params), 2,
                          "each weld must get its own R_W_P round")
 
-    def test_first_weld_user_defined_second_predefined(self):
-        """One run must cover BOTH branches of TG_ApplyWeldParams."""
+    def test_first_weld_operator_overrides_second_preset_bound(self):
+        """One run covers both provenances -- but the flag no longer gates
+        the wire, so both must arrive COMPLETE."""
         robot = FakeWeldRobot()
         run_cycle(robot)
         first, second = robot.weld_params
         self.assertEqual(first["udwp"], 1)
         self.assertEqual(second["udwp"], 0)
-        # UDWP=0 sends travel speed ONLY - the FANUC KAREL zeroes R[171..174]
-        self.assertNotIn("wire_feed", second)
-        self.assertNotIn("proc", second)
+
+    def test_a_preset_bound_weld_is_served_every_value(self):
+        """The regression this whole change exists for.
+
+        Under the pre-WS3 wire, UDWP=0 sent travel speed and nothing else, so
+        TG_ApplyWeldParams fell back to the placeholder wdTG_Lib entry and the
+        weld ran at weld_speed 0 -- the abb_coordinated_v6.tgs Weld5 defect.
+        A preset-bound weld must now receive the same complete set as an
+        operator-overridden one.
+        """
+        robot = FakeWeldRobot()
+        run_cycle(robot)
+        second = robot.weld_params[1]
+        self.assertEqual(second["udwp"], 0, "this is the preset-bound weld")
+        for key in ("welder_type", "proc", "wire_feed", "arc_length",
+                    "arc_control", "weld_sched", "seam_phases"):
+            self.assertIn(key, second, f"a preset-bound weld must be served {key}")
+        # ...and with REAL values, not zeros: a wire that sends the fields but
+        # leaves them empty would pass the check above and still weld at zero.
+        self.assertAlmostEqual(second["travel_speed"], 30.0, places=3)
+        self.assertAlmostEqual(second["wire_feed"], 400.0, places=3)
+        self.assertGreater(second["weld_sched"], 0)
 
     def test_user_defined_fields_match_the_hmi_defaults(self):
         robot = FakeWeldRobot()
@@ -192,14 +222,36 @@ class TestTwoWeldCycle(unittest.TestCase):
         self.assertAlmostEqual(first["wire_feed"], 520.0, places=3)
         self.assertAlmostEqual(first["arc_length"], 49.0, places=3)
         self.assertAlmostEqual(first["arc_control"], 0.0, places=3)
+        self.assertEqual(first["weld_sched"], 4)
 
-    def test_predefined_weld_still_sends_travel_speed(self):
-        """FANUC always wrote $CMD_WSPEED and the HMI always sends travel
-        speed, so TG_ApplyWeldParams overrides weld_speed in both branches."""
+    def test_seam_phases_arrive_as_one_message_in_the_declared_order(self):
+        """Nine values, one message, and the order the planner/RAPID/server
+        all three have to agree on -- a shift here lands a wire feed in a
+        purge time with nothing failing."""
         robot = FakeWeldRobot()
         run_cycle(robot)
-        self.assertAlmostEqual(robot.weld_params[1]["travel_speed"], 30.0,
-                               places=3)
+        first = robot.weld_params[0]
+        self.assertEqual(len(first["seam_phases"]), len(abb_server.SEAM_PHASE_ORDER))
+        self.assertTrue(first["seam_phases_raw"].startswith("["))
+        self.assertTrue(first["seam_phases_raw"].endswith("]"))
+        by_name = dict(zip(abb_server.SEAM_PHASE_ORDER, first["seam_phases"]))
+        self.assertAlmostEqual(by_name["purge_time_s"], 0.5, places=3)
+        self.assertAlmostEqual(by_name["preflow_time_s"], 0.2, places=3)
+        self.assertAlmostEqual(by_name["postflow_time_s"], 0.5, places=3)
+        self.assertAlmostEqual(by_name["craterfill_time_s"], 0.25, places=3)
+        self.assertAlmostEqual(by_name["craterfill_wire_feed_speed"], 350.0, places=3)
+        # The preset with no seam phases authored serves the all-zero row --
+        # which is what CLEARS the previous weld's phases from the PERS.
+        self.assertEqual(robot.weld_params[1]["seam_phases"],
+                         list(abb_server.DEFAULT_SEAM_PHASES))
+
+    def test_the_seam_phase_formatter_refuses_a_wrong_count(self):
+        """Padding a short row would shift every later value into the wrong
+        seamdata component, silently."""
+        with self.assertRaises(ValueError):
+            abb_server.fmt_seam_phases([0.0] * 8)
+        with self.assertRaises(ValueError):
+            abb_server.fmt_seam_phases([0.0] * 10)
 
     def test_touchup_pushed_once_per_weld_frame(self):
         """Phase 7: every R_W_F reply carries the stored touch-up offset."""
