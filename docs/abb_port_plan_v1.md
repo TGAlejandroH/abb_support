@@ -88,7 +88,38 @@ Read from `resources/FANUC/KAREL/*.kl`, `resources/FANUC/LS/*.ls`,
 | `R_C` | 2 | `> id` · `> pose` · `> sub_name` · `< "Give me capture status"` → 1 char |
 | `R_G_C_D` | 11 | `> id` · `< "Give me global loc status"` → 1 char |
 | `R_W_F` | 4 | `> id` · `> pose` · `> sub_name` · `< frame x..r` → 6 × 9 chars → PR[6] · `< "Give me weld status"` → 1 char · `< "Give me touchup x"`…`z` → 3 × 9 chars → R[180..182] (added 2026-09-04; the HMI serves these only when its `ROBOT_PUSH_TOUCHUP_OFFSETS_TO_PENDANT` config key is on — `.pc` and config are a paired deploy) |
-| `R_W_P` | 14 | `> id` · `< "Give me UDWP flag"` → 1 char · `< "Give me travel speed"` → 9 chars · if flag=1: `< welder type` → 2 chars · `< proc` → 2 chars · `< wire feed speed` → 9 · `< arc length` → 9 · `< arc control` → 9 |
+| `R_W_P` | 14 | `> id` · `< "Give me UDWP flag"` → 1 char · `< "Give me travel speed"` → 9 · `< "Give me welder type"` → 2 · `< "Give me proc"` → 2 · `< "Give me wire feed speed"` → 9 · `< "Give me arc length"` → 9 · `< "Give me arc control"` → 9 · `< "Give me weld schedule"` → 2 · `< "Give me seam phases"` → one `[9 × 9-char reals]` message (**WS3/WS4 2026-09-20 — the ABB wire DIVERGES from FANUC's here; see below**) |
+
+> ⚠ **`R_W_P` is the one request whose ABB wire is not a FANUC port.** Everything below the
+> travel speed used to sit behind `if flag=1`, because on FANUC the physical parameters live
+> in an ArcTool schedule file on the controller and the program points at it with
+> `WELD START[proc, sched]` — the HMI only had to speak up when the operator overrode them.
+>
+> ABB has no such file: `welddata`/`seamdata` are ordinary RAPID data passed to the arc
+> instructions, so **whatever the HMI does not send, nothing supplies**. Under the FANUC shape
+> a weld bound to a PRESET received travel speed and nothing else, `TG_ApplyWeldParams` fell
+> back to the placeholder `wdTG_Lib` entry, and the weld ran at `weld_speed 0`
+> (`abb_coordinated_v6.tgs` Weld5). So every value is served on every weld and **`nTG_UdwpFlag`
+> is provenance, not a branch** — it records whether the numbers came from the operator's
+> overrides or from the weld's preset; the HMI picks the source, the robot applies what arrives.
+>
+> Two fields have no FANUC counterpart. **`weld schedule`** is the POWER SOURCE's program /
+> characteristic number (→ `welddata main_arc.sched`), *not* the FANUC schedule of
+> `WELD START[proc, sched]`, which selects a row in a controller file ABB has no equivalent of;
+> MONARCH's own records carry 1, 2 and 4. **`seam phases`** are nine values in this order —
+> `purge_time_s, preflow_time_s, postflow_time_s, burnback_time_s, craterfill_time_s,
+> craterfill_wire_feed_speed, craterfill_volts, ignition_wire_feed_speed, ignition_volts` —
+> batched into ONE bracketed message the way `"Give me the frame"` replaced KAREL's six x..r
+> exchanges. An all-zero row is meaningful: `sdTG_Weld` is a `PERS`, so the zeros are what
+> CLEAR the previous weld's crater fill rather than letting this weld inherit it.
+>
+> That order must agree in **four** places — `SeamPhase` in the HMI's `WeldParameterWire.h`,
+> `SEAM_PHASE_ORDER` in `hmi_prototype/abb_server.py`, the fan-out in `TG_ReqWeldParams`, and
+> `WELD_PROCESS_PARAMETER_KEYS` in the planner's `weld_library_qtsql.py`. A value in the wrong
+> position does not raise anything; it lands in the wrong `seamdata` component.
+>
+> **The two repos deploy together.** The wire is strict prompt/reply lockstep driven by the
+> robot, so changing one side alone desyncs the stream mid-weld.
 | `R_E` | 100 | `> id` · `> pose` · `> sub_name` |
 | `R_O_T` | 20 | `> id` · `> sub_name (SR25)` · `> touchup x/y/z` (3 × 9 chars, from R[180..182]) · `< "Give me save status"` → 1 char · `< "Give me touchup x"`…`z` → 3 × 9 chars → R[180..182] (added 2026-09-04; pendant-initiated save from a macro-launched task — **not in the ABB port**, see Phase 7) |
 | `SOCKET_COM` / `SOCKET_DISC` | — | connection open (server accept) / close |
