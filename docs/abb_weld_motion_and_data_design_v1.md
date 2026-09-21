@@ -343,6 +343,26 @@ signal-scaling cfg covers only wire feed. ⚠ Must confirm that `ARC_UNITS` chan
 the numeric interpretation of `welddata`, not merely the FlexPendant display —
 that is what the §4 Phase-A timing measurement decides.
 
+> **ANSWERED 2026-09-20 — it is MERELY the display.** The timing measurement was
+> run on the VC after it had been moved to `US_UNITS`. A `welddata.weld_speed` of
+> **8.890 welded a 200 mm seam at 8.648 mm/s**; read as ipm it would have been
+> 3.763. A second point agreed (12.700 → **12.173**, ipm predicts 5.376), and
+> pass1/pass2 = 1.408 against the 1.429 either hypothesis predicts, so the method
+> itself checks out. Method: time between request 14 (weld params) and request 13
+> (weld stats), which brackets the arc pass and needs no program-pointer control
+> — RWS refuses PP in AUTO.
+>
+> So `welddata` is **always mm/s** and `TG_ApplyWeldParams`'s ×0.42333 on travel
+> speed is right; the "straight copy under `US_UNITS`" idea above is wrong and
+> must not be revived. MONARCH's own 25 `welddata` records are the trap that made
+> it look right: every weld speed there is an exact ipm→mm/s conversion, because
+> a `US_UNITS` pendant converts on ENTRY and stores mm/s. Nothing needs to be
+> confirmed about the wire-feed unit by analogy — that one is still unmeasured.
+>
+> Consequence elsewhere: the curobo_suite exporter had taken the same inference
+> (its decision **D28**) and was converting `welddata.weld_speed` to ipm, so every
+> `no_hmi` program welded 2.36× too fast. Fixed there the same day.
+
 **(d) Why arc motion ran with no welder.** The equipment prop has
 `override_on = TRUE` and **`autoinhib_on = TRUE`**, and the inhibit I/O
 (`DI WeldInhib`, `DI WeaveInhib`, `DI TrackInhib`, `DO AWBlock`) is **unassigned**.
