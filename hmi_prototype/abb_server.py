@@ -177,9 +177,41 @@ SEAM_PHASE_ORDER = (
 DEFAULT_SEAM_PHASES = (0.0,) * len(SEAM_PHASE_ORDER)
 
 
+#: RAPID's hard limit on a `string`, and so on any one `SocketReceive ... \\Str` message.
+#: See abb_port_plan_v1.md ("RAPID string max length is 80 chars").
+RAPID_STRING_MAX = 80
+
+#: Seam phases are clamped tighter than the standalone scalars (fmt_real's +/-9999.999)
+#: so that nine of them plus separators cannot exceed RAPID_STRING_MAX: with two decimals
+#: the worst case is "-999.99" (7) x 9 + 8 commas + 2 brackets = 73. Two decimals costs
+#: these fields nothing -- the times are hundredths of a second (MONARCH's own seamdata
+#: uses 0.2, 0.25, 0.08), the wire feeds are whole IPM (its largest is 800), and the
+#: volts are a correction or an absolute to 0.01 V.
+SEAM_PHASE_MAX = 999.99
+
+
+def fmt_seam_phase_value(value):
+    """One seam phase as a RAPID num LITERAL -- NOT the fixed-width scalar `fmt_real`.
+
+    No leading '+'. `fmt_real`'s "+0000.500" is right for a standalone reply, which
+    TG_Comms reads with `tgParseReal` -- a helper that exists precisely to strip the
+    FANUC plus sign, because "an explicit plus sign is not part of a RAPID num literal,
+    so StrToVal may reject it". This payload reaches `StrToVal` DIRECTLY, with no such
+    stripping, so the sign must never be emitted in the first place.
+    """
+    clamped = max(-SEAM_PHASE_MAX, min(SEAM_PHASE_MAX, float(value)))
+    return f"{clamped:.2f}"
+
+
 def fmt_seam_phases(values):
     """The nine seam phases as ONE bracketed message RAPID `StrToVal` parses
     straight into a `num{9}` -- the batching "Give me the frame" established.
+
+    MUST stay byte-identical to `WeldParameterWire::FormatSeamPhases` in the production
+    HMI. The two diverged once (2026-09-20): this side emitted 59 characters while the
+    C++ emitted 91 with FANUC plus signs. Every green test here was therefore validating
+    a payload the real HMI never sends, and the one it did send was over RAPID's 80-char
+    string limit -- the divergence is what hid the defect.
 
     Raises on the wrong count rather than padding: a short list would silently
     shift every later value into the wrong seamdata component.
@@ -190,7 +222,15 @@ def fmt_seam_phases(values):
             f"seam phases must have {len(SEAM_PHASE_ORDER)} values "
             f"({', '.join(SEAM_PHASE_ORDER)}), got {len(row)}"
         )
-    return "[" + ",".join(f"{v:.3f}" for v in row) + "]"
+    payload = "[" + ",".join(fmt_seam_phase_value(v) for v in row) + "]"
+    # By construction, but asserted: an oversize message does NOT fail cleanly. RAPID's
+    # SocketReceive truncates at 80 and the remainder stays in the TCP buffer, becoming
+    # the reply to the NEXT prompt and desyncing the rest of the session.
+    assert len(payload) <= RAPID_STRING_MAX, (
+        f"seam phase payload is {len(payload)} chars, over RAPID's "
+        f"{RAPID_STRING_MAX}-char string limit: {payload}"
+    )
+    return payload
 
 
 # ---------------------------------------------------------------------------

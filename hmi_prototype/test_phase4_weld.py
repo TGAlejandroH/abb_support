@@ -253,6 +253,49 @@ class TestTwoWeldCycle(unittest.TestCase):
         with self.assertRaises(ValueError):
             abb_server.fmt_seam_phases([0.0] * 10)
 
+    def test_the_seam_phase_payload_is_byte_identical_to_the_production_hmi(self):
+        """The literal is PINNED, and pinned in both languages.
+
+        The tests above parse the payload back into floats, so they pass whatever
+        the formatting -- which is exactly how this prototype and the C++ HMI came
+        to encode the same row differently (2026-09-20). This side sent
+        "[0.500,...]"; WeldParameterWire::FormatSeamPhases sent
+        "[+0000.500,...]", 91 characters, past RAPID's 80-char string limit. Every
+        green test here was validating a payload the robot never receives.
+
+        Change this string only together with the matching CHECK in
+        TGuideWeldingHMI/tests/unit/weld_parameter_wire_tests.cpp.
+        """
+        row = [0.5, 0.2, 0.5, 0.08, 0.25, 350.0, 3.0, 300.0, 2.0]
+        self.assertEqual(abb_server.fmt_seam_phases(row),
+                         "[0.50,0.20,0.50,0.08,0.25,350.00,3.00,300.00,2.00]")
+        self.assertEqual(abb_server.fmt_seam_phases([0.0] * 9),
+                         "[0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00]")
+
+    def test_the_seam_phase_payload_fits_the_rapid_string_limit(self):
+        """SocketReceive \\Str does not error past 80 chars: it truncates and
+        leaves the tail in the TCP buffer, where it becomes the reply to the NEXT
+        prompt and desyncs the rest of the session."""
+        worst = [-123456.0] * 9          # clamps to -999.99, the widest field
+        payload = abb_server.fmt_seam_phases(worst)
+        self.assertEqual(payload, "[-999.99,-999.99,-999.99,-999.99,-999.99,"
+                                  "-999.99,-999.99,-999.99,-999.99]")
+        self.assertEqual(len(payload), 73)
+
+        for value in (0.0, -0.001, 800.0, -999.99, 999.99, 1e9, -1e9):
+            with self.subTest(value=value):
+                self.assertLessEqual(len(abb_server.fmt_seam_phases([value] * 9)),
+                                     abb_server.RAPID_STRING_MAX)
+
+    def test_seam_phase_values_are_rapid_num_literals(self):
+        """No leading '+'. The standalone scalar replies go through tgParseReal,
+        which strips the FANUC plus sign; this payload reaches StrToVal directly
+        and nothing strips it, so it must never be emitted. Negatives keep their
+        sign -- a Fronius arc-length correction is signed."""
+        self.assertEqual(abb_server.fmt_seam_phase_value(0.5), "0.50")
+        self.assertEqual(abb_server.fmt_seam_phase_value(-3.5), "-3.50")
+        self.assertNotIn("+", abb_server.fmt_seam_phases([-3.5] + [0.0] * 8))
+
     def test_touchup_pushed_once_per_weld_frame(self):
         """Phase 7: every R_W_F reply carries the stored touch-up offset."""
         robot = FakeWeldRobot()
