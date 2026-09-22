@@ -62,6 +62,35 @@ MODULE TG_Comms(SYSMODULE)
     PERS num nTG_ArcControl:=0;            ! R[174] arc control
     PERS num nTG_TravelSpeed:=0;           ! R[175] travel speed
 
+    ! ---- WS3/WS4 (2026-09-20): the values ABB needs and FANUC does not -----
+    ! ABB takes weld parameters from the PROGRAM, not from a numbered schedule
+    ! on the controller, so the HMI must serve the whole set on every weld -
+    ! see the R_W_P note in TG_ReqWeldParams. Two additions carry what the
+    ! FANUC wire never had to:
+    !
+    ! nTG_WeldSched is the POWER SOURCE's program / characteristic number,
+    ! which lands in welddata main_arc.sched. It is NOT the FANUC "schedule
+    ! number" of WELD START[proc,sched] (that selects a row in an ArcTool
+    ! schedule file, a concept ABB has no equivalent of); it is the number the
+    ! Fronius/Miller uses to pick a synergic line. MONARCH's own welddata
+    ! records carry 1, 2 and 4 here.
+    PERS num nTG_WeldSched:=0;             ! -> welddata main_arc.sched
+    ! The seam phases: the parts of a weld either side of the steady arc.
+    ! MONARCH's mDeclarations.sys carries ~15 distinct seamdata records that
+    ! differ almost entirely in these, so a preset that cannot express them
+    ! cannot reproduce their welds. Times in SECONDS, wire feeds in IPM and
+    ! volts absolute - the same units the rest of this wire uses; TG_Weld.sys
+    ! does the conversion, this module only stores.
+    PERS num nTG_PurgeTime:=0;             ! -> seamdata purge_time
+    PERS num nTG_PreflowTime:=0;           ! -> seamdata preflow_time
+    PERS num nTG_PostflowTime:=0;          ! -> seamdata postflow_time
+    PERS num nTG_BurnbackTime:=0;          ! -> seamdata bback_time
+    PERS num nTG_CraterFillTime:=0;        ! -> seamdata fill_time
+    PERS num nTG_CraterFillWireFeed:=0;    ! -> seamdata fill_arc.wirefeed
+    PERS num nTG_CraterFillVolts:=0;       ! -> seamdata fill_arc.voltage
+    PERS num nTG_IgnitionWireFeed:=0;      ! -> seamdata ign_arc.wirefeed
+    PERS num nTG_IgnitionVolts:=0;         ! -> seamdata ign_arc.voltage
+
     ! Phase 7 (2026-09-04): pendant touch-up offset mirror (FANUC R[180..182],
     ! r_w_f.kl of the same date). The HMI pushes its stored per-weld touch-up
     ! offset on EVERY weld-frame reply - weld, skip and abort alike -
@@ -912,36 +941,86 @@ MODULE TG_Comms(SYSMODULE)
 
     PROC TG_ReqWeldParams()
         ! FANUC: R_W_P (HMI request id 14) - welding parameters.
-        ! -> nTG_UdwpFlag (R[170]), nTG_TravelSpeed (R[175]); when the flag
-        ! is set also nTG_WelderType, nTG_WeldProc (R[171]), nTG_WireFeed
-        ! (R[172]), nTG_ArcLength (R[173]), nTG_ArcControl (R[174]).
-        ! KAREL additionally wrote the values into the ArcTool schedule
-        ! (SET_VAR AWE1WP*/SCH[20]) - the RobotWare Arc welddata mapping is
-        ! deferred (plan, phase 4); values are only stored in PERS here.
-        ! KAREL's two welder-type branches were byte-identical; collapsed.
+        !
+        ! WARNING: **The ABB wire is NOT the FANUC one, and deliberately so
+        ! (WS3/WS4, 2026-09-20).** On FANUC the values live in an ArcTool
+        ! schedule file on the controller and the program points at it with
+        ! WELD START[proc,sched]; the HMI only had to send anything at all
+        ! when the operator ticked "user-defined weld parameters", which is
+        ! why everything below the travel speed used to sit behind
+        ! IF nTG_UdwpFlag=1.
+        !
+        ! ABB has no such file. welddata/seamdata are ordinary RAPID data
+        ! passed to the arc instructions, so whatever the HMI does not send,
+        ! nothing supplies. Keeping the FANUC shape produced the defect this
+        ! change fixes: a weld bound to a PRESET (UDWP=0) got travel speed
+        ! and nothing else, TG_ApplyWeldParams fell back to the placeholder
+        ! wdTG_Lib entry, and the weld ran at weld_speed 0.
+        !
+        ! So every value is now served on EVERY weld, and nTG_UdwpFlag stops
+        ! being a branch: it is provenance only, telling the pendant log (and
+        ! anyone reading it) whether these numbers came from the operator's
+        ! overrides or from the weld's preset. The HMI decides which source
+        ! to read; the robot just applies what arrives.
+        !
+        ! Sequence (each line is one prompt/reply round trip):
+        !   UDWP flag, travel speed, welder type, proc, wire feed,
+        !   arc length, arc control, weld schedule, seam phases
+        !
+        ! The seam phases arrive as ONE bracketed message rather than nine
+        ! round trips - the same batching the frame requests already use
+        ! ("Give me the frame" replaced KAREL's six x..r exchanges).
         VAR string reply;
+        VAR num seam{9};
+        VAR bool seam_ok;
         tgSendAck "14";
         reply:=tgPromptRecv("Give me UDWP flag");
         nTG_UdwpFlag:=tgParseReal(reply);
         reply:=tgPromptRecv("Give me travel speed");
         nTG_TravelSpeed:=tgParseReal(reply);
-        IF nTG_UdwpFlag=1 THEN
-            reply:=tgPromptRecv("Give me welder type");
-            nTG_WelderType:=tgParseReal(reply);
-            reply:=tgPromptRecv("Give me proc");
-            nTG_WeldProc:=tgParseReal(reply);
-            reply:=tgPromptRecv("Give me wire feed speed");
-            nTG_WireFeed:=tgParseReal(reply);
-            reply:=tgPromptRecv("Give me arc length");
-            nTG_ArcLength:=tgParseReal(reply);
-            reply:=tgPromptRecv("Give me arc control");
-            nTG_ArcControl:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me welder type");
+        nTG_WelderType:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me proc");
+        nTG_WeldProc:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me wire feed speed");
+        nTG_WireFeed:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me arc length");
+        nTG_ArcLength:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me arc control");
+        nTG_ArcControl:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me weld schedule");
+        nTG_WeldSched:=tgParseReal(reply);
+        reply:=tgPromptRecv("Give me seam phases");
+        seam_ok:=StrToVal(reply,seam);
+        IF seam_ok THEN
+            nTG_PurgeTime:=seam{1};
+            nTG_PreflowTime:=seam{2};
+            nTG_PostflowTime:=seam{3};
+            nTG_BurnbackTime:=seam{4};
+            nTG_CraterFillTime:=seam{5};
+            nTG_CraterFillWireFeed:=seam{6};
+            nTG_CraterFillVolts:=seam{7};
+            nTG_IgnitionWireFeed:=seam{8};
+            nTG_IgnitionVolts:=seam{9};
         ELSE
-            ! KAREL resets the schedule registers when not user-defined
-            nTG_WeldProc:=0;
-            nTG_WireFeed:=0;
-            nTG_ArcLength:=0;
-            nTG_ArcControl:=0;
+            ! Zero the whole block rather than leave the PREVIOUS weld's
+            ! phases standing: these are PERS, so a half-parsed payload that
+            ! left them alone would silently weld this seam with the last
+            ! one's crater fill. Zero is also what "no seam phases" means
+            ! everywhere else on this path, so TG_ApplyWeldParams needs no
+            ! special case. A malformed payload is a wire defect, not an
+            ! operator choice, so it is loud.
+            nTG_PurgeTime:=0;
+            nTG_PreflowTime:=0;
+            nTG_PostflowTime:=0;
+            nTG_BurnbackTime:=0;
+            nTG_CraterFillTime:=0;
+            nTG_CraterFillWireFeed:=0;
+            nTG_CraterFillVolts:=0;
+            nTG_IgnitionWireFeed:=0;
+            nTG_IgnitionVolts:=0;
+            TPWrite "TG ERROR: bad seam phase payload, phases zeroed:";
+            TPWrite reply;
         ENDIF
         TPWrite "TG: weld params, UDWP = "\Num:=nTG_UdwpFlag;
     ENDPROC

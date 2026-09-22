@@ -156,15 +156,19 @@ class FakeTgsRobot(threading.Thread):
             return
         if weld_status == "1":
             # TG_ReqWeldParams
+            # WS3/WS4: unconditional -- see TG_ReqWeldParams. The wire is
+            # strict lockstep, so a fake robot that still branched on the UDWP
+            # flag here would simply desync the stream.
             self._send_ack(conn, "14")
             self.received["udwp"] = self._prompt(conn, "Give me UDWP flag")
             self.received["travel_raw"] = self._prompt(conn, "Give me travel speed")
-            if self.received["udwp"] == "1":
-                self.received["welder_type_raw"] = self._prompt(conn, "Give me welder type")
-                self.received["proc_raw"] = self._prompt(conn, "Give me proc")
-                self.received["wirefeed_raw"] = self._prompt(conn, "Give me wire feed speed")
-                self.received["arclen_raw"] = self._prompt(conn, "Give me arc length")
-                self.received["arcctl_raw"] = self._prompt(conn, "Give me arc control")
+            self.received["welder_type_raw"] = self._prompt(conn, "Give me welder type")
+            self.received["proc_raw"] = self._prompt(conn, "Give me proc")
+            self.received["wirefeed_raw"] = self._prompt(conn, "Give me wire feed speed")
+            self.received["arclen_raw"] = self._prompt(conn, "Give me arc length")
+            self.received["arcctl_raw"] = self._prompt(conn, "Give me arc control")
+            self.received["weldsched_raw"] = self._prompt(conn, "Give me weld schedule")
+            self.received["seamphases_raw"] = self._prompt(conn, "Give me seam phases")
             # TG_ReqWeldStats (R_W_S) - FANUC calls it right after WELD END,
             # so it is the last request of the weld branch. One message, no
             # pose, no sub token. succ_ae mirrors the module's
@@ -312,13 +316,28 @@ class TestBranchScenarios(unittest.TestCase):
         # Phase 7: the touch-up push completes even after a corrupt frame
         self.assertIn("touchup_z", robot.received)
 
-    def test_predefined_schedule_sends_only_flag_and_speed(self):
+    def test_a_preset_bound_weld_is_served_the_full_parameter_set(self):
+        """WS3/WS4 -- this test asserted the OPPOSITE until 2026-09-20.
+
+        It used to be `test_predefined_schedule_sends_only_flag_and_speed`
+        and pinned the FANUC shape: with UDWP=0 the HMI sent the flag and the
+        travel speed and stopped, because on FANUC the rest lives in an
+        ArcTool schedule file on the controller.
+
+        ABB has no such file, so "sends only flag and speed" WAS the defect:
+        TG_ApplyWeldParams had nothing to apply, fell back to the placeholder
+        wdTG_Lib entry and welded at weld_speed 0. The flag is provenance
+        now, not a branch -- so a preset-bound weld is served everything.
+        """
         robot, hmi = run_one_cycle({"udwp_flag": 0})
         self.assertEqual(hmi.request_log,
                          ["10", "5", "1", "2", "1", "2", "11", "4", "14", "13", "100"])
         self.assertEqual(robot.received["udwp"], "0")
         self.assertEqual(robot.received["travel_raw"], "+0017.500")
-        self.assertNotIn("proc_raw", robot.received)
+        for key in ("welder_type_raw", "proc_raw", "wirefeed_raw", "arclen_raw",
+                    "arcctl_raw", "weldsched_raw", "seamphases_raw"):
+            self.assertIn(key, robot.received,
+                          f"a preset-bound weld must still be served {key}")
 
 
 if __name__ == "__main__":
