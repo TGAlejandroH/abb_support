@@ -250,6 +250,20 @@ Then load `abb/rapid/TG_Cell.sys` into `T_ROB1` the same way as `TG_Comms.sys`
 (it is resident, like TG_Comms — the .tgs programs call it via the task-wide
 global scope) and Apply.
 
+**`TG_ActMechUnit` makes this module cell-specific (2026-09-23).** Its body
+references the MONARC mechanical units `STN1` / `STN2` and the in-position
+signals `siGap_AtStn_1` / `siGap_AtStn_2`. The program check fails on a system
+that lacks any of them, so on a different cell rewrite that routine's body
+first. Every HMI-mode `.tgs` module that drives a positioner calls it, so reload
+`TG_Cell.sys` before running a module exported after that date.
+
+It also calls the IRBP positioner package's `ActStn1`/`ActStn2` and
+`DeactStn1`/`DeactStn2`, and binds the station-free coordinated work object
+`wobjTG_WeldActStn` that `TG_Comms.sys` declares, so **load `TG_Comms.sys` first**
+(or both together; a transient 40160 after the first load clears once the second
+is in). Coordinated modules exported after 2026-09-23 reference
+`wobjTG_WeldActStn`, so they need both files from that date.
+
 What to watch during a run:
 
 - Operator Window: `TG: camera flap open` inside each capture branch,

@@ -188,6 +188,10 @@ MODULE TG_Comms(SYSMODULE)
     !   - the static shape stays byte-identical to what a VC has accepted.
     ! An exported program therefore assigns only frame COMPONENTS at entry -
     ! .uframe identity and .oframe nominal - never ufprog/ufmec.
+    ! EXCEPTION (2026-09-23, VC-proven): wobjTG_WeldActStn below is bound
+    ! at run time by TG_ActMechUnit - once, at module entry, before any
+    ! motion - so one coordinated program can run on either station. It is a
+    ! separate record, always coordinated, so none of the reasons above bite.
     ! NOTE Accepted cost: ufprog/ufmec correctness
     ! now lives on the controller, the same trust model as tTG_Weld - a
     ! wrong ufmec here is a silent wrong-station weld, so treat these as
@@ -331,6 +335,23 @@ MODULE TG_Comms(SYSMODULE)
     ! names are cell configuration rather than generic core. That split has
     ! not been taken; if it is, both declarations move together.
     PERS wobjdata wobjTG_WeldStn2:=[FALSE,FALSE,"STN2",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
+    ! ---- Coordinated motion, "the station at the robot" -------------------
+    ! 2026-09-23, VC-proven: ONE coordinated work object for
+    ! whichever station is presented, so a coordinated program names no
+    ! station and can run on both. Declared UNBOUND (ufmec ""): TG_ActMechUnit
+    ! (TG_Cell.sys) writes ufmec from the SAME decision that activates the
+    ! unit, on every call, before the program's first motion. Measured on the
+    ! ProjectMonarch VC (RW 6.15, socket plan V-36):
+    !   - ufmec "" loads; used unbound, CRobT stops the program (41450);
+    !   - bound to the active station, a coordinated MoveL follows it: the
+    !     station frame turned exactly with the chuck (9.961 deg for 9.961);
+    !   - bound to the INACTIVE station, CRobT only LOGS 50066 and returns a
+    !     pose that is not station-relative - execution continues - and the
+    !     next coordinated move stops with 50066. No wrong-station motion;
+    !   - a unit name the controller does not have stops the program (41450).
+    ! The per-station records above stay for programs that name a station.
+    PERS wobjdata wobjTG_WeldActStn:=[FALSE,FALSE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
     ! No coordinated CAMERA work object, deliberately. Captures stay
     ! base-referenced on ABB exactly as on FANUC, so the HMI's scan and
