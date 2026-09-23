@@ -11,10 +11,20 @@ used automatically when present.
 | `TG_SocketProbe.mod` | The whole robot side: a standalone RAPID echo server. No `main`, no motion, no I/O, no dependency on `TG_Comms`. |
 | `logs/` | One timestamped log per run (git-ignored). Paste these into the trip report. |
 
-Status 2026-09-23: the whole PC side was run against the RobotStudio VC (RWS checklist
-with the write round trip, upload, the socket client against a stand-in echo server, and
-every failure path). `TG_SocketProbe.mod` passes `rapid_check` but has **not yet been
-loaded on a controller**; section 6 does that in eight commands whenever the VC is free.
+**How to run it.** Always from inside this folder (`cd tools\comms_check`):
+
+    Anaconda Prompt:   python comms_probe.py --ip <IP> ping
+    Plain PowerShell:  .\comms_probe.cmd   --ip <IP> ping      (nothing in front of it)
+
+`python comms_probe.cmd` is wrong in both shells: it feeds a batch file to Python.
+
+Status 2026-09-23, all on the RobotStudio VC `4600-803651_Virtual` (RW 6.15.08):
+the PC side passed every step and every failure path, and the section 6 bench sequence
+ran end to end: `TG_SocketProbe.mod` loaded clean, a run with the default bind IP (not a
+VC address) hit the SETUP ERROR path and stopped by itself, `setip 127.0.0.1` then `run`
+gave `echo OK` and a clean `TG_BYE`, `unload` and `restore` put Production Manager back.
+The controller side is therefore proven; tomorrow tests the network and the option, not
+the code.
 
 What a full pass proves: the laptop reaches the controller (ping), RWS answers with
 our credentials and lets us read state and write files (the production `.tgs`
@@ -46,9 +56,12 @@ controller in AUTO: `python comms_probe.py --ip <ip> setip <ip>`.
 
 ## 2. Before leaving the office
 
-1. `.\comms_probe.cmd --help` runs. Plain `python` is NOT on this laptop's PowerShell
-   path; the wrapper uses `%USERPROFILE%\anaconda3\python.exe`. An Anaconda Prompt works
-   too. Every `python comms_probe.py ...` below can be typed as `.\comms_probe.cmd ...`.
+1. The tool runs. Two ways, both from INSIDE this folder (`cd tools\comms_check`):
+   - Anaconda Prompt (any env): `python comms_probe.py --help`
+   - Plain PowerShell, where `python` is not on this laptop's path:
+     `.\comms_probe.cmd --help` with nothing in front of it; the wrapper finds
+     `%USERPROFILE%\anaconda3\python.exe` itself. Do not type `python comms_probe.cmd`.
+   Every `python comms_probe.py ...` below can be typed as `.\comms_probe.cmd ...`.
 2. `python ../rapid_check.py TG_SocketProbe.mod` prints `OK` if you edited the module.
 3. Optional but worth it: prove the module loads on the virtual controller (section 6).
 4. Copy this folder (and `tools/rapid_check.py`) to the site laptop / USB stick.
@@ -59,7 +72,9 @@ controller in AUTO: `python comms_probe.py --ip <ip> setip <ip>`.
 
 ## 3. On site, in this order
 
-Open PowerShell in this folder. Replace `<IP>` everywhere.
+Open an Anaconda Prompt or PowerShell **in this folder** (`cd tools\comms_check`).
+Replace `<IP>` everywhere. In PowerShell write `.\comms_probe.cmd` where the lines below
+say `python comms_probe.py`.
 
 ### Step 1 - ping
 
@@ -197,8 +212,13 @@ RobotStudio's VC running (`--user/--password` default to the VC's factory accoun
 POST itself reports success even for a module that fails to compile. `restore` puts
 the program pointer back to `main` and starts with cycle forever, i.e. back to
 Production Manager's `ExecEngine` on the MONARC bench. `run` sets the program pointer
-over RWS; if that action is not accepted by this RobotWare, it says so and you do
-PP to Routine in RobotStudio instead.
+over RWS and verifies it by reading the PP back; if no action is accepted by this
+RobotWare, it says so and you do PP to Routine in RobotStudio instead.
+
+Validated 2026-09-23 on the VC exactly in this order, plus one extra `run` before the
+`setip` to see the wrong-IP path: the routine printed its SETUP ERROR and ended, `socket`
+reported no listener, RAPID was `stopped`. Round trip on the VC was about 460 ms, which
+is VC scheduling, not the network; a real IRC5 answers in a few ms.
 
 The same sequence works on the real cell in AUTO, but the first real contact should be
 done from the pendant in MANUAL as in section 3: it keeps a person at the enabling

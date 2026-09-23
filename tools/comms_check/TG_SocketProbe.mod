@@ -29,7 +29,7 @@ MODULE TG_SocketProbe_Mod
     ! FlexPendant -> Program Data -> string -> stTG_ProbeIP, or from the PC
     ! with "comms_probe.py setip <ip>" (needs AUTO; see README).
     ! =====================================================================
-    PERS string stTG_ProbeIP:="192.168.125.1";
+    PERS string stTG_ProbeIP:="127.0.0.1"; ! "192.168.125.1";
     PERS num nTG_ProbePort:=2000;
 
     ! Per-connection wait for the PC, in seconds. In MANUAL the enabling

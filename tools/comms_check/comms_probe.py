@@ -724,12 +724,17 @@ def cmd_run(rws, log, task):
     errors = []
 
     def try_pcp():
+        # The verdict is the PP read-back, not the HTTP status: on RW 6.15 the
+        # first action moved the PP while urllib still reported an error for it
+        # (VC 2026-09-23), so each attempt is followed by a pcp read.
         for action, fields in PCP_ATTEMPTS:
             try:
                 rws.post_form("/rw/rapid/tasks/%s/pcp" % task, fields(), {"action": action})
-                return action
+                errors.append("%s: accepted" % action)
             except RwsError as exc:
                 errors.append("%s: %s" % (action, exc))
+            if pcp(rws, task)[1] == ROUTINE_NAME:
+                return action
         return None
 
     try:
@@ -740,12 +745,12 @@ def cmd_run(rws, log, task):
     except RwsError as exc:
         log.failed("run", mastership_explain(exc))
         return False
+    log.detail("\n".join(errors))
     if rout != ROUTINE_NAME:
-        log.detail("\n".join(errors))
         log.failed("run", "could not set PP to %s over RWS (PP is at %s/%s) - "
                           "use the pendant: Debug -> PP to Routine" % (ROUTINE_NAME, mod, rout))
         return False
-    log.info("run", "PP set to %s/%s (pcp action '%s')" % (mod, rout, used))
+    log.info("run", "PP verified at %s/%s (set by pcp action '%s')" % (mod, rout, used))
     try:
         fields = dict(START_FIELDS, cycle="once")
         rws.post_form("/rw/rapid/execution", fields, {"action": "start"})
