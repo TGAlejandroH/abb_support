@@ -38,10 +38,38 @@ MODULE TG_Main
         ENDWHILE
     ENDPROC
 
+    PROC TG_VisionOnce()
+        ! Production Manager entry point (socket_start_trigger_hmi_plan_v1.md,
+        ! S1 and phase R1). PM dispatches a TG part -> the thin per-part
+        ! wrapper in TG_Parts.mod stamps nTG_PartNo and calls this -> we
+        ! serve exactly ONE HMI session and RETURN, so PM can run
+        ! EE_POST_PART, count the part and report doJobComplete.
+        !
+        ! The ONLY difference from the standalone entry (main) is the loop:
+        ! identical cycle, served once. Deliberately absent: any indexing or
+        ! pre-positioning. Under PM the station choreography belongs to the
+        ! part's partadv (plan S10) and doing it here would fight the engine.
+        !
+        ! On a Production Manager cell the customer's program already owns
+        ! main, so this module's standalone main cannot be loaded as-is there
+        ! (the ProjectMonarch VC bench renames it tgs_main locally).
+        TPWrite "TG: vision cycle started, part "\Num:=nTG_PartNo;
+        tg_module_loaded:=FALSE;
+        ! Same clean-socket precondition the standalone main starts from.
+        TG_SocketDisc;
+        tgMainCycle;
+        TPWrite "TG: vision cycle finished - returning to Production Manager";
+    ENDPROC
+
     LOCAL PROC tgMainCycle()
         ! One HMI session: connect, serve one program selection, disconnect.
         ! Mirrors TGMAINKL: prog-sel -> file transfer -> run the .tgs program.
         TG_SocketCom;
+        ! Socket-based start trigger (plan S12): the first robot->HMI message
+        ! of the cycle, carrying the cycle counter and the part number. Sent
+        ! on BOTH paths - standalone bench and PM part - so the wire has one
+        ! shape and the HMI needs no mode flag to read it.
+        TG_SendStart;
         TG_ReqProgSel;
         IF nTG_ProgSel=1 THEN
             TG_ReqFileTransfer;

@@ -33,6 +33,35 @@ MODULE TG_Comms(SYSMODULE)
     PERS string stTG_ServerIP:="127.0.0.1";
     PERS num nTG_Port:=2000;
 
+    ! ------------------------------------------------------------------
+    ! Socket-based start trigger
+    ! (TGuideWeldingHMI/docs/socket_start_trigger_hmi_plan_v1.md).
+    !
+    ! nTG_CycleSeq is bumped ONCE per real armed cycle and is PERS so it
+    ! survives restarts. It is NOT the start signal - under Production
+    ! Manager the listener only exists while a TG part is running, so the
+    ! server being up IS the arming evidence. The counter's only job is to
+    ! let the HMI tell a genuine new cycle from a replay of the one it just
+    ! serviced (plan S9: HMI fires on >, ignores only ==, treats < as a
+    ! controller-side counter reset).
+    PERS num nTG_CycleSeq:=0;
+
+    ! Stamped by the thin per-part wrapper that Production Manager
+    ! dispatches (plan S-C, TG_Parts.mod) - the dispatched routine IS the
+    ! part, so no giJobSel read and no GAP_CURRENT_PART semantics are
+    ! needed. 0 = the standalone bench wrapper, i.e. no part identity.
+    PERS num nTG_PartNo:=0;
+
+    ! The station PM dispatched the part for (partdata field 4), stamped by
+    ! the same wrapper. Sent so the HMI can refuse a project whose .tgs
+    ! work_zone stamp names a different station (plan V-17: before
+    ! TG_ActMechUnit, a station-1 program run on a station-2 dispatch
+    ! activated the station on the OPERATOR's side). work_zone 0 = any
+    ! station, no refusal (plan Q-27). PM's partdata is the authority on
+    ! which station was dispatched; the HMI's id->project map must not be the
+    ! only check. 0 = unknown (bench wrapper).
+    PERS num nTG_PartStn:=0;
+
     ! Settle time (s) applied after WaitRob and before every reported pose.
     ! VC measurements (findings doc): WaitRob \InPos alone left up to ~2 mm
     ! of residual convergence; 0.2 s reaches full settle (and matches the
@@ -474,6 +503,28 @@ MODULE TG_Comms(SYSMODULE)
         SocketClose tg_client_socket;
         WaitTime 2;
         TPWrite "TG: socket disconnected";
+    ENDPROC
+
+    PROC TG_SendStart()
+        ! First robot->HMI message of every cycle (plan S12):
+        !
+        !     START <seq> <partNo> <station>
+        !
+        ! (S12 grammar: START <seq> [<workId> [<zone>]]; trailing fields are
+        ! optional, so a reader that only knows <seq> <partNo> still works.)
+        !
+        ! Sent through tgSendAck, so it is an ordinary robot->HMI payload on
+        ! the EXISTING lockstep - no new framing, no new ack rule. The HMI
+        ! tells it apart from the program-id prompt by its first token, which
+        ! is why no prompt anywhere in this file may begin with "START".
+        !
+        ! The counter is bumped here, once, immediately after the HMI is
+        ! accepted - so a cycle that never gets a client never burns a
+        ! number, and a replay of an already-served cycle carries the old
+        ! one (plan S9).
+        nTG_CycleSeq:=nTG_CycleSeq+1;
+        tgSendAck "START "+NumToStr(nTG_CycleSeq,0)+" "+NumToStr(nTG_PartNo,0)+" "+NumToStr(nTG_PartStn,0);
+        TPWrite "TG: START sent, seq="\Num:=nTG_CycleSeq;
     ENDPROC
 
 

@@ -1,0 +1,7 @@
+# Bench run artefacts - regenerated on every VC run, never committed
+*.log
+*.err
+.socket_start_stub_state.json
+# Modules extracted from .tgs projects for a run (project data, not tooling)
+tgs_run/
+tgs_coord/
