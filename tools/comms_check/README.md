@@ -18,13 +18,18 @@ used automatically when present.
 
 `python comms_probe.cmd` is wrong in both shells: it feeds a batch file to Python.
 
-Status 2026-09-23, all on the RobotStudio VC `4600-803651_Virtual` (RW 6.15.08):
-the PC side passed every step and every failure path, and the section 6 bench sequence
-ran end to end: `TG_SocketProbe.mod` loaded clean, a run with the default bind IP (not a
-VC address) hit the SETUP ERROR path and stopped by itself, `setip 127.0.0.1` then `run`
-gave `echo OK` and a clean `TG_BYE`, `unload` and `restore` put Production Manager back.
-The controller side is therefore proven; tomorrow tests the network and the option, not
-the code.
+**Status.**
+- 2026-09-23, RobotStudio VC `4600-803651_Virtual` (RW 6.15.08): the PC side passed every
+  step and every failure path, and the section 6 bench sequence ran end to end, including
+  the wrong-bind-IP SETUP ERROR path.
+- 2026-09-24, **first real cell** (IRC5 `4600-804589`, RW 6.16.02, MONARC): all four
+  steps passed. ping, the RWS checklist with the write round trip, upload and the socket
+  echo, first through the service port (RWS) and then through the WAN port (everything).
+  616-1 read PRESENT from the live option list and the module loaded first time. Socket
+  round trip on the real controller was 250-375 ms, which is RAPID scan time inside the
+  probe's loop, not the network (ping was 1-2 ms). Two operational lessons from
+  that day are in sections 3 and 7: keep the enabling device pressed, and expect the RWS
+  PERS write to be refused in MANUAL.
 
 What a full pass proves: the laptop reaches the controller (ping), RWS answers with
 our credentials and lets us read state and write files (the production `.tgs`
@@ -132,6 +137,13 @@ waits at most 90 s per connection and then stops by itself.
 Do NOT touch the program pointer of the customer's `main`; PP to Routine is enough,
 and when the probe ends execution simply stops.
 
+**Keep the enabling device pressed until the pendant prints `TG PROBE: done`.** Releasing
+it is a guard stop: RAPID stops wherever it is, and if that is inside `SocketAccept` the
+listener stays open in the controller's TCP stack. The PC then reports
+`connected, but no answer` and keeps retrying; nothing is broken. Restart the routine
+(PP to Routine, Start) and the close-before-create at its top clears the old listener.
+Seen on the real cell 2026-09-24.
+
 ### Step 5 - the socket test
 
     python comms_probe.py --ip <IP> socket
@@ -179,6 +191,8 @@ when the option list says 616-1 is absent (`--force-socket` overrides).
 | rws-options 616-1 ABSENT | Sockets impossible until ABB installs the option (licence + Installation Manager rebuild). | RWS results are still the deliverable of the day. Feasibility report B1 / Q5 stand. |
 | module load refused, log names Socket* instructions | Same as above, confirmed on the controller itself. | |
 | bind SETUP ERROR | `stTG_ProbeIP` is not the controller's IP on that port. | Fix the PERS, start again. |
+| socket WARN `connected, but no answer` repeating | The routine is stopped (enabling device released, guard stop) with its listener left open, or it is just restarting. | Restart the routine and keep the enabling device pressed; the PC keeps retrying for the whole `--wait`. |
+| setip HTTP 403 | RWS PERS writes need RAPID mastership; in MANUAL the FlexPendant holds it. | Edit `stTG_ProbeIP` on the pendant (Program Data), or edit the file and reload the module. |
 | socket FAIL with routine listening | Something between the laptop and the controller blocks TCP 2000 (customer switch/firewall), or the laptop connects to a different IP than the one bound. | Compare `--ip` with `stTG_ProbeIP`; try the service port. |
 | all PASS | Communications are done. The production stack needs only the 616-1 socket library it was built on. | |
 
@@ -238,3 +252,12 @@ device and it does not need mastership.
   works on a virtual controller.
 - RAPID module and routine names share one namespace, so the module is
   `TG_SocketProbe_Mod` and the routine `TG_SocketProbe`. Source is ASCII only.
+- RWS fileservice writes need no mastership and work in MANUAL. RWS RAPID symbol writes
+  (`setip`) do need it, and in MANUAL the FlexPendant holds it: HTTP 403 on the real cell
+  2026-09-24. Hence the pendant edit as the primary way to change the bind IP on site.
+- A routine stopped inside `SocketAccept` leaves its listener open; a client connects and
+  gets no answer, and when the routine restarts the pending connection is closed with no
+  data. `socket` treats both as "not running yet" and retries until `--wait` expires.
+- Real IRC5 round trip through this probe: 250-375 ms, dominated by RAPID scan and the
+  TPWrite calls in the loop, with a 1-2 ms ping. The production request loop has
+  the same shape, so expect that order of magnitude per exchange, as on FANUC.

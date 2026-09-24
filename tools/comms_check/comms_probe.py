@@ -579,19 +579,25 @@ def step_socket(args, log, wait, quit_after=True):
         try:
             with sock:
                 reply, rtt = _exchange(sock, msg)
-            break
         except (OSError, socket.timeout) as exc:
-            # Real-cell finding 2026-09-24: a routine stopped inside SocketAccept
-            # leaves its listener open, so the connect succeeds and nothing answers.
-            stale += 1
-            log.warn("socket", "connected, but no answer within 10 s (%s) - stale listener from a "
-                               "stopped routine? retrying until the routine is really running" % exc)
-            if time.time() >= deadline:
-                log.failed("socket", "gave up after %d s: %d accepted connection(s) never answered. "
-                                     "Restart TG_SocketProbe on the pendant and keep the enabling "
-                                     "device pressed" % (wait, stale))
-                return False
-            time.sleep(2.0)
+            reason = "no answer within 10 s (%s)" % exc
+        else:
+            if reply:
+                break
+            reason = "the controller closed the connection without answering"
+        # Real-cell finding 2026-09-24: a routine stopped inside SocketAccept leaves
+        # its listener open, so the connect succeeds and nothing answers; when the
+        # routine restarts, SocketClose drops that listener and a pending connection
+        # is closed with no data. Both mean "not really running yet": keep trying.
+        stale += 1
+        log.warn("socket", "connected, but %s - a listener left by a stopped routine, or the "
+                           "routine restarting; retrying until it really answers" % reason)
+        if time.time() >= deadline:
+            log.failed("socket", "gave up after %d s: %d accepted connection(s) never answered. "
+                                 "Restart TG_SocketProbe on the pendant and keep the enabling "
+                                 "device pressed" % (wait, stale))
+            return False
+        time.sleep(2.0)
     log.detail("sent %r, got %r" % (msg, reply))
     if reply != "TG_ECHO " + msg:
         log.failed("socket", "unexpected reply %r (expected %r)" % (reply, "TG_ECHO " + msg))
