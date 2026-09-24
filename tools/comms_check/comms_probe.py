@@ -557,21 +557,41 @@ def _exchange(sock, text, timeout=10.0):
 def step_socket(args, log, wait, quit_after=True):
     log.say("socket: connecting to %s:%d, retrying for up to %d s. If TG_SocketProbe is not "
             "running yet, start it on the pendant now." % (args.ip, args.socket_port, wait))
-    sock, attempts, last = _connect(args.ip, args.socket_port, time.time() + wait)
-    if sock is None:
-        log.failed("socket", "no listener on %s:%d after %d s / %d attempt%s (last error: %s). "
-                             "TG_SocketProbe not running, %s is not the controller's own IP, "
-                             "or 616-1 is missing"
-                   % (args.ip, args.socket_port, wait, attempts, "" if attempts == 1 else "s",
-                      last, IP_SYMBOL))
-        return False
-    msg = "TG_PING " + _dt.datetime.now().strftime("%H:%M:%S")
-    try:
-        with sock:
-            reply, rtt = _exchange(sock, msg)
-    except (OSError, socket.timeout) as exc:
-        log.failed("socket", "connected, but the exchange failed: %s" % exc)
-        return False
+    deadline = time.time() + wait
+    attempts = 0
+    stale = 0
+    while True:
+        sock, tries, last = _connect(args.ip, args.socket_port, deadline)
+        attempts += tries
+        if sock is None:
+            extra = ""
+            if stale:
+                extra = (" %d connection(s) were accepted but never answered: a listener left "
+                         "open by a STOPPED routine (guard stop / enabling device released). "
+                         "Restart TG_SocketProbe and keep the enabling device pressed." % stale)
+            log.failed("socket", "no working listener on %s:%d after %d s / %d attempt%s (last: %s). "
+                                 "TG_SocketProbe not running, %s is not the controller's own IP, "
+                                 "or 616-1 is missing.%s"
+                       % (args.ip, args.socket_port, wait, attempts, "" if attempts == 1 else "s",
+                          last, IP_SYMBOL, extra))
+            return False
+        msg = "TG_PING " + _dt.datetime.now().strftime("%H:%M:%S")
+        try:
+            with sock:
+                reply, rtt = _exchange(sock, msg)
+            break
+        except (OSError, socket.timeout) as exc:
+            # Real-cell finding 2026-09-24: a routine stopped inside SocketAccept
+            # leaves its listener open, so the connect succeeds and nothing answers.
+            stale += 1
+            log.warn("socket", "connected, but no answer within 10 s (%s) - stale listener from a "
+                               "stopped routine? retrying until the routine is really running" % exc)
+            if time.time() >= deadline:
+                log.failed("socket", "gave up after %d s: %d accepted connection(s) never answered. "
+                                     "Restart TG_SocketProbe on the pendant and keep the enabling "
+                                     "device pressed" % (wait, stale))
+                return False
+            time.sleep(2.0)
     log.detail("sent %r, got %r" % (msg, reply))
     if reply != "TG_ECHO " + msg:
         log.failed("socket", "unexpected reply %r (expected %r)" % (reply, "TG_ECHO " + msg))
