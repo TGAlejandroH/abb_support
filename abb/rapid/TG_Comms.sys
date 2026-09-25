@@ -42,6 +42,19 @@ MODULE TG_Comms(SYSMODULE)
     ! all, instead of misreading START as the program-id prompt.
     PERS num nTG_HandshakePort:=2001;
 
+    ! Opening a listener (socket start latency item 1, 2026-09-25). A port
+    ! that is not free yet is retried every TG_LISTEN_RETRY_S, up to
+    ! TG_LISTEN_TRIES times (3 s - longer than the blind 2 s wait this
+    ! replaced at the start of every part), then a last attempt lets the
+    ! socket error through as before. Every failed attempt leaves a 41571
+    ! "address and port already in use" entry in the event log even though
+    ! it is handled (VC-measured), hence 12 x 0.25 s rather than 30 x 0.1 s.
+    ! nTG_ListenRetries: retries the last listener open needed, 0 = the port
+    ! was free (diagnostics only).
+    PERS num nTG_ListenRetries:=0;
+    LOCAL CONST num TG_LISTEN_TRIES:=12;
+    LOCAL CONST num TG_LISTEN_RETRY_S:=0.25;
+
     ! ------------------------------------------------------------------
     ! Socket-based start trigger
     ! (TGuideWeldingHMI/docs/socket_start_trigger_hmi_plan_v1.md).
@@ -52,7 +65,7 @@ MODULE TG_Comms(SYSMODULE)
     ! server being up IS the arming evidence. The counter's only job is to
     ! let the HMI tell a genuine new cycle from a replay of the one it just
     ! serviced (plan S9: HMI fires on >, ignores only ==, treats < as a
-    ! controller-side counter reset).
+    ! controller-side counter reset). Wraps to 1 after 8000000 (TG_SendStart).
     PERS num nTG_CycleSeq:=0;
 
     ! Stamped by the thin per-part wrapper that Production Manager
@@ -483,15 +496,61 @@ MODULE TG_Comms(SYSMODULE)
     ! Socket lifecycle (FANUC: SOCKET_COM / SOCKET_DISC)
     !===================================================================
 
-    PROC TG_SocketCom()
-        ! FANUC: SOCKET_COM - (re)start the server and wait for the HMI client.
-        ! SocketClose is safe on sockets that were never opened (RoboDK driver
-        ! uses the same close-before-create pattern on RW5/6).
+    LOCAL FUNC bool tgTryOpenListener(num nPort)
+        ! One attempt at a fresh listener on nPort. SocketClose is safe on
+        ! sockets that were never opened (RoboDK driver uses the same
+        ! close-before-create pattern on RW5/6). FALSE when any step failed -
+        ! typically the port is not free yet - with the half-built socket
+        ! closed, so the next attempt starts from nothing.
         SocketClose tg_server_socket;
         SocketClose tg_client_socket;
         SocketCreate tg_server_socket;
-        SocketBind tg_server_socket,stTG_ServerIP,nTG_Port;
+        SocketBind tg_server_socket,stTG_ServerIP,nPort;
         SocketListen tg_server_socket;
+        RETURN TRUE;
+    ERROR
+        SocketClose tg_server_socket;
+        RETURN FALSE;
+    ENDFUNC
+
+    LOCAL PROC tgOpenListener(num nPort)
+        ! Open the listener on nPort at once; retry only a port that is not
+        ! free yet (socket start latency item 1). Replaces a blind 2 s wait
+        ! at the start of every part: the previous part already ended with
+        ! TG_SocketDisc's wait, and an aborted part (tgCycleAbort, no wait)
+        ! is followed by Production Manager's abort hooks and the next index
+        ! before any port is bound again - so the port is normally free and
+        ! this costs nothing. Out of tries: one last attempt WITHOUT the
+        ! catch, so the socket error reaches the caller exactly as it did
+        ! before the retry existed (tgMainCycle abandons the cycle).
+        ! The ERROR handler below is what carries it there: an error raised
+        ! in a routine WITHOUT a handler goes to the system error handler and
+        ! stops the task (40228, VC-measured), it does not reach the caller.
+        VAR num nTry:=0;
+        WHILE NOT tgTryOpenListener(nPort) DO
+            Incr nTry;
+            IF nTry>=TG_LISTEN_TRIES THEN
+                nTG_ListenRetries:=nTry;
+                ErrWrite \W,"TG: listener port busy","Port "+NumToStr(nPort,0)+" still busy after "+NumToStr(nTry,0)+" attempts - last attempt.";
+                SocketClose tg_server_socket;
+                SocketClose tg_client_socket;
+                SocketCreate tg_server_socket;
+                SocketBind tg_server_socket,stTG_ServerIP,nPort;
+                SocketListen tg_server_socket;
+                RETURN;
+            ENDIF
+            IF nTry=1 TPWrite "TG: port "+NumToStr(nPort,0)+" busy - retrying";
+            WaitTime TG_LISTEN_RETRY_S;
+        ENDWHILE
+        nTG_ListenRetries:=nTry;
+        IF nTry>0 ErrWrite \I,"TG: listener port was busy","Port "+NumToStr(nPort,0)+" opened after "+NumToStr(nTry,0)+" retries.";
+    ERROR
+        RAISE;
+    ENDPROC
+
+    PROC TG_SocketCom()
+        ! FANUC: SOCKET_COM - (re)start the server and wait for the HMI client.
+        tgOpenListener nTG_Port;
         TPWrite "TG: waiting for HMI on port "\Num:=nTG_Port;
         SocketAccept tg_server_socket,tg_client_socket\ClientAddress:=tg_client_ip,\Time:=WAIT_MAX;
         TPWrite "TG: HMI connected: "+tg_client_ip;
@@ -529,12 +588,10 @@ MODULE TG_Comms(SYSMODULE)
         ! handshake port and wait for the HMI. The HMI's connect loop targets
         ! THIS port, so the accepted connection is the start trigger (plan
         ! S1). Same socket variables as TG_SocketCom - the handshake and the
-        ! run never overlap - and the same reconnect idiom.
-        SocketClose tg_server_socket;
-        SocketClose tg_client_socket;
-        SocketCreate tg_server_socket;
-        SocketBind tg_server_socket,stTG_ServerIP,nTG_HandshakePort;
-        SocketListen tg_server_socket;
+        ! run never overlap - and the same reconnect idiom. This is the first
+        ! listener of every part, and since 2026-09-25 nothing waits before
+        ! it: tgOpenListener retries the port if it is not free yet.
+        tgOpenListener nTG_HandshakePort;
         TPWrite "TG: waiting for HMI handshake on port "\Num:=nTG_HandshakePort;
         SocketAccept tg_server_socket,tg_client_socket\ClientAddress:=tg_client_ip,\Time:=WAIT_MAX;
         TPWrite "TG: HMI handshake from: "+tg_client_ip;
@@ -578,6 +635,12 @@ MODULE TG_Comms(SYSMODULE)
         ! accepted - so a cycle that never gets a client never burns a
         ! number, and a replay of an already-served cycle carries the old
         ! one (plan S9).
+        ! Wrap the counter long before RAPID's num stops counting (integers are
+        ! exact only up to 8388608): past that, +1 would stop changing it, every
+        ! START would read as a replay and the HMI would refuse every part. The
+        ! HMI adopts the lower number as a counter reset (plan S9 "<", VC-proven
+        ! V-43). At one part a minute this wraps after about 15 years.
+        IF nTG_CycleSeq>=8000000 nTG_CycleSeq:=0;
         nTG_CycleSeq:=nTG_CycleSeq+1;
         tgSendAck "START "+NumToStr(nTG_CycleSeq,0)+" "+NumToStr(nTG_PartNo,0)+" "+NumToStr(nTG_PartStn,0);
         TPWrite "TG: START sent, seq="\Num:=nTG_CycleSeq;

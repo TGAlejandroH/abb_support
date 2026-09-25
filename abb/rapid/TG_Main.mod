@@ -55,8 +55,13 @@ MODULE TG_Main
         ! (the ProjectMonarch VC bench renames it tgs_main locally).
         TPWrite "TG: vision cycle started, part "\Num:=nTG_PartNo;
         tg_module_loaded:=FALSE;
-        ! Same clean-socket precondition the standalone main starts from.
-        TG_SocketDisc;
+        ! No TG_SocketDisc here since 2026-09-25 (socket start latency item
+        ! 1): its 2 s wait sat between the operator's START and the first
+        ! motion on every part. The clean-socket precondition still holds -
+        ! the handshake's listener open closes both sockets first and retries
+        ! a port that is not free yet (tgOpenListener, TG_Comms) - and the
+        ! previous part already ended with TG_SocketDisc and its wait. The
+        ! standalone main keeps its TG_SocketDisc: it runs once, not per part.
         tgMainCycle;
         TPWrite "TG: vision cycle finished - returning to Production Manager";
     ENDPROC
