@@ -38,6 +38,12 @@ Usage:
   done (V-44).
 --drop-in-handshake: close the handshake connection with a TCP RST before answering the
   verdict, to record what the controller does with a client that vanishes mid-handshake (V-47).
+--park-and-release: answer the verdict 1, then do NOT serve the run - the robot parks at
+  TG_SocketCom's SocketAccept on the run port - and after a few seconds end that cycle the way
+  the HMI's ReleaseParkedRun does: connect on 2000, take "Give me the program ID", answer 0 (an
+  id TG_ReqProgSel does not know -> "unknown program ID - ending cycle"), read to end-of-file.
+  Proves the RAPID side of the release (socket plan V-58); the HMI's client side is the
+  handshake harness `parked` scenario.
 """
 
 import json
@@ -50,7 +56,7 @@ import struct
 import sys
 import time
 
-from abb_server import ACK, AbbTgsHmi, fmt_real
+from abb_server import ACK, AbbTgsHmi, ConnectionClosedError, fmt_real
 from rws_session import RwsSession
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -130,11 +136,12 @@ def save_last_seq(seq):
 
 class SocketStartRun(AbbTgsHmi):
     def __init__(self, tgs, abort_at_capture=False, refuse_part=None,
-                 probe_run_port=False, drop_in_handshake=False):
+                 probe_run_port=False, drop_in_handshake=False, park_and_release=False):
         super().__init__("127.0.0.1", 2000, program_selection=1, verbose=True,
                          rws=RwsSession(URL))
         self.probe_run_port = probe_run_port
         self.drop_in_handshake = drop_in_handshake
+        self.park_and_release = park_and_release
         self.prog_name, blob, self.project_zone, self.weld_frames, self.station_agnostic = tgs
         os.makedirs(RUN_DIR, exist_ok=True)
         with open(os.path.join(RUN_DIR, self.prog_name + ".mod"), "wb") as fh:
@@ -156,6 +163,40 @@ class SocketStartRun(AbbTgsHmi):
 
     def _log(self, msg):
         print("[RUN %s] %s" % (ts(), msg), flush=True)
+
+    # -- V-58: the release of a parked run (the HMI's ReleaseParkedRun, byte for byte) ----
+
+    PARK_SECONDS = 4.0
+
+    def serve_cycle(self):
+        if not self.park_and_release:
+            return super().serve_cycle()
+        self.request_log = []
+        self.last_start = self.handshake()
+        if self.last_start["verdict"] != 1:
+            self._log("handshake: refused - the robot ends the part, no run this cycle")
+            return
+        self._log("V-58: verdict 1 sent and NOT serving the run - the robot now parks at "
+                  "TG_SocketCom's SocketAccept on port %d; waiting %.0f s" % (self.port, self.PARK_SECONDS))
+        time.sleep(self.PARK_SECONDS)
+        t0 = time.monotonic()
+        self.connect(retry_seconds=10.0)
+        prompt = self._recv()
+        self._log("  robot prompts %r" % prompt)
+        if "program ID" not in prompt:
+            self._log("  !!! V-58 FAIL: expected the program-id prompt")
+        self.sock.sendall(b"0")
+        self._log("  hmi   -> '0' (an id TG_ReqProgSel does not know)")
+        try:
+            trailing = self._recv()
+            self._log("  !!! unexpected data after the reply: %r" % trailing)
+        except ConnectionClosedError:
+            self._log("  robot closed the connection %.2f s after the connect - the cycle ended "
+                      "gracefully (TPWrite 'TG: unknown program ID - ending cycle', TG_SocketDisc)"
+                      % (time.monotonic() - t0))
+        finally:
+            self.close()
+        self.request_log.append("release")
 
     # -- the connect loop IS the arming (S1), now on the handshake port (S14) ----
     def handshake_connect(self, retry_seconds=None):
@@ -261,6 +302,7 @@ def main(argv):
     refuse_part = argv[argv.index("--refuse-part") + 1] if "--refuse-part" in argv else None
     probe_run_port = "--probe-run-port" in argv
     drop_in_handshake = "--drop-in-handshake" in argv
+    park_and_release = "--park-and-release" in argv
     if "--last-seq" in argv:
         save_last_seq(int(argv[argv.index("--last-seq") + 1]))
     tgs = load_tgs(tgs_path, mod)
@@ -273,7 +315,8 @@ def main(argv):
         % (os.path.basename(tgs_path), name, len(blob), (", HAND-EDITED module " + mod) if mod else "",
            zone, [w for w, _ in frames], agnostic))
     run = SocketStartRun(tgs, abort_at_capture=abort, refuse_part=refuse_part,
-                         probe_run_port=probe_run_port, drop_in_handshake=drop_in_handshake)
+                         probe_run_port=probe_run_port, drop_in_handshake=drop_in_handshake,
+                         park_and_release=park_and_release)
     log("part map %s; persisted last_seq = %d; abort-at-capture = %s"
         % (run.part_map, run.last_seq, abort))
     for i in range(cycles):
