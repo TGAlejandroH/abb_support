@@ -1,37 +1,43 @@
 """Socket-start run of a REAL .tgs program under Production Manager - VC in the loop.
 
-Design: TGuideWeldingHMI/docs/socket_start_trigger_hmi_plan_v1.md, Stage R
-residuals. The earlier stand-in (socket_start_stub.py) proved arming,
-dispatch, part id, return-to-PM and wire-loss recovery with NO program run.
-This one runs the program the HMI would run, so it also proves:
+Design: TGuideWeldingHMI/docs/socket_start_trigger_hmi_plan_v1.md, Stage R and Stage R2.
+The earlier stand-in (socket_start_stub.py) proved arming, dispatch, part id, return-to-PM and
+wire-loss recovery with NO program run. This one runs the program the HMI would run, so it
+also proves:
 
-  * id-10 file transfer + Load \\Dynamic + late-bound call INSIDE a
-    PM-dispatched part (every production cycle takes this path);
-  * the station guard: PM's dispatched station, carried in the START line,
-    checked against the .tgs work_zone stamp before anything runs (V-17);
-  * with --abort-at-capture, the R-5 residual: the HMI dies while the robot
-    is AWAY from home (at a capture pose), not parked at its safe pose.
+  * the two-port handshake (S14-S17, 2026-09-24): the connect loop targets the HANDSHAKE port;
+    the robot sends START, STNFRAME + pose, STNAXES and prompts for a verdict; both sides close;
+    only then does the robot listen on the protocol port and the run proceeds exactly as before
+    the handshake existed (abb_server.AbbTgsHmi.handshake / serve_cycle);
+  * the verdict (S15): part id -> project through the map, the S9 sequence rule, the station
+    guard against the .tgs work_zone stamp (0 = any station, Q-27) - all decided BEFORE the
+    verdict is answered, so a refusal ends the part gracefully on the robot side (S17);
+  * id-10 file transfer + Load \\Dynamic + late-bound call INSIDE a PM-dispatched part;
+  * with --abort-at-capture, the R-5 residual: the HMI dies while the robot is AWAY from home.
 
-What it reads from the .tgs is exactly what the real HMI reads: the program
-text embedded under ROBOT_PROGRAM/<name>.mod (transferred verbatim - the HMI
-does not render RAPID; curobo's AbbTranslator does, at planning time) and the
-project_meta work_zone stamp.
+What it reads from the .tgs is exactly what the real HMI reads: the program text embedded under
+ROBOT_PROGRAM/<name>.mod (transferred verbatim) and the project_meta work_zone stamp.
 
-Answers are the no-localization answers, so the robot runs the PLANNED path:
-  * weld frame  = the program's own nominal wobj oframe (TG_ReqWeldFrame
-    writes WObj.oframe := reply ABSOLUTE; identity would put the part at the
-    world origin and the program's own 100 mm guard would abort);
-  * cam frame   = identity (no motion uses wobjTG_Cam);
-  * touch-ups   = 0, 0, 0;
-  * dry run     = 1 - NOTE this is a NO-OP on ABB today: TG_DryRunOn in
-    TG_Cell.sys is an intentionally empty placeholder, so it does not inhibit
-    the arc. Harmless on the VC's simulated welder; see finding V-18.
+Answers are the no-localization answers, so the robot runs the PLANNED path (weld frame = the
+program's own nominal wobj oframe; cam frame = identity; touch-ups = 0; dry run = 1, which is a
+NO-OP on ABB today - finding V-18).
+
+Every handshake's STNFRAME / STNAXES is written to tgs_run/stnframe_seq<N>_stn<S>.json for the
+V-45 comparison against vc_probes/stn<S>_T2.json (probe_math.py).
 
 Usage:
     python tgs_socket_run.py [--cycles N] [--abort-at-capture] [--tgs PATH] [--mod PATH]
+                             [--refuse-part ID] [--last-seq N]
 
---mod replaces the .tgs's embedded program with a hand-edited module (same program name), for
-RAPID-only VC experiments that come before an exporter change. project_meta still comes from --tgs.
+--mod replaces the .tgs's embedded program with a hand-edited module (same program name).
+--refuse-part removes that part id from the map, so its START is refused (V-41).
+--last-seq overrides the persisted last_seq before the first cycle (V-43: set it to the next
+  START's number to see a "replay" refused, or far above it to see a "counter reset" adopted).
+--probe-run-port: during every handshake, before the verdict, try to connect to the RUN port
+  (2000). S14's promise is that it is refused: 2000 is not listening until the handshake is
+  done (V-44).
+--drop-in-handshake: close the handshake connection with a TCP RST before answering the
+  verdict, to record what the controller does with a client that vanishes mid-handshake (V-47).
 """
 
 import json
@@ -51,12 +57,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TGS_PATH = r"C:\Users\TG_Laptop08\Downloads\abb_coordinated_v5_regenerated - Copy.tgs"
 RUN_DIR = os.path.join(HERE, "tgs_run")
 STATE_FILE = os.path.join(HERE, ".socket_start_stub_state.json")   # shared with the stub
-URL = "http://127.0.0.1:80"
+URL = os.environ.get("TG_VC_RWS_URL", "http://127.0.0.1:80")   # the VC is not always on 80
 
-# Stand-in for the work-selection map (S11 / D47). Both ids resolve to the SAME
-# station-1 project on purpose: dispatching 9022 for station 2 must be REFUSED
-# by the station guard, not run.
-PART_MAP = {"9011": "TfCItn7EEr", "9022": "TfCItn7EEr"}
+# Stand-in for the work-selection map (S11 / S18): part id -> project (program name). The real
+# HMI loads the mapped project; this runner has ONE project loaded, so both VC test parts map
+# to it and --refuse-part takes one away to exercise the unknown-id refusal.
+VC_PART_IDS = ("9011", "9022")
 
 
 class HmiDied(Exception):
@@ -109,20 +115,6 @@ def load_tgs(path, mod_override=None):
     return name, blob, zone, frames, agnostic
 
 
-def parse_start(line):
-    toks = line.strip().split()
-    if not toks or toks[0] != "START":
-        return None
-    try:
-        seq = int(toks[1])
-    except (IndexError, ValueError):
-        log("MALFORMED START %r - ignoring" % line.strip())
-        return None
-    part = toks[2] if len(toks) > 2 else "0"
-    stn = int(toks[3]) if len(toks) > 3 and toks[3].lstrip("-").isdigit() else 0
-    return seq, part, stn
-
-
 def load_last_seq():
     try:
         with open(STATE_FILE) as fh:
@@ -137,9 +129,12 @@ def save_last_seq(seq):
 
 
 class SocketStartRun(AbbTgsHmi):
-    def __init__(self, tgs, abort_at_capture=False):
+    def __init__(self, tgs, abort_at_capture=False, refuse_part=None,
+                 probe_run_port=False, drop_in_handshake=False):
         super().__init__("127.0.0.1", 2000, program_selection=1, verbose=True,
                          rws=RwsSession(URL))
+        self.probe_run_port = probe_run_port
+        self.drop_in_handshake = drop_in_handshake
         self.prog_name, blob, self.project_zone, self.weld_frames, self.station_agnostic = tgs
         os.makedirs(RUN_DIR, exist_ok=True)
         with open(os.path.join(RUN_DIR, self.prog_name + ".mod"), "wb") as fh:
@@ -153,6 +148,8 @@ class SocketStartRun(AbbTgsHmi):
         # MONARC uses schedules 1, 2 and 4.
         self.weld_sched = 1
         self.abort_at_capture = abort_at_capture
+        refused = set(str(refuse_part).split(",")) if refuse_part else set()   # "9022" or "9011,9022"
+        self.part_map = {pid: self.prog_name for pid in VC_PART_IDS if pid not in refused}
         self.last_seq = load_last_seq()
         self._frame_idx = 0
         self.decision = None
@@ -160,58 +157,79 @@ class SocketStartRun(AbbTgsHmi):
     def _log(self, msg):
         print("[RUN %s] %s" % (ts(), msg), flush=True)
 
-    # -- connect loop replaces the green button (S1) ------------------------
-    def connect(self, retry_seconds=None):
+    # -- the connect loop IS the arming (S1), now on the handshake port (S14) ----
+    def handshake_connect(self, retry_seconds=None):
         refused = 0
         while True:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                s = socket.create_connection((self.host, self.port), timeout=2.0)
-                s.settimeout(120.0)            # longest silent stretch is the weld
+                s.settimeout(self.HANDSHAKE_TIMEOUT)
+                s.connect((self.host, self.handshake_port))
                 self.sock = s
-                log("CONNECTED - listener is up, PM dispatched a TG part (after %d refusals)" % refused)
+                log("HANDSHAKE CONNECTED on port %d - PM dispatched a TG part (after %d refusals)"
+                    % (self.handshake_port, refused))
                 return
             except OSError:
+                s.close()
+                self.sock = None
                 refused += 1
                 if refused % 20 == 1:
-                    log("  (robot not listening - %d refusals)" % refused)
+                    log("  (robot not listening on %d - %d refusals)" % (self.handshake_port, refused))
                 time.sleep(0.5)
 
-    # -- S12 lookahead + S9 + station guard -----------------------------------
-    def serve_program_selection(self):
+    # -- the verdict (S15): S9 sequence rule + map + station guard, all before answering ----
+    def decide_start(self, event):
         self._frame_idx = 0
-        first = self._recv()
-        log("  robot -> %r" % first)
-        start = parse_start(first)
-        if start is None:
-            log("  no START line -> legacy robot; this IS the program-id prompt")
-            self.sock.sendall(str(self.program_selection).encode())
-            return
-        self.sock.sendall(ACK)
-        seq, part, stn = start
+        seq, part, stn = event["seq"], event["part"], event["station"]
+        log("  START seq=%d part=%s station=%d | STNFRAME %s | STNAXES tilt=%s chuck=%s"
+            % (seq, part, stn, event["station_frame"], event["tilt_deg"], event["chuck_deg"]))
+        with open(os.path.join(RUN_DIR, "stnframe_seq%d_stn%d.json" % (seq, stn)), "w") as fh:
+            json.dump({"seq": seq, "part": part, "station": stn,
+                       "station_frame": event["station_frame"],
+                       "tilt_deg": event["tilt_deg"], "chuck_deg": event["chuck_deg"],
+                       "time": time.strftime("%Y-%m-%d %H:%M:%S")}, fh, indent=1)
+
+        if self.probe_run_port:
+            # V-44: the run port must be closed while the handshake is open.
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            probe.settimeout(0.5)
+            try:
+                probe.connect((self.host, self.port))
+                log("  !!! V-44 FAIL: port %d ACCEPTED a connection during the handshake" % self.port)
+            except OSError as exc:
+                log("  V-44: connect to port %d during the handshake -> refused (%s)" % (self.port, exc.__class__.__name__))
+            finally:
+                probe.close()
+        if self.drop_in_handshake:
+            log("  !!! V-47: dropping the handshake connection (TCP RST) before the verdict")
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            self.sock.close()
+            self.sock = None
+            raise HmiDied()
 
         sel, why = 1, "run"
         if seq == self.last_seq:
-            sel, why = 2, "REPLAY of cycle %d - not re-running it" % seq
+            sel, why = 0, "REPLAY of cycle %d - not re-running it (S9 ==)" % seq
         else:
             if seq < self.last_seq:
-                log("COUNTER RESET: robot %d < last %d - adopting and continuing" % (seq, self.last_seq))
-            project = PART_MAP.get(part)
+                log("COUNTER RESET: robot %d < last %d - adopting and continuing (S9 <)" % (seq, self.last_seq))
+            project = self.part_map.get(part)
             if project is None:
-                sel, why = 2, "unknown part id %s (S5: refuse, no latch)" % part
+                sel, why = 0, "unknown part id %s (S5: refuse, no latch)" % part
             elif project != self.prog_name:
-                sel, why = 2, "part %s maps to %s, not the loaded %s" % (part, project, self.prog_name)
+                sel, why = 0, "part %s maps to %s, not the loaded %s" % (part, project, self.prog_name)
             elif stn != self.project_zone and not self.station_agnostic:
-                sel, why = 2, ("STATION GUARD: PM dispatched part %s for STATION %d, but %s is "
+                sel, why = 0, ("STATION GUARD: PM dispatched part %s for STATION %d, but %s is "
                                "stamped work_zone %d - running it would drive the station on the "
                                "operator's side" % (part, stn, self.prog_name, self.project_zone))
             save_last_seq(seq)
             self.last_seq = seq
         if sel == 1 and self.station_agnostic:
-            why = "run (work_zone 0 = any station; station %d, TG_ActMechUnit picks the unit)" % stn
+            why = "run (work_zone 0 = any station; station %d, TG_ActMechUnit picked the unit)" % stn
         self.decision = (seq, part, stn, sel, why)
-        log(">>> START seq=%d part=%s station=%d -> %s" % (seq, part, stn,
-            ("RUN %s" % self.prog_name) if sel == 1 else ("REFUSED: " + why)))
-        self.do_send(str(sel))
+        log(">>> VERDICT for seq=%d part=%s station=%d -> %s" % (seq, part, stn,
+            ("RUN %s" % self.prog_name) if sel == 1 else ("REFUSE: " + why)))
+        return sel
 
     # -- no-localization answers --------------------------------------------
     def handle_weld_frame_req(self):
@@ -240,13 +258,24 @@ def main(argv):
     abort = "--abort-at-capture" in argv
     tgs_path = argv[argv.index("--tgs") + 1] if "--tgs" in argv else TGS_PATH
     mod = argv[argv.index("--mod") + 1] if "--mod" in argv else None
+    refuse_part = argv[argv.index("--refuse-part") + 1] if "--refuse-part" in argv else None
+    probe_run_port = "--probe-run-port" in argv
+    drop_in_handshake = "--drop-in-handshake" in argv
+    if "--last-seq" in argv:
+        save_last_seq(int(argv[argv.index("--last-seq") + 1]))
     tgs = load_tgs(tgs_path, mod)
+    if "--zone" in argv:
+        # Force the stamp the station guard reads (V-42 without a second project file).
+        forced = int(argv[argv.index("--zone") + 1])
+        tgs = (tgs[0], tgs[1], forced, tgs[3], forced == 0)
     name, blob, zone, frames, agnostic = tgs
     log("loaded %s: program %s (%d bytes%s), work_zone %d, weld frames %s, station-agnostic %s"
         % (os.path.basename(tgs_path), name, len(blob), (", HAND-EDITED module " + mod) if mod else "",
            zone, [w for w, _ in frames], agnostic))
-    run = SocketStartRun(tgs, abort_at_capture=abort)
-    log("persisted last_seq = %d; abort-at-capture = %s" % (run.last_seq, abort))
+    run = SocketStartRun(tgs, abort_at_capture=abort, refuse_part=refuse_part,
+                         probe_run_port=probe_run_port, drop_in_handshake=drop_in_handshake)
+    log("part map %s; persisted last_seq = %d; abort-at-capture = %s"
+        % (run.part_map, run.last_seq, abort))
     for i in range(cycles):
         try:
             run.serve_cycle()

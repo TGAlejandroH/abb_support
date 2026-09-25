@@ -33,6 +33,15 @@ MODULE TG_Comms(SYSMODULE)
     PERS string stTG_ServerIP:="127.0.0.1";
     PERS num nTG_Port:=2000;
 
+    ! Handshake port (socket_start_trigger_hmi_plan_v1.md S14, 2026-09-24).
+    ! Every cycle begins with a short HANDSHAKE connection on this port:
+    ! START, STNFRAME, STNAXES, then the HMI's verdict - closed before the
+    ! run connection is accepted on nTG_Port. Two ports so that nTG_Port is
+    ! not listening until the handshake succeeded: an early reconnect is
+    ! refused cleanly, and an HMI that skips the handshake cannot connect at
+    ! all, instead of misreading START as the program-id prompt.
+    PERS num nTG_HandshakePort:=2001;
+
     ! ------------------------------------------------------------------
     ! Socket-based start trigger
     ! (TGuideWeldingHMI/docs/socket_start_trigger_hmi_plan_v1.md).
@@ -452,6 +461,16 @@ MODULE TG_Comms(SYSMODULE)
     LOCAL PERS tooldata tTG_Scratch:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
     LOCAL PERS wobjdata wobjTG_Scratch:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
 
+    ! Station-frame probe work object for TG_SendStnFrame (2026-09-24, VC
+    ! finding V-40): the frame must be read through a work object whose
+    ! oframe is IDENTITY. wobjTG_WeldActStn's oframe is rewritten by every
+    ! served coordinated weld and persists across cycles, so a CRobT in it
+    ! returns the TCP in uframe*oframe - on the first station-1 handshake
+    ! after a station-2 run the two cancelled and the frame read as identity.
+    ! Nothing writes this object's frames; only its ufmec is set, to the unit
+    ! TG_ActMechUnit bound. Internal - never reference in .tgs programs.
+    LOCAL PERS wobjdata wobjTG_StnProbe:=[FALSE,FALSE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
+
     ! ------------------------------------------------------------------
     ! Socket state. Lifecycle owned by TG_Main via TG_SocketCom/TG_SocketDisc;
     ! .tgs programs must never touch these directly.
@@ -505,6 +524,43 @@ MODULE TG_Comms(SYSMODULE)
         TPWrite "TG: socket disconnected";
     ENDPROC
 
+    PROC TG_HandshakeCom()
+        ! Socket-start handshake (plan S14): (re)start a listener on the
+        ! handshake port and wait for the HMI. The HMI's connect loop targets
+        ! THIS port, so the accepted connection is the start trigger (plan
+        ! S1). Same socket variables as TG_SocketCom - the handshake and the
+        ! run never overlap - and the same reconnect idiom.
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        SocketCreate tg_server_socket;
+        SocketBind tg_server_socket,stTG_ServerIP,nTG_HandshakePort;
+        SocketListen tg_server_socket;
+        TPWrite "TG: waiting for HMI handshake on port "\Num:=nTG_HandshakePort;
+        SocketAccept tg_server_socket,tg_client_socket\ClientAddress:=tg_client_ip,\Time:=WAIT_MAX;
+        TPWrite "TG: HMI handshake from: "+tg_client_ip;
+    ERROR
+        IF ERRNO=ERR_SOCK_TIMEOUT THEN
+            ResetRetryCount;
+            RETRY;
+        ELSEIF ERRNO=ERR_SOCK_CLOSED THEN
+            SocketClose tg_server_socket;
+            SocketClose tg_client_socket;
+            WaitTime 2;
+            ResetRetryCount;
+            RETRY;
+        ENDIF
+    ENDPROC
+
+    PROC TG_HandshakeDisc()
+        ! End of the handshake: close the LISTENER first, then the client
+        ! (plan S14 ordering), so the HMI's end-of-file arrives only once the
+        ! handshake port is gone. No WaitTime: the run listens on a different
+        ! port, and this one is not rebound until the next cycle.
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        TPWrite "TG: handshake closed";
+    ENDPROC
+
     PROC TG_SendStart()
         ! First robot->HMI message of every cycle (plan S12):
         !
@@ -525,6 +581,52 @@ MODULE TG_Comms(SYSMODULE)
         nTG_CycleSeq:=nTG_CycleSeq+1;
         tgSendAck "START "+NumToStr(nTG_CycleSeq,0)+" "+NumToStr(nTG_PartNo,0)+" "+NumToStr(nTG_PartStn,0);
         TPWrite "TG: START sent, seq="\Num:=nTG_CycleSeq;
+    ENDPROC
+
+    PROC TG_SendStnFrame()
+        ! Handshake messages 2 and 3 (plan S16): the ACTIVE station's frame
+        ! in the robot base, as the controller itself resolves it, so the HMI
+        ! can run one .tgs on either station of a calibrated cell without a
+        ! frame file of its own. Computed exactly as the 2026-09-23 T2 probe
+        ! did (vc_probes/TG_UfmecProbe.mod + probe_math.py):
+        !     T_base_station = T_base_tcp * inv(T_station_tcp)
+        ! from two CRobT reads of the same tool at the same pose - one in
+        ! wobj0, one in a probe work object bound to the SAME unit as
+        ! wobjTG_WeldActStn, which TG_ActMechUnit must have bound to the
+        ! station at the robot BEFORE this is called. The probe object, not
+        ! wobjTG_WeldActStn itself: the served weld pose lives in that one's
+        ! oframe and persists across cycles (VC finding V-40, 2026-09-24).
+        ! The tool cancels out; tool0 keeps the reads independent of TG tool
+        ! data.
+        !
+        ! The station frame follows the positioner axes, so the third line
+        ! carries the external axis readings (tilt eax_b, chuck eax_c) the
+        ! frame was taken at; the HMI backs them out against the .tgs nominal
+        ! (plan H7). A deactivated unit reads 9E9 here (TG_RoboCal L12).
+        !
+        ! Wire shape: a header line, then the pose as a pose literal like
+        ! every other pose (plan 4.5) - two lines because a RAPID string is
+        ! at most 80 characters; then "STNAXES <tilt> <chuck>" on one line.
+        ! Every line goes through the ack lockstep.
+        VAR robtarget rtBase;
+        VAR robtarget rtStn;
+        VAR pose pBase;
+        VAR pose pStn;
+        VAR pose pFrame;
+        VAR jointtarget jtNow;
+        wobjTG_StnProbe.ufmec:=wobjTG_WeldActStn.ufmec;
+        rtBase:=CRobT(\Tool:=tool0 \WObj:=wobj0);
+        rtStn:=CRobT(\Tool:=tool0 \WObj:=wobjTG_StnProbe);
+        pBase.trans:=rtBase.trans;
+        pBase.rot:=rtBase.rot;
+        pStn.trans:=rtStn.trans;
+        pStn.rot:=rtStn.rot;
+        pFrame:=PoseMult(pBase,PoseInv(pStn));
+        tgSendAck "STNFRAME";
+        tgSendAck tgPoseToStr(pFrame);
+        jtNow:=CJointT();
+        tgSendAck "STNAXES "+NumToStr(jtNow.extax.eax_b,3)+" "+NumToStr(jtNow.extax.eax_c,3);
+        TPWrite "TG: station frame sent, ufmec "+wobjTG_WeldActStn.ufmec;
     ENDPROC
 
 
@@ -804,6 +906,33 @@ MODULE TG_Comms(SYSMODULE)
         ENDIF
         TPWrite "TG: program ID = "\Num:=nTG_ProgSel;
     ENDPROC
+
+    FUNC num TG_ReqVerdict()
+        ! Handshake message 4 (plan S15): the HMI's verdict for this part,
+        ! asked only after START, STNFRAME and STNAXES were acknowledged.
+        !   1 = run: the caller closes the handshake, accepts the run
+        !       connection on nTG_Port and serves the cycle exactly as it
+        !       did before the handshake existed.
+        !   anything else = refuse (plan S5/S17): the caller ends the part
+        !       without a program request.
+        ! The HMI answers only once it has mapped the part id, checked the
+        ! station stamp and loaded the project, so this prompt may wait a
+        ! while - WAIT_MAX, like every other receive. The prompt text must
+        ! never begin with "START".
+        VAR string reply;
+        VAR num nVerdict:=0;
+        VAR bool ok;
+        reply:=tgPromptRecv("Give me the verdict");
+        ok:=StrToVal(reply,nVerdict);
+        IF NOT ok THEN
+            nVerdict:=0;
+            TPWrite "TG ERROR: bad verdict:";
+            TPWrite reply;
+        ENDIF
+        IF nVerdict<>1 nVerdict:=0;
+        TPWrite "TG: verdict = "\Num:=nVerdict;
+        RETURN nVerdict;
+    ENDFUNC
 
     PROC TG_ReqEnd(\PERS tooldata Tool,\PERS wobjdata WObj)
         ! FANUC: R_E (HMI request id 100) - program end notification.

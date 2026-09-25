@@ -62,14 +62,37 @@ MODULE TG_Main
     ENDPROC
 
     LOCAL PROC tgMainCycle()
-        ! One HMI session: connect, serve one program selection, disconnect.
-        ! Mirrors TGMAINKL: prog-sel -> file transfer -> run the .tgs program.
-        TG_SocketCom;
-        ! Socket-based start trigger (plan S12): the first robot->HMI message
-        ! of the cycle, carrying the cycle counter and the part number. Sent
-        ! on BOTH paths - standalone bench and PM part - so the wire has one
-        ! shape and the HMI needs no mode flag to read it.
+        ! One HMI session: the start handshake, then connect, serve one
+        ! program selection, disconnect. Mirrors TGMAINKL: prog-sel -> file
+        ! transfer -> run the .tgs program.
+        VAR num nVerdict;
+        ! Socket-based start trigger, handshake connection (plan S14-S17,
+        ! 2026-09-24): START, the active station's frame, the HMI's verdict.
+        ! Its own port, closed BEFORE the run connection is accepted, so the
+        ! run below is byte-identical to the pre-handshake cycle and an HMI
+        ! that skips the handshake cannot connect at all. Sent on BOTH paths
+        ! - standalone bench and PM part - so the wire has one shape and the
+        ! HMI needs no mode flag to read it.
+        TG_HandshakeCom;
         TG_SendStart;
+        ! Bind wobjTG_WeldActStn to the station at the robot before its frame
+        ! is read. Under Production Manager the station is already active
+        ! (EE_PRE_PART), so this only binds; the .tgs program's own call
+        ! later in the run is then a no-op as well.
+        TG_ActMechUnit;
+        TG_SendStnFrame;
+        nVerdict:=TG_ReqVerdict();
+        TG_HandshakeDisc;
+        IF nVerdict<>1 THEN
+            ! Refused (plan S17): end the part gracefully - Production
+            ! Manager books it as completed and continues; the HMI shows the
+            ! reason, this leaves the trace on the pendant and in the event
+            ! log. No program is requested, nothing moves.
+            TPWrite "TG: part refused by HMI - ending cycle";
+            ErrWrite \W,"TG: part refused by the vision HMI","The HMI declined part "+NumToStr(nTG_PartNo,0)+" for station "+NumToStr(nTG_PartStn,0)+"."\RL2:="See the HMI screen for the reason. Nothing was welded.";
+            RETURN;
+        ENDIF
+        TG_SocketCom;
         TG_ReqProgSel;
         IF nTG_ProgSel=1 THEN
             TG_ReqFileTransfer;

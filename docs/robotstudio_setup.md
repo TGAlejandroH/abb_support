@@ -34,6 +34,13 @@ Notes:
   edit the PERS value to the controller's LAN IP (RAPID → TG_Comms →
   `stTG_ServerIP`), or change it from the FlexPendant (Program Data → string).
   Port lives in `nTG_Port` (default 2000).
+- Since 2026-09-24 every cycle begins with a short **handshake connection on
+  `nTG_HandshakePort` (default 2001)** — `START`, the active station's frame, the
+  HMI's verdict — and only then does the controller listen on 2000 for the run
+  (socket start plan S14–S17). A client that connects straight to 2000 is refused
+  until a handshake happened; `hmi_prototype/abb_server.py` and
+  `tgs_socket_run.py` do the handshake themselves. On a real IRC5 both ports
+  bind `stTG_ServerIP`; PC Interface covers both, no further option.
 
 ## 3. Run the smoke test
 
@@ -45,6 +52,14 @@ Robot side:
    ```
    TG: main started
    TG: socket disconnected
+   TG: waiting for HMI handshake on port 2001
+   ```
+   and, once the client has answered the verdict:
+   ```
+   TG: START sent, seq=1
+   TG: station frame sent, ufmec STN1
+   TG: verdict = 1
+   TG: handshake closed
    TG: waiting for HMI on port 2000
    ```
 

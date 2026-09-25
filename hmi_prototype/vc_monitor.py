@@ -27,7 +27,8 @@ import time
 
 from rws_session import RwsSession
 
-URL = "http://127.0.0.1:80"
+import os
+URL = os.environ.get("TG_VC_RWS_URL", "http://127.0.0.1:80")   # the VC is not always on 80
 MOVE_DEG = 2.0
 
 AX = re.compile(r'"(rax_\d|eax_[a-f])"\s*:\s*"?([-0-9.eE+]+)"?')

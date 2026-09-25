@@ -20,7 +20,7 @@ import urllib.parse
 from rws_session import RwsSession
 
 RAPID = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "abb", "rapid")
-URL = "http://127.0.0.1:80"
+URL = os.environ.get("TG_VC_RWS_URL", "http://127.0.0.1:80")   # the VC is not always on 80
 H = {"Content-Type": "application/x-www-form-urlencoded"}
 
 

@@ -306,9 +306,14 @@ class AbbTgsHmi:
     """Application-level request server / transport-level TCP client."""
 
     def __init__(self, host="127.0.0.1", port=2000, program_selection=1,
-                 verbose=True, vc_home_dir=None, rws=None):
+                 verbose=True, vc_home_dir=None, rws=None, handshake_port=2001):
         self.host = host
         self.port = port
+        # Socket-start handshake port (socket plan S14, 2026-09-24): every cycle begins
+        # with a short connection here (START, STNFRAME, STNAXES, verdict) before the
+        # robot listens on `port` for the run.
+        self.handshake_port = handshake_port
+        self.last_start = None
         self.program_selection = program_selection
         self.verbose = verbose
         self.sock = None
@@ -417,6 +422,75 @@ class AbbTgsHmi:
             self.sock.close()
             self.sock = None
             self._log("connection closed")
+
+    # -- socket-start handshake (socket plan S14-S17, 2026-09-24) ------------
+
+    HANDSHAKE_TIMEOUT = 30.0
+
+    def handshake_connect(self, retry_seconds=30.0):
+        """Connect to the handshake port, retrying while the robot is not listening."""
+        deadline = time.monotonic() + retry_seconds
+        while True:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.settimeout(self.HANDSHAKE_TIMEOUT)
+                s.connect((self.host, self.handshake_port))
+                self.sock = s
+                self._log(f"handshake: connected to {self.host}:{self.handshake_port}")
+                return
+            except OSError:
+                s.close()
+                self.sock = None
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.5)
+
+    def decide_start(self, event):
+        """Verdict for this part: 1 = run, anything else = refuse. The base client always
+        runs; SocketStartRun maps the part id and checks the station (plan S15)."""
+        return 1
+
+    def handshake(self):
+        """One handshake connection: START, STNFRAME + pose, STNAXES, then the verdict on
+        the robot's prompt, then wait for the robot to close (listener first, then the
+        client - plan S14) before anything reconnects. Returns the StartEvent dict."""
+        self.handshake_connect()
+        event = {"verdict": 0}
+        try:
+            start = self.do_receive()
+            toks = start.split()
+            if not toks or toks[0] != "START":
+                raise RuntimeError(f"handshake: expected START, got {start!r}")
+            event["seq"] = int(toks[1])
+            event["part"] = toks[2] if len(toks) > 2 else "0"
+            event["station"] = int(toks[3]) if len(toks) > 3 and toks[3].lstrip("-").isdigit() else 0
+            header = self.do_receive().strip()
+            if header != "STNFRAME":
+                raise RuntimeError(f"handshake: expected STNFRAME, got {header!r}")
+            event["station_frame"] = self.do_receive().strip()
+            event["station_frame_xyzwpr"] = pose_literal_to_xyzwpr(event["station_frame"])
+            axes = self.do_receive().split()
+            if not axes or axes[0] != "STNAXES":
+                raise RuntimeError(f"handshake: expected STNAXES, got {axes!r}")
+            event["tilt_deg"] = float(axes[1]) if len(axes) > 1 else None
+            event["chuck_deg"] = float(axes[2]) if len(axes) > 2 else None
+            event["verdict"] = int(self.decide_start(event))
+            prompt = self.do_send(str(event["verdict"]))
+            if "verdict" not in prompt:
+                self._log(f"WARNING: unexpected verdict prompt: {prompt!r}")
+            # The robot closes its listener, then this client; read until end-of-file so
+            # a reconnect (to any port) never races the close.
+            try:
+                trailing = self.sock.recv(RECV_MAX)
+                if trailing:
+                    self._log(f"handshake: unexpected trailing data {trailing!r}")
+                else:
+                    self._log("handshake: robot closed the connection")
+            except socket.timeout:
+                self._log("handshake: robot did not close within the timeout")
+            return event
+        finally:
+            self.close()
 
     def _recv(self):
         data = self.sock.recv(RECV_MAX)
@@ -628,10 +702,14 @@ class AbbTgsHmi:
     # -- main loop -----------------------------------------------------------
 
     def serve_cycle(self):
-        """One robot cycle: connect, program selection, serve requests until
-        the robot disconnects (which it does right after request 100)."""
-        self.connect()
+        """One robot cycle: the start handshake, then connect, program selection, serve
+        requests until the robot disconnects (which it does right after request 100)."""
         self.request_log = []
+        self.last_start = self.handshake()
+        if self.last_start["verdict"] != 1:
+            self._log("handshake: refused - the robot ends the part, no run this cycle")
+            return
+        self.connect()
         self._weld_param_calls = 0
         # One analytics "session" per cycle, like the real HMI (it opens a
         # weld session per run and inserts a row per successful weld).

@@ -15,7 +15,7 @@ import urllib.parse
 
 from rws_session import RwsSession
 
-URL = "http://127.0.0.1:80"
+URL = os.environ.get("TG_VC_RWS_URL", "http://127.0.0.1:80")   # the VC is not always on 80
 H = {"Content-Type": "application/x-www-form-urlencoded"}
 MODULE = "TG_UfmecProbe"
 RESULTS = ("stPrbStep", "stPrbUfmec", "nPrbStn", "pPrbS0", "pPrbS1", "pPrbW0", "pPrbW1")
