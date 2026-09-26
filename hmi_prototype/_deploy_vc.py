@@ -7,7 +7,8 @@ import os, re, time, urllib.parse
 from rws_session import RwsSession
 
 RAPID = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "abb", "rapid")
-MODULES = ["TG_Comms.sys", "TG_Cell.sys", "TG_Weld.sys", "TG_Main.mod", "TG_Parts.mod"]
+# TG_Touch.sys (touch-sense P2) after TG_Cell: it calls TG_Cell's touch macros.
+MODULES = ["TG_Comms.sys", "TG_Cell.sys", "TG_Touch.sys", "TG_Weld.sys", "TG_Main.mod", "TG_Parts.mod"]
 c = RwsSession("http://127.0.0.1:80")
 
 def post(path, fields, query=None):

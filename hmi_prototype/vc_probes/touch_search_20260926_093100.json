@@ -1,0 +1,696 @@
+{
+ "record": {
+  "S1 hit": {
+   "raw": {
+    "stTspStep": "\"S1 done\"",
+    "nTspFaceZ": "1372.5",
+    "nTspPauses": "0",
+    "nTspLastPause": "0",
+    "nTspSensorAfter": "0",
+    "bTspLiveAfter": "FALSE",
+    "bTspHitOK": "TRUE",
+    "pTspStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[0,-1,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspContactPart": "[[-42.8002,67.5742,92.2054],[0.491394,0.363382,0.791438,0.0105077],[0,-1,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspHit": "[[-42.8169,67.5417,92.2946],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterPart": "[[-42.6533,67.859,91.4229],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterW": "[[1738.92,-8.42749E-5,1371.65],[0.5,-1.96081E-8,0.866025,-4.50364E-9],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTspPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7623,
+     "10157",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The restart order was initiated by an action causing the UNDO handler to execute."
+    ],
+    [
+     7624,
+     "10133",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready with the execution of the UNDO handlers."
+    ],
+    [
+     7625,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7626,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TspHit by Default User."
+    ],
+    [
+     7627,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7628,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7629,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7630,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7631,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ]
+  },
+  "S2 miss, part placed, retry": {
+   "raw": {
+    "stTspStep": "\"S2 done\"",
+    "nTspFaceZ": "1372.5",
+    "nTspPauses": "1",
+    "nTspLastPause": "3",
+    "nTspSensorAfter": "0",
+    "bTspLiveAfter": "FALSE",
+    "bTspHitOK": "TRUE",
+    "pTspStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspContactPart": "[[-42.8002,67.5742,92.2054],[0.491394,0.363382,0.791438,0.0105077],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspHit": "[[-42.8169,67.5417,92.2946],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterPart": "[[-42.6533,67.859,91.4229],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterW": "[[1738.92,-8.42749E-5,1371.65],[0.5,-1.96081E-8,0.866025,-4.50364E-9],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTspPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7633,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7634,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TspMissRetry by Default User."
+    ],
+    [
+     7635,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7636,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7637,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7638,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7639,
+     "40574",
+     "Search Warning",
+     "Task: T_ROB1.Number of hits during search was 0. Before performing next search, make sure that TCP is moved back to the start position of the search path.Program ref: /TG_Touch/tgtSearch/SearchL/131."
+    ],
+    [
+     7640,
+     "80002",
+     "\\n TG: touch search found nothing\\n",
+     "\\n No contact within 150 mm; the robot is back at the start.\\n \\n Check the part and the wire, then Start to search again.\\n \\n \\n \\n \\n \\n"
+    ],
+    [
+     7641,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ],
+    [
+     7642,
+     "10136",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task has reached a stop instruction."
+    ],
+    [
+     7643,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7644,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7645,
+     "10156",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The originator is an external client."
+    ],
+    [
+     7646,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ],
+    [
+     7647,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ]
+   ]
+  },
+  "S3 welder not live, fixed": {
+   "raw": {
+    "stTspStep": "\"S3 done\"",
+    "nTspFaceZ": "1372.5",
+    "nTspPauses": "1",
+    "nTspLastPause": "2",
+    "nTspSensorAfter": "0",
+    "bTspLiveAfter": "FALSE",
+    "bTspHitOK": "TRUE",
+    "pTspStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspContactPart": "[[-42.8002,67.5742,92.2054],[0.491394,0.363382,0.791438,0.0105077],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspHit": "[[-42.8169,67.5417,92.2946],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterPart": "[[-42.6533,67.859,91.4229],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterW": "[[1738.92,-8.42749E-5,1371.65],[0.5,-1.96081E-8,0.866025,-4.50364E-9],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTspPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7648,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7649,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TspNotLive by Default User."
+    ],
+    [
+     7650,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7651,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7652,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7653,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7654,
+     "80002",
+     "\\n TG: touch sensing not live\\n",
+     "\\n The welder did not confirm touch sensing within 2.0 s.\\n \\n Check the welder and its touch mode, then Start to search again.\\n \\n \\n \\n \\n \\n"
+    ],
+    [
+     7655,
+     "10136",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task has reached a stop instruction."
+    ],
+    [
+     7656,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ],
+    [
+     7657,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7658,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7659,
+     "10156",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The originator is an external client."
+    ],
+    [
+     7660,
+     "50501",
+     "Short movements",
+     "One or more consecutive move instructions resulted in movements close to zero length.Task: T_ROB1.Program ref. /TG_Touch/TG_TouchSearch/MoveL/89."
+    ],
+    [
+     7661,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ],
+    [
+     7662,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ]
+   ]
+  },
+  "S4 signal not configured, fixed": {
+   "raw": {
+    "stTspStep": "\"S4 done\"",
+    "nTspFaceZ": "1372.5",
+    "nTspPauses": "1",
+    "nTspLastPause": "1",
+    "nTspSensorAfter": "0",
+    "bTspLiveAfter": "FALSE",
+    "bTspHitOK": "TRUE",
+    "pTspStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[0,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspContactPart": "[[-42.8002,67.5742,92.2054],[0.491394,0.363382,0.791438,0.0105077],[0,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspHit": "[[-42.8169,67.5417,92.2946],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterPart": "[[-42.6533,67.859,91.4229],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterW": "[[1738.92,-8.42749E-5,1371.65],[0.5,-1.96081E-8,0.866025,-4.50364E-9],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTspPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7663,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7664,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TspNoSignal by Default User."
+    ],
+    [
+     7665,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7666,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7667,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7668,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7669,
+     "40713",
+     "Alias Define Error",
+     "Task: T_ROB1.The signal in argument FromSignal: diTG_NoSuchSignal, must be defined in the I/O configuration and the signal in argument ToSignal: diTG_TouchAlias, must be declared in the RAPID program and not defined in t"
+    ],
+    [
+     7670,
+     "80002",
+     "\\n TG: touch signal not configured\\n",
+     "\\n TG_Cell names a touch signal this controller does not have.\\n \\n Fix stTG_TouchDI / stTG_TouchOnDO / stTG_TouchActiveDI, then Start.\\n \\n \\n \\n \\n \\n"
+    ],
+    [
+     7671,
+     "10136",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task has reached a stop instruction."
+    ],
+    [
+     7672,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ],
+    [
+     7673,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7674,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7675,
+     "10156",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The originator is an external client."
+    ],
+    [
+     7676,
+     "50501",
+     "Short movements",
+     "One or more consecutive move instructions resulted in movements close to zero length.Task: T_ROB1.Program ref. /TG_Touch/TG_TouchSearch/MoveL/89."
+    ],
+    [
+     7677,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ],
+    [
+     7678,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ]
+  },
+  "S5 touching at the start, cleared": {
+   "raw": {
+    "stTspStep": "\"S5 done\"",
+    "nTspFaceZ": "1372.5",
+    "nTspPauses": "1",
+    "nTspLastPause": "4",
+    "nTspSensorAfter": "0",
+    "bTspLiveAfter": "FALSE",
+    "bTspHitOK": "TRUE",
+    "pTspStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspContactPart": "[[-42.8002,67.5742,92.2054],[0.491394,0.363382,0.791438,0.0105077],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspHit": "[[-42.8169,67.5417,92.2946],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterPart": "[[-42.6533,67.859,91.4229],[0.491394,0.363382,0.791438,0.0105077],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTspAfterW": "[[1738.92,-8.42749E-5,1371.65],[0.5,-1.96081E-8,0.866025,-4.50364E-9],[-1,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTspPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7679,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7680,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TspAtStart by Default User."
+    ],
+    [
+     7681,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7682,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7683,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7684,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7685,
+     "40661",
+     "Search Error",
+     "Task: T_ROB1.The signal diTG_TouchAlias for the SearchX instruction is already set to the specified value (high or low) at the start of searching, or the I/O-device for the signal isn&apos;t up and running for the occasi"
+    ],
+    [
+     7686,
+     "80002",
+     "\\n TG: wire touching at search start\\n",
+     "\\n The contact signal was already high when the search began.\\n \\n Clear the wire from the part, then Start to search again.\\n \\n \\n \\n \\n \\n"
+    ],
+    [
+     7687,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ],
+    [
+     7688,
+     "10136",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task has reached a stop instruction."
+    ],
+    [
+     7689,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7690,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7691,
+     "10156",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The originator is an external client."
+    ],
+    [
+     7692,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ],
+    [
+     7693,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ]
+   ]
+  }
+ },
+ "verdicts": [
+  [
+   "S1 hit ran to completion",
+   true,
+   "step 'S1 done'"
+  ],
+  [
+   "S1 hit bTG_TouchHitOK set by the hit",
+   true,
+   "bTG_TouchHitOK True"
+  ],
+  [
+   "S1 hit rtTG_TouchHit (part frame) lands AT the face",
+   true,
+   "-0.096 mm inside the face (need -0.225..1.005)"
+  ],
+  [
+   "S1 hit hit ON the start -> contact line",
+   true,
+   "0.0001 mm off"
+  ],
+  [
+   "S1 hit NO return after the hit (D12)",
+   true,
+   "robot 0.94 mm from the hit, 50.85 mm from the start"
+  ],
+  [
+   "S1 hit sense voltage off after the search (D5)",
+   true,
+   "doTG_SimSensorOn 0.0, bTG_TouchLive False"
+  ],
+  [
+   "S1 hit paused 0 x for 'none'",
+   true,
+   "paused 0.0 x, last reason 0.0 (none)"
+  ],
+  [
+   "S2 miss, part placed, retry ran to completion",
+   true,
+   "step 'S2 done'"
+  ],
+  [
+   "S2 miss, part placed, retry bTG_TouchHitOK set by the hit",
+   true,
+   "bTG_TouchHitOK True"
+  ],
+  [
+   "S2 miss, part placed, retry rtTG_TouchHit (part frame) lands AT the face",
+   true,
+   "-0.096 mm inside the face (need -0.225..1.005)"
+  ],
+  [
+   "S2 miss, part placed, retry hit ON the start -> contact line",
+   true,
+   "0.0001 mm off"
+  ],
+  [
+   "S2 miss, part placed, retry NO return after the hit (D12)",
+   true,
+   "robot 0.94 mm from the hit, 50.85 mm from the start"
+  ],
+  [
+   "S2 miss, part placed, retry sense voltage off after the search (D5)",
+   true,
+   "doTG_SimSensorOn 0.0, bTG_TouchLive False"
+  ],
+  [
+   "S2 miss, part placed, retry paused 1 x for 'no contact'",
+   true,
+   "paused 1.0 x, last reason 3.0 (no contact)"
+  ],
+  [
+   "S3 welder not live, fixed ran to completion",
+   true,
+   "step 'S3 done'"
+  ],
+  [
+   "S3 welder not live, fixed bTG_TouchHitOK set by the hit",
+   true,
+   "bTG_TouchHitOK True"
+  ],
+  [
+   "S3 welder not live, fixed rtTG_TouchHit (part frame) lands AT the face",
+   true,
+   "-0.096 mm inside the face (need -0.225..1.005)"
+  ],
+  [
+   "S3 welder not live, fixed hit ON the start -> contact line",
+   true,
+   "0.0001 mm off"
+  ],
+  [
+   "S3 welder not live, fixed NO return after the hit (D12)",
+   true,
+   "robot 0.94 mm from the hit, 50.85 mm from the start"
+  ],
+  [
+   "S3 welder not live, fixed sense voltage off after the search (D5)",
+   true,
+   "doTG_SimSensorOn 0.0, bTG_TouchLive False"
+  ],
+  [
+   "S3 welder not live, fixed paused 1 x for 'welder not live'",
+   true,
+   "paused 1.0 x, last reason 2.0 (welder not live)"
+  ],
+  [
+   "S4 signal not configured, fixed ran to completion",
+   true,
+   "step 'S4 done'"
+  ],
+  [
+   "S4 signal not configured, fixed bTG_TouchHitOK set by the hit",
+   true,
+   "bTG_TouchHitOK True"
+  ],
+  [
+   "S4 signal not configured, fixed rtTG_TouchHit (part frame) lands AT the face",
+   true,
+   "-0.096 mm inside the face (need -0.225..1.005)"
+  ],
+  [
+   "S4 signal not configured, fixed hit ON the start -> contact line",
+   true,
+   "0.0001 mm off"
+  ],
+  [
+   "S4 signal not configured, fixed NO return after the hit (D12)",
+   true,
+   "robot 0.94 mm from the hit, 50.85 mm from the start"
+  ],
+  [
+   "S4 signal not configured, fixed sense voltage off after the search (D5)",
+   true,
+   "doTG_SimSensorOn 0.0, bTG_TouchLive False"
+  ],
+  [
+   "S4 signal not configured, fixed paused 1 x for 'signal not configured'",
+   true,
+   "paused 1.0 x, last reason 1.0 (signal not configured)"
+  ],
+  [
+   "S5 touching at the start, cleared ran to completion",
+   true,
+   "step 'S5 done'"
+  ],
+  [
+   "S5 touching at the start, cleared bTG_TouchHitOK set by the hit",
+   true,
+   "bTG_TouchHitOK True"
+  ],
+  [
+   "S5 touching at the start, cleared rtTG_TouchHit (part frame) lands AT the face",
+   true,
+   "-0.096 mm inside the face (need -0.225..1.005)"
+  ],
+  [
+   "S5 touching at the start, cleared hit ON the start -> contact line",
+   true,
+   "0.0001 mm off"
+  ],
+  [
+   "S5 touching at the start, cleared NO return after the hit (D12)",
+   true,
+   "robot 0.94 mm from the hit, 50.85 mm from the start"
+  ],
+  [
+   "S5 touching at the start, cleared sense voltage off after the search (D5)",
+   true,
+   "doTG_SimSensorOn 0.0, bTG_TouchLive False"
+  ],
+  [
+   "S5 touching at the start, cleared paused 1 x for 'touching at the start'",
+   true,
+   "paused 1.0 x, last reason 4.0 (touching at the start)"
+  ]
+ ]
+}

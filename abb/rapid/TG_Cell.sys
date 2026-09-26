@@ -13,8 +13,13 @@ MODULE TG_Cell(SYSMODULE)
     ! PROCs - an empty routine body is legal RAPID (statement list may be
     ! empty; comments are not statements) - so .tgs programs can already
     ! call them in the FANUC call order while the cell hardware I/O is
-    ! still unknown. TEACHMODE_ON belongs to the touch-sense family (out
-    ! of v1 scope) and will follow the same pattern when that is ported.
+    ! still unknown.
+    !
+    ! Touch sensing (touch-sense P2, 2026-09-26): TEACHMODE_ON ->
+    ! TG_TeachModeOn, plus TG_TouchSenseOn/Off, which TG_Touch.sys calls
+    ! around every search. They drive the welder's touch-sense I/O BY NAME
+    ! (the stTG_Touch* strings below), so a new welder or a test rig changes
+    ! data, not code. docs/abb_touch_sense_port_v1.md D5/D11.
     !
     ! TG_ActMechUnit (added 2026-09-23) has no FANUC counterpart - a FANUC
     ! motion group is always active. Every HMI-mode .tgs module that drives
@@ -31,6 +36,34 @@ MODULE TG_Cell(SYSMODULE)
     ! the virtual controller leave it unassigned to any device (a simulated
     ! signal); TODO: on the real cell map it to the actual flap output.
     !***********************************************************************
+
+    ! ---- Touch sensing: the welder's touch-sense I/O, by name ------------
+    ! "" = the cell has no such signal. CELL DATA, not code: these values are
+    ! the MONARC VC's Miller EIP (the RobotWare Miller add-in's own names,
+    ! the same ones SmarTac's smtMiller1 profile uses). The real MONARC cell
+    ! is a Fronius TPS/i (smtFronius1: siFr1PartDetect / soFr1TouchSense /
+    ! soFr1SensorRef) and gets its values at commissioning (plan P6).
+    !
+    ! stTG_TouchDI: the contact signal SearchL supervises (TG_TouchSearch).
+    PERS string stTG_TouchDI:="diWld1Touched";
+    ! stTG_TouchOnDO: puts the sense voltage on the wire (TG_TouchSenseOn).
+    PERS string stTG_TouchOnDO:="doWld1TouchOn";
+    ! stTG_TouchActiveDI: the welder confirms sensing is live; waited for up
+    ! to nTG_TouchActiveWait s. MONARC's own programs always wait for it.
+    PERS string stTG_TouchActiveDI:="diWld1TouchActive";
+    PERS num nTG_TouchActiveWait:=2;
+    ! stTG_TeachModeDO: Fronius TPS/i Teach mode (FANUC TEACHMODE_ON, D5);
+    ! the Miller has none. On a TPS/i: "doFr1TeachMode" (RobotWare's
+    ! FroniusTPSi equipment template).
+    PERS string stTG_TeachModeDO:="";
+    ! TRUE after TG_TouchSenseOn when the welder confirmed (or there is no
+    ! active signal to wait for); TG_TouchSearch will not search otherwise.
+    PERS bool bTG_TouchLive:=FALSE;
+
+    ! AliasIO targets: must be module-level (TRM 1.6), bound before each use.
+    LOCAL VAR signaldo doTG_TouchOnAlias;
+    LOCAL VAR signaldi diTG_TouchActiveAlias;
+    LOCAL VAR signaldo doTG_TeachModeAlias;
 
     PROC TG_CamOpen()
         ! FANUC: CAM_OPEN (.ls utility) - open the camera flap.
@@ -76,6 +109,72 @@ MODULE TG_Cell(SYSMODULE)
         ! FANUC: DRY_RUN_OFF (.ls utility) - (re-)enable welding; the
         ! default state, set unconditionally after the password check.
         ! PLACEHOLDER (phase 4): intentionally empty. TODO real cell.
+    ENDPROC
+
+    PROC TG_TeachModeOn()
+        ! FANUC: TEACHMODE_ON (.ls utility) - the Fronius TPS/i Teach mode:
+        ! the wire feeder retracts the wire when the nozzle nears the part, so
+        ! the bridge moves between touches cannot bend it (Fronius signal
+        ! description). Called once at the start of a touch block. Nothing
+        ! turns it off: touch sensing ON disables it for each measurement
+        ! (owner, D5) and welding turns it off by itself (owner, D11).
+        ! No-op when the cell has no such output.
+        VAR string stName;
+        IF stTG_TeachModeDO="" RETURN;
+        stName:=stTG_TeachModeDO;
+        AliasIO stName,doTG_TeachModeAlias;
+        SetDO doTG_TeachModeAlias,1;
+    ERROR
+        ! Hand an I/O error (a name the configuration does not know:
+        ! ERR_ALIASIO_DEF) to the caller. Without a handler it would stop the
+        ! task instead of reaching TG_TouchSearch's (VC-measured 40228, see
+        ! tgOpenListener in TG_Comms.sys).
+        RAISE;
+    ENDPROC
+
+    PROC TG_TouchSenseOn()
+        ! The touch output FANUC's ArcTool drives itself during Search[] -
+        ! no .ls of its own there. Called by TG_TouchSearch right before each
+        ! search, so the sense voltage is live only while searching (D5).
+        ! Sets bTG_TouchLive: TRUE when the welder confirmed within
+        ! nTG_TouchActiveWait s, or when there is no confirmation to wait for.
+        ! AliasIO needs a VAR/CONST string, hence the local copies.
+        VAR string stName;
+        VAR bool bTimeout:=FALSE;
+        bTG_TouchLive:=FALSE;
+        IF stTG_TouchOnDO<>"" THEN
+            stName:=stTG_TouchOnDO;
+            AliasIO stName,doTG_TouchOnAlias;
+            SetDO doTG_TouchOnAlias,1;
+        ENDIF
+        IF stTG_TouchActiveDI<>"" THEN
+            stName:=stTG_TouchActiveDI;
+            AliasIO stName,diTG_TouchActiveAlias;
+            WaitDI diTG_TouchActiveAlias,1\MaxTime:=nTG_TouchActiveWait\TimeFlag:=bTimeout;
+        ENDIF
+        bTG_TouchLive:=NOT bTimeout;
+    ERROR
+        ! Hand an I/O error (a name the configuration does not know:
+        ! ERR_ALIASIO_DEF) to the caller. Without a handler it would stop the
+        ! task instead of reaching TG_TouchSearch's (VC-measured 40228, see
+        ! tgOpenListener in TG_Comms.sys).
+        RAISE;
+    ENDPROC
+
+    PROC TG_TouchSenseOff()
+        ! Right after each search - hit or miss (D5).
+        VAR string stName;
+        bTG_TouchLive:=FALSE;
+        IF stTG_TouchOnDO="" RETURN;
+        stName:=stTG_TouchOnDO;
+        AliasIO stName,doTG_TouchOnAlias;
+        SetDO doTG_TouchOnAlias,0;
+    ERROR
+        ! Hand an I/O error (a name the configuration does not know:
+        ! ERR_ALIASIO_DEF) to the caller. Without a handler it would stop the
+        ! task instead of reaching TG_TouchSearch's (VC-measured 40228, see
+        ! tgOpenListener in TG_Comms.sys).
+        RAISE;
     ENDPROC
 
     PROC TG_ActMechUnit()

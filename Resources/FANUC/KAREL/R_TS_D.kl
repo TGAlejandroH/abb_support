@@ -1,0 +1,33 @@
+PROGRAM R_TS_D
+    -- Request Touch Sense Do Per Weld. RequestTouchSenseDoPerWeld.
+
+VAR
+    comm_file:         FILE
+    status:                INTEGER
+    cmd:                  STRING[254]
+    resp:                  STRING[254]
+    flag:                   INTEGER
+
+
+
+BEGIN -- Begin main program
+
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+
+    -- Sending request ID
+    resp = '16' -- request id
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+
+    WRITE comm_file ('Give me TS status')
+    READ comm_file (cmd::1)
+    
+    CNV_STR_INT(SUB_STR(cmd, 1, 1), flag)
+    SET_INT_REG(195, flag, status)
+      
+    
+      
+    CLOSE FILE comm_file
+
+END R_TS_D

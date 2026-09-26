@@ -1,0 +1,175 @@
+MODULE TG_Touch(SYSMODULE)
+    !***********************************************************************
+    ! TetraGen touch sensing for ABB - the search primitive (touch-sense P2).
+    ! Design: docs/abb_touch_sense_port_v1.md sections 3.4-3.6 and 6.
+    !
+    ! One call per touch, where the FANUC program has
+    !     L P[53] 775mm/sec FINE Search[+X] ;
+    ! the exporter emits (plan 3.5, D12):
+    !     MoveL rtApproach,vApproach,fine,tTG_Weld\WObj:=wobjTG_Weld;
+    !     TG_TouchSearch rtApproach,rtContact,tTG_Weld,wobjTG_Weld;
+    !     TG_ReqTouchSensePoint;
+    !     WaitTime 0.5;
+    !     MoveL rtApproach,vApproach,fine,tTG_Weld\WObj:=wobjTG_Weld;
+    ! - the last line is the RETURN. FANUC runs its touch schedules with
+    ! "auto return" OFF because the Weld Planner emits that move itself
+    ! (owner, 2026-09-26), so this routine does NOT return: after a hit the
+    ! robot stays where \Stop left it, just past the contact (D12).
+    !
+    ! The primitive is plain SearchL\Stop (D1), VC-proven in P0: it stops on
+    ! the DI and returns the DETECTION point in the work object's frame -
+    ! FANUC's PR[32] - which lands in rtTG_TouchHit (TG_Comms) with
+    ! bTG_TouchHitOK for TG_ReqTouchSensePoint.
+    !
+    ! Geometry (D9): the search starts at StartPoint and runs up to
+    ! nTG_TouchStroke mm along StartPoint -> ContactPoint (the nominal
+    ! contact), at nTG_TouchSpeed mm/s. Only the position is extended:
+    ! orientation, robconf and extax come from StartPoint, so an indexed
+    ! positioner stays still (D6).
+    !
+    ! Failures pause, as FANUC's THSR-017 does (D3): the robot goes back to
+    ! the start, the reason goes to the event log, the program Stops, and
+    ! Start searches again - no id 18 is sent in between, so the HMI wire
+    ! stays in lockstep. Every error is handled HERE: an error raised inside
+    ! a late-bound .tgs does not propagate to TG_Main (finding F-F).
+    !
+    ! Cell I/O by name (TG_Cell.sys): stTG_TouchDI is the contact signal;
+    ! TG_TouchSenseOn/Off put the sense voltage on the wire around every
+    ! search, so it is live only while searching (D5).
+    !***********************************************************************
+
+    ! D9: the FANUC touch schedule values. Cell data - tune from the pendant.
+    PERS num nTG_TouchSpeed:=15;           ! mm/s, search speed
+    PERS num nTG_TouchStroke:=150;         ! mm from StartPoint, maximum
+    ! Before each search the contact DI must be low; a Fronius holds its touch
+    ! signal 0.3 s past the short (Fronius signal description), so wait up to
+    ! this long before letting SearchL's start-of-search check decide.
+    PERS num nTG_TouchClearWait:=1;        ! s
+    ! Diagnostics: pauses since load, and why the last one happened
+    ! (1 signal not configured, 2 welder not live, 3 no contact,
+    ! 4 touching at the start, 0 none yet).
+    PERS num nTG_TouchPauses:=0;
+    PERS num nTG_TouchLastPause:=0;
+
+    LOCAL CONST num TG_TOUCH_OK:=0;
+    LOCAL CONST num TG_TOUCH_NOSIGNAL:=1;
+    LOCAL CONST num TG_TOUCH_NOTLIVE:=2;
+    LOCAL CONST num TG_TOUCH_MISS:=3;
+    LOCAL CONST num TG_TOUCH_ATSTART:=4;
+
+    ! AliasIO target for stTG_TouchDI (module-level, TRM 1.6).
+    LOCAL VAR signaldi diTG_TouchAlias;
+
+    PROC TG_TouchSearch(robtarget StartPoint,robtarget ContactPoint,PERS tooldata Tool,PERS wobjdata WObj)
+        VAR robtarget rtTo;
+        VAR pos dir;
+        VAR num nLen;
+        VAR num nSpeed;
+        VAR speeddata vSearch;
+        VAR num nResult;
+        bTG_TouchHitOK:=FALSE;
+        dir:=ContactPoint.trans-StartPoint.trans;
+        nLen:=VectMagn(dir);
+        IF nLen<1 THEN
+            ! An exported program with no search direction: nothing to retry.
+            ErrWrite "TG: touch search has no direction","StartPoint and ContactPoint are less than 1 mm apart."\RL2:="Fix the exported program. Nothing was searched.";
+            EXIT;
+        ENDIF
+        rtTo:=StartPoint;
+        rtTo.trans:=StartPoint.trans+(nTG_TouchStroke/nLen)*dir;
+        ! \Stop is only allowed below 100 mm/s (RAPID reference, SearchL).
+        nSpeed:=nTG_TouchSpeed;
+        IF nSpeed>=100 nSpeed:=99;
+        IF nSpeed<=0 nSpeed:=15;
+        vSearch:=[nSpeed,500,5000,1000];
+        WHILE NOT bTG_TouchHitOK DO
+            ! A fine point at the start of the search (a flying zone before a
+            ! search can hit on the wrong side). The program's approach move
+            ! normally put the TCP here already: a zero-length move.
+            MoveL StartPoint,v100,fine,Tool\WObj:=WObj;
+            nResult:=TG_TOUCH_OK;
+            tgtArm nResult;
+            IF nResult=TG_TOUCH_OK tgtSearch rtTo,vSearch,Tool,WObj,StartPoint,nResult;
+            tgtSenseOff;
+            IF nResult=TG_TOUCH_OK THEN
+                bTG_TouchHitOK:=TRUE;
+            ELSE
+                tgtPause nResult;
+            ENDIF
+        ENDWHILE
+        ! No return move: see D12 in the header.
+        TPWrite "TG: touch at "\Pos:=rtTG_TouchHit.trans;
+    ENDPROC
+
+    LOCAL PROC tgtArm(INOUT num nResult)
+        ! Bind the contact signal, put the sense voltage on, wait for the
+        ! welder to confirm, then for the contact DI to be low.
+        VAR string stName;
+        VAR bool bTimeout:=FALSE;
+        stName:=stTG_TouchDI;
+        AliasIO stName,diTG_TouchAlias;
+        TG_TouchSenseOn;
+        IF NOT bTG_TouchLive THEN
+            nResult:=TG_TOUCH_NOTLIVE;
+            RETURN;
+        ENDIF
+        WaitDI diTG_TouchAlias,0\MaxTime:=nTG_TouchClearWait\TimeFlag:=bTimeout;
+        nResult:=TG_TOUCH_OK;
+    ERROR
+        IF ERRNO=ERR_ALIASIO_DEF OR ERRNO=ERR_ALIASIO_TYPE THEN
+            nResult:=TG_TOUCH_NOSIGNAL;
+            RETURN;
+        ENDIF
+        RAISE;
+    ENDPROC
+
+    LOCAL PROC tgtSearch(robtarget ToPoint,speeddata Speed,PERS tooldata Tool,PERS wobjdata WObj,robtarget StartPoint,INOUT num nResult)
+        ! The search. On no contact (the robot has run on to ToPoint) or a DI
+        ! already high at the start (stopped there), the manual's recovery
+        ! brings the robot back to StartPoint - P0 X3a/X3b, VC-proven.
+        VAR num nErr;
+        SearchL\Stop,diTG_TouchAlias,rtTG_TouchHit,ToPoint,Speed,Tool\WObj:=WObj;
+        nResult:=TG_TOUCH_OK;
+    ERROR
+        nErr:=ERRNO;
+        IF nErr=ERR_WHLSEARCH OR nErr=ERR_SIGSUPSEARCH THEN
+            StorePath;
+            MoveL StartPoint,v100,fine,Tool\WObj:=WObj;
+            RestoPath;
+            ClearPath;
+            StartMove;
+            nResult:=TG_TOUCH_MISS;
+            IF nErr=ERR_SIGSUPSEARCH nResult:=TG_TOUCH_ATSTART;
+            RETURN;
+        ENDIF
+        RAISE;
+    ENDPROC
+
+    LOCAL PROC tgtSenseOff()
+        ! Never let switching the sense voltage off mask the real result:
+        ! a bad output name has already been reported by tgtArm.
+        TG_TouchSenseOff;
+    ERROR
+        RETURN;
+    ENDPROC
+
+    LOCAL PROC tgtPause(num nWhy)
+        ! D3: tell the operator why, then Stop. Start resumes here and the
+        ! caller's loop searches again.
+        nTG_TouchPauses:=nTG_TouchPauses+1;
+        nTG_TouchLastPause:=nWhy;
+        TEST nWhy
+        CASE TG_TOUCH_NOSIGNAL:
+            ErrWrite \W,"TG: touch signal not configured","TG_Cell names a touch signal this controller does not have."\RL2:="Fix stTG_TouchDI / stTG_TouchOnDO / stTG_TouchActiveDI, then Start.";
+        CASE TG_TOUCH_NOTLIVE:
+            ErrWrite \W,"TG: touch sensing not live","The welder did not confirm touch sensing within "+NumToStr(nTG_TouchActiveWait,1)+" s."\RL2:="Check the welder and its touch mode, then Start to search again.";
+        CASE TG_TOUCH_MISS:
+            ErrWrite \W,"TG: touch search found nothing","No contact within "+NumToStr(nTG_TouchStroke,0)+" mm; the robot is back at the start."\RL2:="Check the part and the wire, then Start to search again.";
+        CASE TG_TOUCH_ATSTART:
+            ErrWrite \W,"TG: wire touching at search start","The contact signal was already high when the search began."\RL2:="Clear the wire from the part, then Start to search again.";
+        ENDTEST
+        TPWrite "TG: touch search paused - see the event log, then Start";
+        Stop;
+    ENDPROC
+
+ENDMODULE

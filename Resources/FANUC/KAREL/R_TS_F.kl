@@ -1,0 +1,74 @@
+PROGRAM R_TS_F
+    -- Request Touch Sense Search Frame
+
+VAR
+    entry:                 INTEGER
+    int_value:          INTEGER
+    comm_file:         FILE
+    status:                INTEGER
+    cmd:                  STRING[254]
+    resp:                  STRING[254]
+    flag:                   INTEGER
+    proc_no:            STRING[254]
+    X,Y,Z,W,P,R:         REAL
+    cpos: XYZWPR
+    uf_pos,ut_pos : POSITION
+
+
+BEGIN -- Begin main program
+
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+
+    -- Sending request ID
+    resp = '17' -- request id
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+
+    WRITE comm_file ('Give me the frame x')
+    cmd = ''  
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),X)
+      
+    WRITE comm_file ('Give me the frame y')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),Y)
+    
+    WRITE comm_file ('Give me the frame z')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),Z)
+    
+    WRITE comm_file ('Give me the frame w')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),W)
+    
+    WRITE comm_file ('Give me the frame p')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),P)
+    
+    WRITE comm_file ('Give me the frame r')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),R)
+      
+
+    GET_VAR(entry, '*SYSTEM*', '$TH_WRKFRAME[1].$WORK_FRAME[1]', uf_pos, status)
+    WRITE ('status: ', status, CR)
+    
+    ut_pos = POS(X, Y, Z, W, P, R, uf_pos.CONFIG_DATA)
+    
+    SET_VAR(entry, '*SYSTEM*', '$TH_WRKFRAME[1].$WORK_FRAME[1]', ut_pos, status)
+    
+    SET_VAR(entry, '*SYSTEM*', '$THSCHEDULE[1].$MASTER_FLAG', TRUE, status)
+    SET_VAR(entry, '*SYSTEM*', '$THSCHEDULE[2].$MASTER_FLAG', FALSE, status)
+    SET_VAR(entry, '*SYSTEM*', '$THSCHEDULE[3].$MASTER_FLAG', TRUE, status)
+    
+    
+    WRITE ('status: ', status, CR)
+    CLOSE FILE comm_file
+
+END R_TS_F

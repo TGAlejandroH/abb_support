@@ -19,6 +19,11 @@ Phase 2 scope: program selection + all priority requests
 (1 R_C_F, 2 R_C, 4 R_W_F, 5 R_P_C, 10 R_F_T, 11 R_G_C_D, 14 R_W_P, 100 R_E).
 Dummy, configurable answers everywhere; no real HMI/camera logic.
 
+Touch-sense P1 (2026-09-26, docs/abb_touch_sense_port_v1.md): the auto touch-up
+requests 16 R_TS_D, 18 R_TS_P and 19 R_TS_END, with the HMI's own offset math
+mirrored in ``auto_touchup_offset``. There is no 17 (R_TS_F) on ABB (plan D2) -
+a robot that sends it gets "no handler", on purpose.
+
 Usage:
     python abb_server.py [host] [port] [cycles] [transfer]
     defaults: 127.0.0.1 2000 2 (no module transfer)
@@ -234,6 +239,109 @@ def fmt_seam_phases(values):
 
 
 # ---------------------------------------------------------------------------
+# Auto touch-up offset: a mirror of the HMI's math
+# ---------------------------------------------------------------------------
+#
+# TGuideWeldingHMI WeldLibrary.cpp AutoTouchUpsOffset (read 2026-09-25, plan 1.4):
+#   * each touch point contributes ONE coordinate - the one along its snapped
+#     axis, in the search frame; the other two are ignored;
+#   * N / M = the nominal / measured points built that way (zero elsewhere);
+#     delta_cad = M - N; delta_base = R(base_T_cad) * delta_cad;
+#   * the corrected frame is T(delta_base) * base_T_cad - a pure translation in
+#     the robot base, the frame's rotation untouched;
+#   * two touches on the same axis: the later one wins (no averaging).
+# For .tgs projects the search frame is the CAD frame (cad_T_searchFrame =
+# identity, WeldLibrary.cpp:861), which is the only case ABB supports (plan D2).
+# Snapped axes are normalized to their dominant +/-1 component, as the .tgs
+# loader does (TGuideProjectTgsStore NormalizeLegacyTouchAxis). The sign only
+# selects the search direction; the math uses the axis.
+
+
+def touch_axis_index(snapped_axis):
+    """0/1/2 for the dominant component of a snapped axis (sign ignored)."""
+    mags = [abs(float(c)) for c in snapped_axis]
+    if len(mags) != 3 or max(mags) == 0.0:
+        raise ValueError(f"not a snapped axis: {snapped_axis!r}")
+    return mags.index(max(mags))
+
+
+def rotate_by_wpr(w_deg, p_deg, r_deg, v):
+    """Rotate v by the FANUC W,P,R rotation (R = Rz*Ry*Rx)."""
+    w, x, y, z = euler_wpr_to_quat(w_deg, p_deg, r_deg)
+    rows = ((1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)),
+            (2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)),
+            (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)))
+    return tuple(sum(a * b for a, b in zip(row, v)) for row in rows)
+
+
+def auto_touchup_offset(frame_xyzwpr, touch_points, measured_xyz):
+    """delta_base (mm) for one weld: see the block comment above.
+
+    frame_xyzwpr: base_T_cad, the frame the TSP R_W_F served (localization only).
+    touch_points: [{"nominal": (x, y, z), "snapped_axis": (sx, sy, sz)}, ...] in CAD.
+    measured_xyz: the id-18 reports, in order, in the same frame.
+
+    Stricter than the HMI on purpose: it refuses a point count that differs
+    from the weld's, where the HMI (no bounds check) would read a stale point.
+    """
+    if len(measured_xyz) != len(touch_points):
+        raise ValueError(f"{len(measured_xyz)} touch reports for a weld with "
+                         f"{len(touch_points)} touch points")
+    nominal = [0.0, 0.0, 0.0]
+    measured = [0.0, 0.0, 0.0]
+    for point, xyz in zip(touch_points, measured_xyz):
+        axis = touch_axis_index(point["snapped_axis"])
+        nominal[axis] = float(point["nominal"][axis])
+        measured[axis] = float(xyz[axis])
+    delta_cad = tuple(m - n for m, n in zip(measured, nominal))
+    w, p, r = (float(v) for v in frame_xyzwpr[3:6])
+    return rotate_by_wpr(w, p, r, delta_cad)
+
+
+def translate_frame(frame_xyzwpr, delta):
+    """T(delta) * frame: shift the origin in the parent frame, keep the rotation."""
+    x, y, z = (float(v) + float(d) for v, d in zip(frame_xyzwpr[:3], delta))
+    return [x, y, z] + [float(v) for v in frame_xyzwpr[3:6]]
+
+
+# touch-wire script (mode "touch-wire"): the NOMINAL touch points of the weld
+# TGS/TD05TsWire.mod touch-senses. The module pretends measured points that
+# differ by +3.000 mm in X (touch 1, Search[+X]) and -2.000 mm in Z (touch 2,
+# Search[-Z]), with junk in the coordinates each search does not measure.
+# The two MUST agree: change one, change the other.
+TOUCH_WIRE_DEMO = {
+    "touch_points": [
+        {"nominal": (100.0, 0.0, 20.0), "snapped_axis": (-1.0, 0.0, 0.0)},  # search +X
+        {"nominal": (60.0, 25.0, 0.0), "snapped_axis": (0.0, 0.0, 1.0)},    # search -Z
+    ],
+    # What TD05TsWire.mod reports (rtTsHit1 / rtTsHit2).
+    "measured": [(103.0, 0.7, 20.4), (59.6, 25.3, -2.0)],
+    "delta_cad": (3.0, 0.0, -2.0),
+}
+
+
+# touch-real script (mode "touch-real", touch-sense P3): TGS/TD05Touch.mod touch-senses a
+# block with REAL searches (TG_TouchSearch). The "part" is the VC-only World Zone box of
+# vc_probes/TG_TrRig.mod, which is this block mapped to world by the frame below.
+# The frame turns the part 90 deg about Z, so part X is world +Y: the offset math's
+# rotation into the base is exercised, while both touched faces stay world-aligned, as a
+# World Zone box must be. The touched faces are the block's -X face (touch 1, Search[+X]) and
+# its top face (touch 2, Search[-Z]); approaches stand 30 mm off along the snapped axis.
+# TD05Touch.mod, TG_TrRig.mod and this dict MUST agree - test_phase8_touchsense.py checks
+# all three against each other.
+TOUCH_REAL_DEMO = {
+    "prog_name": "TD05Touch",
+    "weld_frame_xyzwpr": [1600.0, 0.0, 1450.0, 0.0, 0.0, 90.0],
+    "block": ((0.0, -50.0, -200.0), (100.0, 50.0, 0.0)),     # part-frame corners (min, max)
+    "standoff": 30.0,
+    "touch_points": [
+        {"nominal": (0.0, 0.0, -20.0), "snapped_axis": (-1.0, 0.0, 0.0)},   # -X face, search +X
+        {"nominal": (50.0, 20.0, 0.0), "snapped_axis": (0.0, 0.0, 1.0)},    # top face, search -Z
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
 # The HMI prototype
 # ---------------------------------------------------------------------------
 
@@ -375,6 +483,21 @@ class AbbTgsHmi:
         self.weld_param_sequence = None
         self._weld_param_calls = 0
 
+        # ---- auto touch-ups (ids 16/18/19, touch-sense P1) ----------------
+        # auto_touchups stands in for the operator's Tools-menu mode ("Touchups
+        # + Weld"); touch_points for the current weld's points from the project.
+        # The HMI answers id 16 with 1 only when both are set (RobotCell.cpp
+        # IsWeldGoingToPerformAutoTouchedupsOffsets).
+        self.auto_touchups = False
+        self.touch_points = []
+        self.touch_measured_xyz = []      # the id-18 reports of the current block
+        # The weld's stored touch-up (a base-frame translation, mm) that R_W_F
+        # composes onto the localization: cleared by the TSP R_W_F, set by id 19.
+        self.touch_offset_base = None
+        self.last_touch_frame_xyzwpr = None
+        self.last_touch_points = None     # the reports id 19 consumed, for tests/VC checks
+        self.corrupt_touch_frame = False  # fault injection for id 19
+
         # ---- last-received data, for tests / future HMI logic
         self.last_pose_xyzwpr = None
         self.last_sub_name = None
@@ -396,6 +519,10 @@ class AbbTgsHmi:
             "11": self.handle_global_captures_done_req, # R_G_C_D
             "13": self.handle_weld_stats_req,           # R_W_S
             "14": self.handle_weld_params_req,          # R_W_P
+            "16": self.handle_touch_sense_do_req,       # R_TS_D
+            "18": self.handle_touch_point_req,          # R_TS_P
+            "19": self.handle_touch_end_req,            # R_TS_END
+            # no "17" (R_TS_F): not on ABB, plan D2
             "100": self.handle_end_req,                 # R_E
         }
 
@@ -558,13 +685,70 @@ class AbbTgsHmi:
         the RAPID side receives the full sequence on every reply mode.
         """
         self._recv_pose_and_sub()
+        sub = self.last_sub_name or ""
+        if (sub.startswith("TSP") and sub.endswith("_full")
+                and self.auto_touchups and self.touch_points):
+            # First auto-touch-up pass of the weld: the HMI clears the stored
+            # touch-up so the points are measured against the localization
+            # alone (RobotCell.cpp, "touchup offset cleared").
+            self.touch_offset_base = None
         if self.corrupt_weld_frame:
             self.do_send(CORRUPT_FRAME_PAYLOAD)
         else:
-            self.do_send(xyzwpr_to_pose_literal(self.weld_frame_xyzwpr))
+            self.do_send(xyzwpr_to_pose_literal(self.served_weld_frame()))
         self.do_send(str(self.weld_status))
         for value in self.touchup_offsets_in:
             self.do_send(fmt_real(value))
+
+    def served_weld_frame(self):
+        """The frame R_W_F serves: the stored touch-up composed onto the
+        localization (Weld.cpp: GetTouchupOffset() * localization)."""
+        if self.touch_offset_base is None:
+            return list(self.weld_frame_xyzwpr)
+        return translate_frame(self.weld_frame_xyzwpr, self.touch_offset_base)
+
+    def handle_touch_sense_do_req(self):
+        """FANUC R_TS_D (id 16): 1 = run this weld's touch block.
+
+        Always answers. The production HMI sends nothing when it has no
+        current weld, which leaves the robot blocked on the prompt (HMI repo,
+        docs/endpoint_touch_sense_hmi_plan_v1.md: the id-16 nullptr deadlock)."""
+        flag = 1 if (self.auto_touchups and self.touch_points) else 0
+        self.touch_measured_xyz = []
+        prompt = self.do_send(str(flag))
+        if "TS status" not in prompt:
+            self._log(f"WARNING: unexpected touch-sense prompt: {prompt!r}")
+
+    def handle_touch_point_req(self):
+        """FANUC R_TS_P (id 18): one contact point, as a pose literal on ABB.
+
+        Only x, y, z are used - coordinates in the frame the TSP R_W_F served,
+        which is what SearchL's SearchPoint is in the weld work object."""
+        xyz = pose_literal_to_xyzwpr(self.do_receive())[:3]
+        if len(self.touch_measured_xyz) >= len(self.touch_points):
+            raise RuntimeError(
+                f"touch point {len(self.touch_measured_xyz) + 1} reported for a weld "
+                f"with {len(self.touch_points)} touch points")
+        self.touch_measured_xyz.append(xyz)
+        self._log(f"  touch point {len(self.touch_measured_xyz)}: "
+                  f"{['%.3f' % v for v in xyz]}")
+
+    def handle_touch_end_req(self):
+        """FANUC R_TS_END (id 19): compute the offset, serve the corrected frame."""
+        delta = auto_touchup_offset(self.weld_frame_xyzwpr, self.touch_points,
+                                    self.touch_measured_xyz)
+        self.touch_offset_base = delta
+        self.last_touch_points = list(self.touch_measured_xyz)
+        frame = self.served_weld_frame()
+        self.last_touch_frame_xyzwpr = frame
+        self._log(f"  auto touch-up offset (base, mm): {['%.3f' % v for v in delta]}")
+        if self.corrupt_touch_frame:
+            prompt = self.do_send(CORRUPT_FRAME_PAYLOAD)
+        else:
+            prompt = self.do_send(xyzwpr_to_pose_literal(frame))
+        if "frame" not in prompt:
+            self._log(f"WARNING: unexpected touch-end prompt: {prompt!r}")
+        self.touch_measured_xyz = []
 
     def handle_pass_check_req(self):
         """FANUC R_P_C (id 5): pose + sub + password in; 2-char status out
@@ -761,14 +945,30 @@ def main(argv):
         # both branches of TG_ApplyWeldParams.
         hmi.prog_name = "TD05Weld"
         hmi.weld_param_sequence = WELD_DEMO_SEQUENCE
+    elif mode in ("touch-wire", "touch-off", "touch-corrupt"):
+        # Touch-sense P1: TGS/TD05TsWire.mod. touch-wire serves auto
+        # touch-ups on; touch-off answers id 16 with 0 (the block is skipped);
+        # touch-corrupt sends a malformed id-19 frame (the robot abandons).
+        hmi.prog_name = "TD05TsWire"
+        hmi.touch_points = [dict(p) for p in TOUCH_WIRE_DEMO["touch_points"]]
+        hmi.auto_touchups = mode != "touch-off"
+        hmi.corrupt_touch_frame = mode == "touch-corrupt"
+    elif mode == "touch-real":
+        # Touch-sense P3: TGS/TD05Touch.mod, real searches on the VC's World Zone rig
+        # (vc_probes/TG_TrRig.mod + touch_real_vc.py).
+        hmi.prog_name = TOUCH_REAL_DEMO["prog_name"]
+        hmi.weld_frame_xyzwpr = list(TOUCH_REAL_DEMO["weld_frame_xyzwpr"])
+        hmi.touch_points = [dict(p) for p in TOUCH_REAL_DEMO["touch_points"]]
+        hmi.auto_touchups = True
     elif mode == "dry-run":
         # Welding inhibited. The robot still serves every request, R_W_S
         # included, but reports succ_ae = 0 (nTG_SuccArcEnd := 1-nTG_DryRun),
         # so no weld may be recorded - see handle_weld_stats_req.
         hmi.dry_run = 1
     elif mode is not None:
-        raise SystemExit(f"unknown mode {mode!r} (use corrupt-cam, "
-                         "corrupt-weld, weld-demo or dry-run)")
+        raise SystemExit(f"unknown mode {mode!r} (use corrupt-cam, corrupt-weld, "
+                         "weld-demo, dry-run, touch-wire, touch-off, touch-corrupt or "
+                         "touch-real)")
     for i in range(cycles):
         print(f"--- cycle {i + 1}/{cycles} ---", flush=True)
         hmi.serve_cycle()

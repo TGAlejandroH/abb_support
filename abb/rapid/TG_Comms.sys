@@ -152,6 +152,22 @@ MODULE TG_Comms(SYSMODULE)
     ! Units: INCHES verbatim off the wire (their D4), converted nowhere.
     PERS pos posTG_Touchup:=[0,0,0];       ! R[180..182] X/Y/Z, inches
 
+    ! Touch-sense P1 (2026-09-26, docs/abb_touch_sense_port_v1.md): the auto
+    ! touch-up requests 16/18/19. The robot only MEASURES; the HMI computes
+    ! the offset and serves the corrected weld frame back (plan 0.1).
+    !
+    ! R[195:doTouchSense] - 1 = this weld's touch block runs (id 16 reply).
+    PERS num nTG_DoTouchSense:=0;
+    ! PR[32], the FANUC "contact record": the TCP at the moment of contact,
+    ! in the work object the search ran in. SearchL's SearchPoint is exactly
+    ! that - VC-proven in P0 (X1: the detection point, not the stop point;
+    ! X2: work-object coordinates). The touch primitive (TG_TouchSearch, P2)
+    ! writes it and sets bTG_TouchHitOK; TG_ReqTouchSensePoint sends it ONCE
+    ! and clears the flag, so a point can never be reported twice or reported
+    ! after a failed search (plan 3.6).
+    PERS robtarget rtTG_TouchHit:=[[0,0,0],[1,0,0,0],[0,0,0,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
+    PERS bool bTG_TouchHitOK:=FALSE;
+
     ! Phase 6: R_W_S weld statistics. No FANUC register equivalent - KAREL
     ! read the ArcTool record $AWEWELDSTAT[1] directly (R_W_S.kl). An IRC5
     ! has no drop-in equivalent of that record, so the .tgs program writes
@@ -1318,6 +1334,113 @@ MODULE TG_Comms(SYSMODULE)
         tgSendAck "13";
         tgSendAck stats;
         TPWrite "TG: weld stats "+stats;
+    ENDPROC
+
+    !===================================================================
+    ! Touch sensing - auto touch-ups (ids 16, 18, 19)
+    ! docs/abb_touch_sense_port_v1.md, phase P1 (2026-09-26).
+    !
+    ! Per weld, the .tgs program runs (FANUC TD05tRJYQd.ls lines 76-196):
+    !   stTG_SubName:="TSP<weld>_full"; TG_ReqWeldFrame ...;  (localization only)
+    !   TG_ReqTouchSenseDo;
+    !   IF nTG_DoTouchSense=1 THEN
+    !       per touch: TG_TouchSearch ...; TG_ReqTouchSensePoint;
+    !       TG_ReqTouchSenseEnd \WObj:=<the weld's work object>;
+    !   ENDIF
+    ! and then the weld's own R_W_F, which re-serves the corrected frame.
+    !
+    ! There is no id 17 (R_TS_F, the FANUC touch frame) on ABB - plan D2:
+    ! a search direction here is the vector between two robtargets expressed
+    ! in the weld work object, whose oframe the HMI has just served, so it
+    ! follows the part already. The robot drives the protocol, so never
+    ! sending 17 cannot desync the HMI.
+    !===================================================================
+
+    LOCAL PROC tgTouchAbort(string reason)
+        ! Abandon the cycle rather than let the HMI compute an offset from a
+        ! missing, stale or unreadable exchange - there is no graceful wire
+        ! path back to the program at these points (plan 3.6). Same exit as a
+        ! wire error (tgCycleAbort): drop the sockets, ExitCycle.
+        ErrWrite "TG: touch sensing aborted",reason\RL2:="The cycle was abandoned; no touch-up offset was applied.";
+        TPWrite "TG ERROR: "+reason;
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        ExitCycle;
+    ENDPROC
+
+    PROC TG_ReqTouchSenseDo()
+        ! FANUC: R_TS_D (HMI request id 16) - does this weld get an auto
+        ! touch-up? Called right after the weld's TSP<weld>_full R_W_F: the
+        ! message carries no weld id, the HMI goes by the weld that request
+        ! named. Sequence: id -> prompt "Give me TS status" -> 1 char.
+        ! -> nTG_DoTouchSense (R[195]). KAREL keeps the FIRST character
+        ! (CNV_STR_INT of SUB_STR(cmd,1,1)); anything but "1" means no touch
+        ! block, and anything but "0"/"1" is also reported.
+        ! (Nested IFs: RAPID AND does not short-circuit, and StrPart on an
+        ! empty string is an error.)
+        VAR string reply;
+        tgSendAck "16";
+        reply:=tgPromptRecv("Give me TS status");
+        nTG_DoTouchSense:=0;
+        IF StrLen(reply)>0 THEN
+            IF StrPart(reply,1,1)="1" nTG_DoTouchSense:=1;
+        ENDIF
+        IF nTG_DoTouchSense=0 AND reply<>"0" THEN
+            TPWrite "TG ERROR: bad touch-sense status payload:";
+            TPWrite reply;
+        ENDIF
+        TPWrite "TG: touch sense = "\Num:=nTG_DoTouchSense;
+    ENDPROC
+
+    PROC TG_ReqTouchSensePoint()
+        ! FANUC: R_TS_P (HMI request id 18) - report the contact point of the
+        ! search just made (KAREL: PR[32] as "x,y,z,w,p,r"). Sequence: id ->
+        ! ONE pose literal (plan 4.5). The HMI keeps x,y,z only, as
+        ! coordinates in the frame it served - which is what SearchPoint is
+        ! when the search ran in the weld work object (P0 X2).
+        ! The Nth report fills the HMI's Nth stored touch point; it has no
+        ! bounds check, so a report without a valid hit would silently feed it
+        ! a stale point. Hence the refusal: no valid hit -> abandon the cycle.
+        VAR pose pHit;
+        IF NOT bTG_TouchHitOK THEN
+            tgTouchAbort "touch point requested without a successful search";
+        ENDIF
+        tgSendAck "18";
+        pHit.trans:=rtTG_TouchHit.trans;
+        pHit.rot:=rtTG_TouchHit.rot;
+        tgSendAck tgPoseToStr(pHit);
+        ! Sent once: the next report needs the next search.
+        bTG_TouchHitOK:=FALSE;
+        TPWrite "TG: touch point sent "\Pos:=rtTG_TouchHit.trans;
+    ENDPROC
+
+    PROC TG_ReqTouchSenseEnd(\PERS wobjdata WObj)
+        ! FANUC: R_TS_END (HMI request id 19) - the HMI has computed this
+        ! weld's auto touch-up offset from the points just reported and
+        ! serves the corrected weld frame (KAREL: six prompted 9-char reals
+        ! -> PR[6] and UFRAME[6]). Sequence: id -> prompt "Give me the frame"
+        ! -> ONE pose literal (plan 4.5).
+        ! \WObj: the weld's work object; its .oframe receives the frame
+        ! (THE RULE at the top of this file, exactly as TG_ReqWeldFrame).
+        ! Omitted -> wobjTG_Weld, the base-referenced object - the only shape
+        ! v1 touch-senses (plan D6: indexed welds).
+        ! A malformed payload abandons the cycle (tgTouchAbort): the weld must
+        ! never run against a frame the HMI did not mean, and there is no
+        ! graceful wire path back from here.
+        VAR string reply;
+        VAR pose pFrame;
+        tgSendAck "19";
+        reply:=tgPromptRecv("Give me the frame");
+        IF NOT tgTryStrToPose(reply,pFrame) THEN
+            tgTouchAbort "bad touch-sense frame payload";
+        ENDIF
+        IF Present(WObj) THEN
+            WObj.oframe:=pFrame;
+        ELSE
+            wobjTG_Weld.oframe:=pFrame;
+        ENDIF
+        bTG_TouchHitOK:=FALSE;
+        TPWrite "TG: touch-sense frame set "\Pos:=pFrame.trans;
     ENDPROC
 
 ENDMODULE
