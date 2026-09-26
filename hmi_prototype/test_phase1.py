@@ -18,6 +18,7 @@ import socket
 import threading
 import unittest
 
+from fake_rapid import FakeHandshake
 from abb_server import (
     ACK,
     AbbTgsHmi,
@@ -214,7 +215,8 @@ ROBOT_POSE_XYZWPR = [600.0, -150.5, 1225.3, 159.464, -40.967, 29.743]
 class FakeRapidRobot(threading.Thread):
     """Emulates TG_Main + TG_Comms Phase 1, message by message:
 
-    per cycle:  accept                          (TG_SocketCom)
+    per cycle:  the start handshake             (fake_rapid.FakeHandshake)
+                accept                          (TG_SocketCom)
                 send "Give me the program ID",
                 recv program id                 (TG_ReqProgSel / tgPromptRecv)
                 send "100", recv ack            (TG_ReqEnd / tgSendAck)
@@ -233,6 +235,9 @@ class FakeRapidRobot(threading.Thread):
         self.listener.bind(("127.0.0.1", 0))  # ephemeral port
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
+        # The start handshake every cycle opens with (fake_rapid.py), on its own
+        # ephemeral port - never the real 2001.
+        self.handshake = FakeHandshake()
 
     def _send_ack_msg(self, conn, payload):  # tgSendAck
         conn.sendall(payload.encode("utf-8"))
@@ -241,6 +246,8 @@ class FakeRapidRobot(threading.Thread):
     def run(self):
         try:
             for _ in range(self.cycles):
+                if self.handshake.serve() != "1":
+                    continue                # refused: the part ends, no run
                 conn, _addr = self.listener.accept()
                 with conn:
                     # TG_ReqProgSel
@@ -255,6 +262,7 @@ class FakeRapidRobot(threading.Thread):
             self.errors.append(exc)
         finally:
             self.listener.close()
+            self.handshake.close()
 
 
 class TestPhase1Choreography(unittest.TestCase):
@@ -263,12 +271,17 @@ class TestPhase1Choreography(unittest.TestCase):
         """Phase 1 exit criterion: connect/prog-sel/end/disconnect twice."""
         robot = FakeRapidRobot(cycles=2)
         robot.start()
-        hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port, verbose=False)
+        hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port,
+                        handshake_port=robot.handshake.port, verbose=False)
         for _ in range(2):
             hmi.serve_cycle()
         robot.join(timeout=10)
         self.assertFalse(robot.is_alive(), "fake robot did not finish")
         self.assertEqual(robot.errors, [])
+        # both cycles opened with a handshake the HMI answered "run"
+        self.assertEqual(robot.handshake.verdicts, ["1", "1"])
+        self.assertEqual(robot.handshake.acks, [ACK] * 8)
+        self.assertEqual(hmi.last_start["seq"], 2)
 
         # robot got the program selection both cycles
         self.assertEqual(robot.received_prog_ids, ["1", "1"])

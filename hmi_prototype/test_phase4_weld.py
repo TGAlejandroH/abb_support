@@ -19,6 +19,7 @@ import threading
 import unittest
 
 import abb_server
+from fake_rapid import FakeHandshake
 from abb_server import (
     ACK,
     IPM_TO_MM_S,
@@ -53,6 +54,9 @@ class FakeWeldRobot(threading.Thread):
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
+        # The start handshake every cycle opens with (fake_rapid.py), on its own
+        # ephemeral port - never the real 2001.
+        self.handshake = FakeHandshake()
 
     # -- primitives, mirroring the TG_Comms helpers -------------------------
 
@@ -118,6 +122,8 @@ class FakeWeldRobot(threading.Thread):
 
     def run(self):
         try:
+            if self.handshake.serve() != "1":
+                return                      # refused: the part ends, no run
             conn, _ = self.listener.accept()
             with conn:
                 # program selection + file transfer
@@ -155,11 +161,13 @@ class FakeWeldRobot(threading.Thread):
             self.errors.append(exc)
         finally:
             self.listener.close()
+            self.handshake.close()
 
 
 def run_cycle(robot, hmi_setup=None):
     robot.start()
-    hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port, verbose=False)
+    hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port,
+                    handshake_port=robot.handshake.port, verbose=False)
     hmi.prog_name = "TD05Weld"
     hmi.weld_param_sequence = WELD_DEMO_SEQUENCE
     if hmi_setup:
