@@ -17,7 +17,8 @@ Status:
   PASS, 2026-09-27, §6 P4). Committed in TGuideWeldingHMI as `bfcf41a` on branch
   `ft-abb-offset-ts` (2026-09-28, not pushed).
 - **Next:**
-  - owner decisions Q-P4a and Q-P4b (§8.2);
+  - D15 (FANUC's touch block tied to its TSP request, 2026-09-28): the FANUC bench run before
+    merge (RoboGuide or the cell: a normal weld, an unchecked weld, a failed localization);
   - P6, the real cell.
 
 Written 2026-09-25 from the four new KAREL sources, the HMI and Weld Planner code, the ABB
@@ -142,7 +143,7 @@ Notes:
 ```
 ! TouchSense for Weld2 ;
 CALL SET_SUB_ROUTINE_SR('TSPWeld2_full') ;
-CALL R_W_F ;                  <- first pass: touch-up cleared, serves the LOCALIZATION-ONLY frame
+CALL R_W_F ;                  <- touch-up cleared (every pass since D15), serves the LOCALIZATION-ONLY frame
 CALL R_TS_D ;
 CALL CAM_CLOSE ;
 IF (R[195:doTouchSense]=1) THEN ;
@@ -1014,7 +1015,7 @@ prototype.
   - ABB `supports_touch_sense`, behind `HMI_ABB_TOUCH_SENSE_ENABLED` (config v1.0.8, optional,
     default `false`; schema row, seeds and fixtures);
   - `touch_sense_has_search_frame_request`, FANUC only;
-  - `touch_sense_block_tied_to_tsp_request`, ABB only.
+  - `touch_sense_block_tied_to_tsp_request`, ABB only (removed by D15: its rule is every brand's).
 - `TouchSenseGate.h` (pure): the id-16 decision. Run / Skip / Abort, with reasons for: no
   current weld (it replies 0 now; the old handler hung the robot), not selected, the brand switch
   off, a coordinated weld, a search frame that is not the part frame, no weld frame served.
@@ -1040,7 +1041,7 @@ prototype.
   oframe whatever the status. An unchecked or unlocalized weld (served Identity or a stale frame)
   would have been searched in the wrong place, with a nonsense touch-up saved. Now ABB answers 0
   unless the TSP reply served a weld frame (1 or 3). On the VC the oframe was indeed [0,0,0] in
-  that case, and the robot now never leaves home. FANUC is unchanged (Q-P4a).
+  that case, and the robot now never leaves home. FANUC does the same since D15.
 - The id-19 frame used the weld's cached scan result, which only a fresh scan in this run sets.
   A weld on its saved transformation got a frame near the robot base. This is latent on both
   brands, because the next weld-frame request re-serves the right frame. Fixed with
@@ -1051,9 +1052,9 @@ prototype.
   - A repeated block in the same run measured against a frame that still carried the old touch-up,
     and then dropped it.
   - A clear followed by a failed localization lost the touch-up for later runs.
-  Now `TouchSenseGate::ClearsTouchup` decides: on ABB, only a TSP request clears, on every pass
-  whose block will run, and the clear is undone when the request serves no frame. FANUC keeps its
-  first-request rule.
+  Now `TouchSenseGate::ClearsTouchup` decides: only a TSP request clears, on every pass whose
+  block will run, and the clear is undone when the request serves no frame. At P4 this was ABB
+  only and FANUC kept its first-request rule; since D15 it is both brands.
 - Bookkeeping, texts and docs: the aborts' session close-out, operator texts that no longer claim
   "the touch-up is unchanged", `config.md`, CHANGELOG, and the brand plan.
 
@@ -1071,7 +1072,7 @@ provoke (unit-pinned only); FANUC.
 
 **Known and accepted:** an id-18 refusal cannot stop the robot at once. The report is already
 acknowledged, so the robot carries on with its planned retreat and next approach until its next
-request finds the connection closed. FANUC behaves the same (Q-P4b).
+request finds the connection closed. FANUC behaves the same (D16: kept).
 
 ### P5: Weld Planner emission, §5.2
 
@@ -1251,7 +1252,8 @@ The composition in the station frame (§3.3 item 5), plus HMI and planner change
   - In either case `wobjTG_Weld.oframe` still holds the previous frame. Hits measured there
     would become a wrong touch-up, which the HMI then **saves to the project**.
   - FANUC touches regardless of the weld status. Skip (0) still touches on ABB too, because
-    only `nTG_DoTouchSense` gates the block.
+    only `nTG_DoTouchSense` gates the block. (Since P4 and D15 the HMI answers 0 at id 16 when
+    the TSP reply served no frame, on both brands, so a skip no longer touches.)
   - `TD05Touch.mod` carries the line as well. VC-proven (P5 E4): `10 5 4 100`.
 - **D14 (P5): `TG_TouchSearch` keeps its (approach, contact) signature; the planner passes the
   solved contact.**
@@ -1261,26 +1263,34 @@ The composition in the station frame (§3.3 item 5), plus HMI and planner change
     `-snapped_axis` by construction, so no frame convention has to be assumed to turn a label
     into a vector.
   - The translator cross-checks the geometry against the label.
+- **D15 (owner, 2026-09-28; was Q-P4a): FANUC's touch block is tied to its TSP weld-frame
+  request exactly like ABB's, in the HMI only.** TGuideWeldingHMI `881a6b5` on
+  `ft-abb-offset-ts`.
+  - A weld whose TSP reply served no weld frame is not touched: id 16 answers 0. FANUC used to
+    touch it and save a touch-up from that search:
+    - an unchecked weld in a stale UFRAME (the previous weld's frame, or Identity at run start);
+    - a weld whose localization failed - with or without the abort option - around the robot base
+      origin: the HMI serves Identity with 0 or 2, `R_W_F` writes it to PR[6] whatever the status,
+      the FANUC TSP wrapper has no status check before `R_TS_D`, and the mode-2 path does not end
+      the run before id 16.
+  - Only the TSP request of a block that will run clears the stored touch-up, on every pass, and
+    the clear is undone when that request serves no frame. FANUC used to clear at the weld's first
+    request of the run - so a weld with touch data but no touch block lost its touch-up, and a
+    repeated block dropped the touch-up its served frame carried.
+  - The ABB-only capability that switched this is removed; one rule for every brand
+    (`TouchSenseGate::ClearsTouchup` / `Decide`). The per-run "performed once" flag that fed the
+    old rule is removed too.
+  - No Weld Planner or KAREL change: the FANUC TP program already skips the block on
+    `R_TS_D` = 0. FANUC cannot be run here. D15 is an owner-sanctioned exception to the HMI brand
+    plan's FANUC-parity rule (D9), whose bench run still applies before merge: a RoboGuide (or
+    cell) touch-sensed run with a normal weld, an unchecked weld and a failed localization.
+  - A reply that serves no frame restores the touch-up before the weld-frame reply pushes it to
+    the pendant registers, so the FANUC pendant shows the value the weld keeps.
+- **D16 (owner, 2026-09-28; was Q-P4b): an unusable id-18 report keeps today's behaviour.** The
+  HMI acknowledges it, ends the run, and the robot stops at its next request. Not acknowledging
+  would freeze the robot at the contact point.
 
 ### 8.2 Still open
-
-- **Q-P4a: should FANUC also skip the touch block of a weld whose TSP weld-frame reply served no
-  frame?**
-  - Today a FANUC weld that is unchecked, or whose localization failed without an abort (reply
-    0), is still touched when it has touch data. It is searched in a stale UFRAME, and its
-    touch-up is overwritten from that search.
-  - Setting `touch_sense_block_tied_to_tsp_request = true` for FANUC in `RobotBrand.h` would give
-    FANUC ABB's whole TSP tie:
-    - skip such a block;
-    - clear the touch-up only at a TSP request, on every pass (FANUC today clears at the weld's
-      first request of the run, and a repeated block drops the touch-up the served frame
-      carried);
-    - undo the clear when that request serves no frame.
-  - It was left off because it changes field FANUC behaviour.
-- **Q-P4b: should an unusable id-18 report stop the robot where it stands?**
-  - That needs a receive without the acknowledgement, which would leave the robot waiting at the
-    contact point. Today it acknowledges, and the run ends at the robot's next request (see
-    §6 P4).
 
 - **Q-P5a: should ABB touch generation wait behind a planner config key until P6?**
   - As drafted, `supports_touch_generation` is on for ABB, gated only on HMI mode and indexed

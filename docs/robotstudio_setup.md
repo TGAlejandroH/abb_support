@@ -1744,6 +1744,8 @@ Across cycles:
 ### 24.2 Result 2026-09-27
 
 **100/100 PASS** with the final code (raw data `planner_out/p4/p4_run_20260927_195526.json`).
+Re-run 2026-09-28 after D15 (FANUC on ABB's rule, the brand capability removed): 100/100 again,
+the same numbers (raw data not committed).
 
 Earlier runs:
 - Before the review fixes, the first eight cycles passed 83/83 (raw data not committed).
@@ -1784,5 +1786,6 @@ Earlier runs:
 - `RobotCell` itself (see above).
 - The id-18 and id-19 refusals. The RAPID cannot produce an unparseable, extra or missing
   report, so they are pinned by the unit tests only.
-- FANUC. Its path is covered by the unit tests, and its behaviour is unchanged except on a
-  malformed program.
+- FANUC. Its path is covered by the unit tests. Since D15 (2026-09-28) it follows ABB's TSP
+  rule: a normal run is unchanged, while a skipped or unlocalized weld is no longer touched and
+  the touch-up is cleared only at the TSP request. A FANUC dry run is the check for that.
