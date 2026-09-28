@@ -304,6 +304,76 @@ def translate_frame(frame_xyzwpr, delta):
     return [x, y, z] + [float(v) for v in frame_xyzwpr[3:6]]
 
 
+def normalize_touch_axis(axis):
+    """The dominant component of `axis` as a signed unit axis; (0, 0, 1) if unusable.
+
+    TGuideProjectTgsStore.cpp NormalizeLegacyTouchAxis: ties go to the lower index, and a
+    zero dominant component counts as positive."""
+    try:
+        values = [float(v) for v in axis]
+    except (TypeError, ValueError):
+        return (0.0, 0.0, 1.0)
+    if len(values) < 3:
+        return (0.0, 0.0, 1.0)
+    index = 0
+    for k in (1, 2):
+        if abs(values[k]) > abs(values[index]):
+            index = k
+    out = [0.0, 0.0, 0.0]
+    out[index] = 1.0 if values[index] >= 0.0 else -1.0
+    return tuple(out)
+
+
+def weld_name_from_sub(sub):
+    """The weld an R_W_F token names: "TSP<weld>_full" (the touch block) or "P<weld>" (the
+    weld), as the Weld Planner names them; None for anything else ("none", captures)."""
+    token = str(sub or "").strip()
+    if token.startswith("TSP") and token.endswith("_full") and len(token) > len("TSP_full"):
+        return token[3:-len("_full")]
+    if token.startswith("P") and len(token) > 1 and token.lower() != "none":
+        return token[1:]
+    return None
+
+
+def load_tgs_touch_points(tgs_path):
+    """{weld name: [{"nominal", "snapped_axis"}, ...]} from a native .tgs project.
+
+    What the HMI reads (TGuideProjectTgsStore.cpp): `weld_touch_points` rows by weld and
+    `order_index`, each payload normalized as NormalizeTouchPointPayload does -
+    `touch_point_cad_local_mm` becomes the nominal and `snapped_axis_cad_local` the axis,
+    snapped to its dominant component; a payload without them keeps its own `touch_point` /
+    `snapped_axis`. The HMI fills touch point N with the Nth id-18 report, so this order IS
+    the order the robot must search in. Read-only: the project is never written."""
+    import json
+    import sqlite3
+    uri = "file:" + os.path.abspath(tgs_path).replace("\\", "/") + "?mode=ro"
+    db = sqlite3.connect(uri, uri=True)
+    try:
+        names = dict(db.execute("SELECT weld_id, name FROM weld_items"))
+        out = {}
+        for weld_id, _, payload_json in db.execute(
+                "SELECT weld_id, order_index, payload_json FROM weld_touch_points "
+                "ORDER BY weld_id, order_index"):
+            if weld_id not in names:
+                continue
+            payload = json.loads(payload_json)
+            if not isinstance(payload, dict):
+                continue
+            nominal = payload.get("touch_point_cad_local_mm", payload.get("touch_point"))
+            if "snapped_axis_cad_local" in payload:
+                axis = normalize_touch_axis(payload["snapped_axis_cad_local"])
+            else:
+                axis = payload.get("snapped_axis")
+            if nominal is None or axis is None:
+                continue                       # the HMI skips it too
+            out.setdefault(names[weld_id], []).append(
+                {"nominal": tuple(float(v) for v in nominal[:3]),
+                 "snapped_axis": tuple(float(v) for v in axis[:3])})
+        return out
+    finally:
+        db.close()
+
+
 # touch-wire script (mode "touch-wire"): the NOMINAL touch points of the weld
 # TGS/TD05TsWire.mod touch-senses. The module pretends measured points that
 # differ by +3.000 mm in X (touch 1, Search[+X]) and -2.000 mm in Z (touch 2,
@@ -490,6 +560,10 @@ class AbbTgsHmi:
         # IsWeldGoingToPerformAutoTouchedupsOffsets).
         self.auto_touchups = False
         self.touch_points = []
+        # {weld name: touch points} from a project (load_tgs_touch_points); when set, each
+        # R_W_F picks its weld's points, as the HMI's current weld does. None = touch_points
+        # is the one weld's list, set directly (the P1/P3 demos).
+        self.touch_points_by_weld = None
         self.touch_measured_xyz = []      # the id-18 reports of the current block
         # The weld's stored touch-up (a base-frame translation, mm) that R_W_F
         # composes onto the localization: cleared by the TSP R_W_F, set by id 19.
@@ -686,6 +760,11 @@ class AbbTgsHmi:
         """
         self._recv_pose_and_sub()
         sub = self.last_sub_name or ""
+        weld = weld_name_from_sub(sub)
+        if self.touch_points_by_weld is not None and weld is not None:
+            # A project's touch points belong to ONE weld, named by the R_W_F token - the
+            # HMI's current weld (ABBRobot strips "TSP..._full"; "P<weld>" names the weld).
+            self.touch_points = list(self.touch_points_by_weld.get(weld, []))
         if (sub.startswith("TSP") and sub.endswith("_full")
                 and self.auto_touchups and self.touch_points):
             # First auto-touch-up pass of the weld: the HMI clears the stored

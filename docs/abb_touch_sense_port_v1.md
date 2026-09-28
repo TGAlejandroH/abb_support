@@ -8,8 +8,16 @@ Status:
   VC checks PASS, 2026-09-26).
 - **P3 DONE** (`TD05Touch.mod`, real searches through the real TG cycle; 19/19 VC checks
   PASS, 2026-09-26).
+- **P5 DONE** (the Weld Planner's own ABB export of TD05Touch's part, run through the real TG
+  cycle; 44/44 VC checks PASS, 2026-09-26, §6 P5). Committed in curobo_suite as `fc6c4e7` on
+  branch `ft-abb-offset-touch-sensing` (2026-09-27, not pushed); the pre-commit snapshot is
+  [cross_repo/curobo_suite_touch_sense_p5.patch](cross_repo/curobo_suite_touch_sense_p5.patch).
+- **P4 DONE, VC-validated** (the HMI's ABB touch path in TGuideWeldingHMI, reviewed twice by a
+  separate agent and fixed; the real `ABBRobot` against the planner's module, 100/100 VC checks
+  PASS, 2026-09-27, §6 P4). Committed in TGuideWeldingHMI as `bfcf41a` on branch
+  `ft-abb-offset-ts` (2026-09-28, not pushed).
 - **Next:**
-  - P4 and P5, the cross-repo work (HMI ABB overrides, Weld Planner ABB emission);
+  - owner decisions Q-P4a and Q-P4b (§8.2);
   - P6, the real cell.
 
 Written 2026-09-25 from the four new KAREL sources, the HMI and Weld Planner code, the ABB
@@ -33,7 +41,10 @@ P0 established on the VC (§6, P0 status):
   - Teach mode turns off by itself during welding;
   - no automatic return after a touch: the program's own move back is the return (D12,
     2026-09-26).
-- **Still open:** none (§8.2).
+- **Proposed with P5 (2026-09-26, §8.1):** a malformed TSP frame ends the run before any
+  touch request (D13); the planner passes its solved contact to `TG_TouchSearch` (D14).
+- **Still open:** Q-P5a, whether ABB touch generation waits behind a planner config key
+  until P6 (§8.2).
 - Everything still marked **[unverified]** concerns SmarTac (X4/X5, not run under D1) or
   the real welder signals (P6).
 
@@ -650,6 +661,8 @@ HMI and planner changes starting once P1 has frozen the wire.
 5. Unit tests for `AutoTouchUpsOffset`. None exist today; they would pin the per-axis math
    that §3.5 depends on.
 
+All five are done (P4, 2026-09-27); §6 P4 lists what was built and what the review added.
+
 ### 5.2 curobo_suite (Weld Planner)
 
 1. The ABB touch generation path (tracker Phase 15). Per touch it emits:
@@ -988,9 +1001,149 @@ P4 is gated on P1's wire, so the formats are frozen first. It is validated with 
 HMI against the VC: same scenario as P3, and the HMI log must show the same δ as the
 prototype.
 
+**Status: DONE 2026-09-27, 100/100 VC checks PASS** (recipe and results in
+`robotstudio_setup.md` §24). Committed in TGuideWeldingHMI as `bfcf41a` on branch
+`ft-abb-offset-ts` (2026-09-28, not pushed).
+
+**What was built.**
+- `ABBRobot`: ids 16, 18 and 19.
+  - 18 parses one pose literal and returns NaN, never zero, when it does not parse.
+  - 19 sends one literal and returns false when the frame is out of range.
+  - There is no 17.
+- `RobotBrand`:
+  - ABB `supports_touch_sense`, behind `HMI_ABB_TOUCH_SENSE_ENABLED` (config v1.0.8, optional,
+    default `false`; schema row, seeds and fixtures);
+  - `touch_sense_has_search_frame_request`, FANUC only;
+  - `touch_sense_block_tied_to_tsp_request`, ABB only.
+- `TouchSenseGate.h` (pure): the id-16 decision. Run / Skip / Abort, with reasons for: no
+  current weld (it replies 0 now; the old handler hung the robot), not selected, the brand switch
+  off, a coordinated weld, a search frame that is not the part frame, no weld frame served.
+  `WouldRunAtTsp` is the same decision taken at the TSP weld-frame request.
+- `AutoTouchupOffsetCore.h` (pure): the per-axis math that `AutoTouchUpsOffset` now delegates
+  to, and `CorrectedWeldFrame`.
+- RobotCell:
+  - id 18 always consumes the report, then ends the run on an unusable report, an extra report,
+    or no current weld;
+  - id 19 ends the run on an incomplete block;
+  - the id-19 frame is built on the frame the TSP request served, and sent through
+    `StationRebase::ToWire`, like every weld-frame reply;
+  - a failed id-19 send puts the weld back and ends the run;
+  - every touch abort closes the weld session as aborted and marks the weld not completed.
+- Unit tests: 320/320. They include the pre-P4 loop, transcribed, as a reference over 500 random
+  search frames.
+
+**What the separate review found, and the fixes** (the review was read-only and ran twice).
+- The TSP request cleared the stored touch-up whenever auto touch-ups were selected, even when
+  id 16 then skipped the block (the switch off). The weld lost its touch-up and welded without
+  it. Now it clears only when `WouldRunAtTsp`.
+- ABB's TSP block runs on status 0 too (only 2 aborts, D13), and `TG_ReqWeldFrame` writes the
+  oframe whatever the status. An unchecked or unlocalized weld (served Identity or a stale frame)
+  would have been searched in the wrong place, with a nonsense touch-up saved. Now ABB answers 0
+  unless the TSP reply served a weld frame (1 or 3). On the VC the oframe was indeed [0,0,0] in
+  that case, and the robot now never leaves home. FANUC is unchanged (Q-P4a).
+- The id-19 frame used the weld's cached scan result, which only a fresh scan in this run sets.
+  A weld on its saved transformation got a frame near the robot base. This is latent on both
+  brands, because the next weld-frame request re-serves the right frame. Fixed with
+  `CorrectedWeldFrame`.
+- Coordinated welds are now skipped at the gate (D6), not only by the planner.
+- Second pass: three gaps in how the clear was tied to the block.
+  - A weld with touch data but no touch block lost its touch-up at its first weld-frame request.
+  - A repeated block in the same run measured against a frame that still carried the old touch-up,
+    and then dropped it.
+  - A clear followed by a failed localization lost the touch-up for later runs.
+  Now `TouchSenseGate::ClearsTouchup` decides: on ABB, only a TSP request clears, on every pass
+  whose block will run, and the clear is undone when the request serves no frame. FANUC keeps its
+  first-request rule.
+- Bookkeeping, texts and docs: the aborts' session close-out, operator texts that no longer claim
+  "the touch-up is unchanged", `config.md`, CHANGELOG, and the brand plan.
+
+**VC method.**
+- `AbbTouchHarness.exe` runs the real `ABBRobot`, handshake client, RWS upload and cores. It
+  mirrors RobotCell's per-request logic, because the Qt application itself cannot run headless
+  against the VC.
+- `vc_probes/p4_cpp_touch_vc.py` drives ten cycles through §23's rig and judges.
+- Beyond §23 they cover: the rebase, the switch absent / false / keeping a stored touch-up, an
+  unchecked weld, and the miss-pause-retry with the C++ blocking read.
+- The C++ HMI measured exactly what the prototype measured in P5.
+
+**Not covered on the VC:** `RobotCell` itself; the id-18/19 refusals, which the RAPID cannot
+provoke (unit-pinned only); FANUC.
+
+**Known and accepted:** an id-18 refusal cannot stop the robot at once. The report is already
+acknowledged, so the robot carries on with its planned retreat and next approach until its next
+request finds the connection closed. FANUC behaves the same (Q-P4b).
+
 ### P5: Weld Planner emission, §5.2
 
 The emitted module is diffed against `TD05Touch.mod` shape. VC run as in P3.
+
+**Status 2026-09-26: DRAFTED, VC-validated, 44/44 PASS.** Recipe and numbers in
+[robotstudio_setup.md](robotstudio_setup.md) §23; raw data
+`vc_probes/planner_out/planner_run_20260926_121106.json`.
+
+**The planner change** (curobo_suite, branch `ft-abb-offset-touch-sensing` off `develop`
+0dd3b44, committed as `fc6c4e7`; pre-commit snapshot
+[cross_repo/curobo_suite_touch_sense_p5.patch](cross_repo/curobo_suite_touch_sense_p5.patch)):
+- `AbbProgramBlocksProvider.build_touchsense_program_blocks`: the TSP block of `TD05Touch.mod`.
+  It uses the RAPID routine names, and the FANUC ones in the context are ignored. It has no
+  id 17 and no `Search Start`/`End`. `TG_TeachModeOn` is emitted on the planner's existing
+  `WELDER_ENABLE_FRONIUS_TEACH_MODE`. It adds one line FANUC does not have (D13).
+- `AbbTranslator.MoveLSearch` emits `TG_TouchSearch <approach>, <contact>, tTG_Weld,
+  wobjTG_Weld;`. The contact is the planner's solved `search_contact_embedded_target`, which the
+  compiler now hands over through `configure_next_search_contact`, a hook only ABB's
+  translator has (D14).
+  - It refuses (the old `MoveL` plus a warning) outside HMI mode, without a contact, or in a
+    coordinated work object.
+  - It warns on a search more than 0.5° off the work object's axes, or one that contradicts
+    its FANUC axis label (the §3.5 caveat, curobo E30).
+  - The touch routines join the resident-routine allow-list, and `TG_TouchSearch` counts as
+    a move for the held-posture and move-run trackers.
+- Touch generation: `supports_touch_generation` is on for ABB.
+  `_abb_touch_export_mode` refuses `no_hmi` and coordinated welds. The contexts carry the
+  export mode, and the provider's lines are marked brand-native. FANUC's `runBrandCode` is
+  `runCode`, so its `.LS` is unchanged, which is tested.
+- Tests: `tests/test_abb_touchsense.py`, 28 tests. The ABB and touch suites pass with the
+  change: 764 tests plus those 28.
+- User messages: the refusals say what to change (an ABB robot needs the HMI Mode profile; a
+  coordinated weld cannot be touch-sensed yet). The unsupported-brand message now names Fanuc
+  and ABB.
+- Docs: tracker E17 corrected, E30 caveat, E58, D55; the contract doc's 16/18/19 section;
+  `docs/product/touch_sense.md` has an ABB section; `CHANGELOG.md` [Unreleased].
+
+**Found on the VC, fixed in the change (curobo E58).** The first run went `16 → 100` on every
+touch-sensed cycle.
+- The planner's D54 chain-entry guard reads `CPos`, and RAPID had run ahead of the blended
+  bridge. The guard read the TCP still at home, **201.7 mm** from the first approach, and
+  aborted.
+- The fix settles the arrival before the guard.
+- The same run showed a zero-length repeat: the bridge ends on the touch approach, and the touch
+  program opens with a `MoveJ` to it. The redundant-move collapse now covers Cartesian `MoveJ`.
+- Both are pinned by tests that failed before the fix.
+
+**The experiments.** The module is the planner's own. The touch programs come from
+`WeldTouchGenerationService`'s real builders. The station is modelled as the app authors it
+(STN1, tilt → `eax_b`, rotate → `eax_c`), and the module is compiled under the ABB HMI profile.
+The joint solutions come from the controller: `TG_P5Survey.mod` measured them at TD05Touch's
+poses.
+
+| # | Experiment | Result |
+|---|---|---|
+| E1 | static | lints clean with the resident modules; the touch block has TD05Touch's exact statement shape; no FANUC syntax |
+| E2 | baseline / shifted +3,-2 / aligned 9q,-6q | full block, no pause. The HMI's δ = the shift within one rig quantum. aligned − baseline = shift to **0.02 mm**. `oframe` = the HMI's frame to 0.0000 mm. **Identical to TD05Touch's P3 numbers (0.0000 mm difference).** The arc ran on the corrected seam to **0.001 mm**, at the HMI's travel speed. Each search stopped **0.94 mm** past its hit at ~15 mm/s. |
+| E3 | touch off (id 16 = 0) | the block is skipped; the weld runs on the nominal seam (0.001 mm) with the block moved 3/-2 |
+| E4 | malformed TSP frame | `10 5 4 100`: the D13 line ends the run before any touch request; the robot never leaves home |
+| E5 | first search misses | a real 150 mm miss pauses with reason 3 and 0 reports sent. With the signal restored, Start searches again. Exactly two 18s; δ identical to baseline (0.0000 mm) |
+
+**What P5 does not cover.**
+- The planner's solvers (touch IK and orientation sweep, the cuRobo bridge planner): the VC run
+  takes their outputs from the survey.
+- The package generator's own main assembly: the runner assembles the main the same way from
+  the package blocks.
+- The real HMI (P4).
+
+**For P4**, the prototype HMI now reads touch points from the `.tgs` the way the real HMI does
+(`abb_server.load_tgs_touch_points`, the R_W_F token selects the weld). It passed against the
+planner's `.tgs` (E2-E5).
 
 ### P6: real cell (MONARC 4600-804589, Fronius TPS/i, `smtFronius1`)
 
@@ -1091,9 +1244,50 @@ The composition in the station frame (§3.3 item 5), plus HMI and planner change
     restarts from there). That is the only move `TG_TouchSearch` makes on its own.
   - VC-proven in P2: the robot was left 0.94 mm past the hit.
 
+- **D13 (proposed with P5, 2026-09-26; not in FANUC's sample): a malformed TSP frame ends the
+  run before any touch request.** The TSP block has `IF nTG_WeldStatus=2 GOTO abort_end;`
+  right after its `TG_ReqWeldFrame`.
+  - 2 is the robot-side sentinel for a malformed frame payload, and the HMI's own abort.
+  - In either case `wobjTG_Weld.oframe` still holds the previous frame. Hits measured there
+    would become a wrong touch-up, which the HMI then **saves to the project**.
+  - FANUC touches regardless of the weld status. Skip (0) still touches on ABB too, because
+    only `nTG_DoTouchSense` gates the block.
+  - `TD05Touch.mod` carries the line as well. VC-proven (P5 E4): `10 5 4 100`.
+- **D14 (P5): `TG_TouchSearch` keeps its (approach, contact) signature; the planner passes the
+  solved contact.**
+  - FANUC's `Search[+X]` needs only the approach and an axis label.
+  - The planner already stores the solved contact TCP on every search instruction
+    (`search_contact_embedded_target`). Its direction in the weld's CAD frame is
+    `-snapped_axis` by construction, so no frame convention has to be assumed to turn a label
+    into a vector.
+  - The translator cross-checks the geometry against the label.
+
 ### 8.2 Still open
 
-None.
+- **Q-P4a: should FANUC also skip the touch block of a weld whose TSP weld-frame reply served no
+  frame?**
+  - Today a FANUC weld that is unchecked, or whose localization failed without an abort (reply
+    0), is still touched when it has touch data. It is searched in a stale UFRAME, and its
+    touch-up is overwritten from that search.
+  - Setting `touch_sense_block_tied_to_tsp_request = true` for FANUC in `RobotBrand.h` would give
+    FANUC ABB's whole TSP tie:
+    - skip such a block;
+    - clear the touch-up only at a TSP request, on every pass (FANUC today clears at the weld's
+      first request of the run, and a repeated block drops the touch-up the served frame
+      carried);
+    - undo the clear when that request serves no frame.
+  - It was left off because it changes field FANUC behaviour.
+- **Q-P4b: should an unusable id-18 report stop the robot where it stands?**
+  - That needs a receive without the acknowledgement, which would leave the robot waiting at the
+    contact point. Today it acknowledges, and the run ends at the robot's next request (see
+    §6 P4).
+
+- **Q-P5a: should ABB touch generation wait behind a planner config key until P6?**
+  - As drafted, `supports_touch_generation` is on for ABB, gated only on HMI mode and indexed
+    welds.
+  - An HMI without P4 aborts an ABB run at id 16 with a message, so a premature generation
+    fails loudly rather than silently.
+  - The HMI's P4 config key (§5.1) is then the one switch that enables touch sensing on a cell.
 
 ---
 

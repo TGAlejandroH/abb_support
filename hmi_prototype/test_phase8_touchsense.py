@@ -338,6 +338,107 @@ class TestTouchWire(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# P5: the touch points come from the PROJECT, per weld - as the HMI reads a .tgs
+# ---------------------------------------------------------------------------
+
+def _write_tgs(path, welds):
+    """welds: [(weld_id, name, [payload, ...])] -> the two native .tgs tables the HMI reads."""
+    import json
+    import sqlite3
+    db = sqlite3.connect(path)
+    try:
+        db.executescript(
+            "CREATE TABLE weld_items(weld_id TEXT PRIMARY KEY, project_node_id TEXT, name TEXT,"
+            " robot_group_name TEXT, order_index INTEGER, payload_json TEXT, generation_state_json TEXT);"
+            "CREATE TABLE weld_touch_points(touch_point_id TEXT PRIMARY KEY, weld_id TEXT,"
+            " order_index INTEGER, payload_json TEXT);")
+        for w_index, (weld_id, name, payloads) in enumerate(welds):
+            db.execute("INSERT INTO weld_items VALUES (?,?,?,?,?,?,?)", (weld_id, "p", name, "R1", w_index, "{}", "{}"))
+            # Inserted in REVERSE so the reader has to sort by order_index itself.
+            for index, payload in reversed(list(enumerate(payloads))):
+                db.execute("INSERT INTO weld_touch_points VALUES (?,?,?,?)",
+                           (f"{weld_id}_{index}", weld_id, index, json.dumps(payload)))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _planner_payload(point_mm, axis):
+    """A payload as the Weld Planner persists it (normalize_touch_point_payload + root_cad)."""
+    return {"placement_mode": "manual", "source_cad_ref": {}, "coordinate_frame": "root_cad",
+            "touch_point_cad_local_mm": list(point_mm),
+            "approach_point_cad_local_mm": [p + 30.0 * a for p, a in zip(point_mm, axis)],
+            "base_normal_cad_local": list(axis), "normal_cad_local": list(axis),
+            "snapped_axis_cad_local": list(axis)}
+
+
+class TestTgsTouchPoints(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, self.dir, True)
+
+    def test_weld_names_come_from_the_r_w_f_tokens(self):
+        self.assertEqual(abb_server.weld_name_from_sub("TSPWeld2_full"), "Weld2")
+        self.assertEqual(abb_server.weld_name_from_sub("PWeld2"), "Weld2")
+        for token in ("none", "", None, "TSP_full", "P"):
+            self.assertIsNone(abb_server.weld_name_from_sub(token))
+
+    def test_payloads_are_read_as_the_hmis_tgs_store_reads_them(self):
+        """TGuideProjectTgsStore.cpp: order by order_index; touch_point_cad_local_mm -> the
+        nominal; snapped_axis_cad_local -> its dominant +/-1 axis; a payload without them keeps
+        its own touch_point / snapped_axis; one with neither is skipped."""
+        path = os.path.join(self.dir, "p.tgs")
+        _write_tgs(path, [
+            ("w2", "Weld2", [
+                _planner_payload((0.0, 0.0, -20.0), (-0.96, 0.2, 0.1)),
+                _planner_payload((50.0, 20.0, 0.0), (0.0, 0.0, 1.0)),
+                {"touch_point": [1.0, 2.0, 3.0], "snapped_axis": [0.0, 1.0, 0.0]},
+                {"placement_mode": "manual"},
+            ]),
+            ("w3", "Weld3", []),
+        ])
+        points = abb_server.load_tgs_touch_points(path)
+
+        self.assertEqual(list(points), ["Weld2"])
+        self.assertEqual(points["Weld2"], [
+            point((0.0, 0.0, -20.0), (-1.0, 0.0, 0.0)),
+            point((50.0, 20.0, 0.0), (0.0, 0.0, 1.0)),
+            point((1.0, 2.0, 3.0), (0.0, 1.0, 0.0)),
+        ])
+
+    def test_the_r_w_f_token_selects_the_welds_points(self):
+        """With a project loaded, the TSP R_W_F picks its weld's points - the HMI's current weld -
+        and the block runs on them exactly as on the directly-set list."""
+        robot, hmi = run_touch_cycle(lambda h: (
+            setattr(h, "touch_points", []),
+            setattr(h, "touch_points_by_weld", {"Weld2": TOUCH_WIRE_DEMO["touch_points"]})))
+        self.assertEqual(robot.ts_flag, 1)
+        self.assertEqual(hmi.request_log, ["10", "5", "4", "16", "18", "18", "19", "4", "100"])
+        want = rotate_by_wpr(*hmi.weld_frame_xyzwpr[3:6], TOUCH_WIRE_DEMO["delta_cad"])
+        for got, w in zip(hmi.touch_offset_base, want):
+            self.assertAlmostEqual(got, w, places=6)
+
+    def test_a_weld_the_project_has_no_points_for_answers_zero(self):
+        robot, hmi = run_touch_cycle(lambda h: setattr(h, "touch_points_by_weld",
+                                                       {"Weld9": TOUCH_WIRE_DEMO["touch_points"]}))
+        self.assertEqual(robot.ts_flag, 0)
+        self.assertNotIn("18", hmi.request_log)
+
+    def test_the_planner_export_carries_td05touchs_points(self):
+        """P5 bench output: the Weld Planner's .tgs for TD05Touch's part holds the P3 nominals."""
+        path = os.path.join(REPO_ROOT, "hmi_prototype", "vc_probes", "planner_out", "TsPlan05.tgs")
+        if not os.path.exists(path):
+            self.skipTest("no planner export yet (vc_probes/planner_touch_vc.py export)")
+        self.assertEqual(abb_server.load_tgs_touch_points(path)["Weld2"],
+                         [point(tuple(p["nominal"]), tuple(p["snapped_axis"])) for p in TOUCH_REAL_DEMO["touch_points"]])
+
+
+REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+
+# ---------------------------------------------------------------------------
 # P3: TD05Touch.mod, TG_TrRig.mod and TOUCH_REAL_DEMO must describe ONE part
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,250 @@
+{
+ "done": "1",
+ "seconds": 8.5,
+ "station": 1,
+ "tool": "[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]]",
+ "poses": {
+  "Home": {
+   "robax_deg": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    30.0,
+    0.0
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "Via": {
+   "robax_deg": [
+    -1.27004,
+    -3.32845,
+    9.37792,
+    2.70705,
+    23.9802,
+    -3.10879
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "A1": {
+   "robax_deg": [
+    -1.27004,
+    -3.36479,
+    12.1788,
+    3.04007,
+    21.2192,
+    -3.4694
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "C1": {
+   "robax_deg": [
+    -2.23856e-15,
+    -3.38223,
+    12.1953,
+    4.30994e-15,
+    21.1868,
+    -1.07943e-13
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "A2": {
+   "robax_deg": [
+    2.14783,
+    -4.36026,
+    10.81,
+    -4.64333,
+    23.6367,
+    5.32957
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "C2": {
+   "robax_deg": [
+    2.14783,
+    -4.38644,
+    12.2176,
+    -4.91518,
+    22.2601,
+    5.62476
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "WA": {
+   "robax_deg": [
+    2.07026,
+    -1.7297,
+    7.84136,
+    -4.41702,
+    23.9676,
+    5.07295
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "WS": {
+   "robax_deg": [
+    2.07026,
+    -1.76729,
+    9.49181,
+    -4.71721,
+    22.3599,
+    5.39942
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "WE": {
+   "robax_deg": [
+    2.16405,
+    -4.90893,
+    12.4723,
+    -4.89628,
+    22.5283,
+    5.60667
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  },
+  "WD": {
+   "robax_deg": [
+    2.16405,
+    -4.86614,
+    10.8188,
+    -4.58754,
+    24.1335,
+    5.27046
+   ],
+   "extax": [
+    9000000000.0,
+    0.0,
+    45.0,
+    9000000000.0,
+    9000000000.0,
+    9000000000.0
+   ]
+  }
+ },
+ "elog": [
+  [
+   7953,
+   "10157",
+   "Program restarted",
+   "Execution of task T_ROB1 has been restarted from where it was previously stopped. The restart order was initiated by an action causing the UNDO handler to execute."
+  ],
+  [
+   7954,
+   "10133",
+   "Program stopped",
+   "The task T_ROB1 has stopped. The reason is that the task is ready with the execution of the UNDO handlers."
+  ],
+  [
+   7955,
+   "10002",
+   "Program pointer has been reset",
+   "The program pointer of task T_ROB1 has been reset."
+  ],
+  [
+   7956,
+   "10149",
+   "Program Pointer moved to routine",
+   "The program pointer in task T_ROB1 has been moved to routine TG_P5Run by Default User."
+  ],
+  [
+   7957,
+   "10052",
+   "Regain start",
+   "A regain movement has started."
+  ],
+  [
+   7958,
+   "10053",
+   "Regain ready",
+   "The regain movement is ready."
+  ],
+  [
+   7959,
+   "10151",
+   "Program started",
+   "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+  ],
+  [
+   7960,
+   "80003",
+   "\\n SmarTac Initialized\\n",
+   "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+  ],
+  [
+   7961,
+   "50501",
+   "Short movements",
+   "One or more consecutive move instructions resulted in movements close to zero length.Task: T_ROB1.Program ref. /TG_P5Survey/TG_P5Run/MoveAbsJ/65."
+  ],
+  [
+   7962,
+   "10122",
+   "Program stopped",
+   "The task T_ROB1 has stopped. The reason is that the task is ready."
+  ]
+ ]
+}

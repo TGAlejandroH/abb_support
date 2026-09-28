@@ -79,6 +79,10 @@ MODULE TD05Touch_Mod
         ! ================ TouchSense for Weld2 (FANUC lines 76-196) =========
         stTG_SubName:="TSPWeld2_full";
         TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;
+        ! Not in FANUC's sample (touch-sense P5): 2 = a malformed frame, and
+        ! wobjTG_Weld.oframe still holds the previous one. Hits measured there
+        ! would become a wrong touch-up the HMI saves to the project.
+        IF nTG_WeldStatus=2 GOTO abort_end;
         TG_ReqTouchSenseDo;
         TG_CamClose;
         IF nTG_DoTouchSense=1 THEN
