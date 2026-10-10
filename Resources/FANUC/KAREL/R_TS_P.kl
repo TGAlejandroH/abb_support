@@ -1,0 +1,57 @@
+PROGRAM R_TS_P
+    -- Request Touch Sense Point Record
+
+VAR
+    comm_file:         FILE
+    status:               INTEGER
+    cmd:                  STRING[254]
+    resp:                  STRING[254]
+    out:                    STRING[254]
+    X,Y,Z,W,P,R:     REAL
+    cpos:                  XYZWPR
+
+--CONST
+ --   POS_REG_NUMBER_OF_RECORDED_TOUCHED_POINT = 194
+
+BEGIN -- Begin main program
+
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+
+    -- Sending request ID
+    resp = '18' -- request id
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+      
+    cpos = GET_POS_REG(32, status)
+    
+   CNV_REAL_STR(cpos.x, 8, 3, out)
+    resp =  out
+
+    CNV_REAL_STR(cpos.y, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.z, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.w, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.p, 8, 3, out)
+    resp = resp + ',' + out
+
+    CNV_REAL_STR(cpos.r, 8, 3, out)
+    resp = resp + ',' + out
+    
+   -- WRITE('Sending touched point: ', CR, resp, CR)
+    
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+    
+
+    
+    
+    
+    CLOSE FILE comm_file
+
+END R_TS_P

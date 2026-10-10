@@ -15,6 +15,7 @@ import threading
 import unittest
 
 import abb_server
+from fake_rapid import FakeHandshake
 from abb_server import (
     ACK,
     AbbTgsHmi,
@@ -50,6 +51,9 @@ class FakeTgsRobot(threading.Thread):
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
+        # The start handshake every cycle opens with (fake_rapid.py), on its own
+        # ephemeral port - never the real 2001.
+        self.handshake = FakeHandshake()
 
     # -- primitives, mirroring TG_Comms helpers ------------------------------
 
@@ -76,6 +80,8 @@ class FakeTgsRobot(threading.Thread):
 
     def run(self):
         try:
+            if self.handshake.serve() != "1":
+                return                      # refused: the part ends, no run
             conn, _ = self.listener.accept()
             with conn:
                 self._run_cycle(conn)
@@ -83,6 +89,7 @@ class FakeTgsRobot(threading.Thread):
             self.errors.append(exc)
         finally:
             self.listener.close()
+            self.handshake.close()
 
     def _run_cycle(self, conn):                              # tgMainCycle
         self.received["prog_sel"] = self._prompt(conn, "Give me the program ID")
@@ -190,7 +197,8 @@ def run_one_cycle(hmi_config=None):
     """Run the fake robot against a fresh AbbTgsHmi; return (robot, hmi)."""
     robot = FakeTgsRobot()
     robot.start()
-    hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port, verbose=False)
+    hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port,
+                    handshake_port=robot.handshake.port, verbose=False)
     for key, value in (hmi_config or {}).items():
         setattr(hmi, key, value)
     hmi.serve_cycle()

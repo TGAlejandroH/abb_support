@@ -1,0 +1,424 @@
+{
+ "results": {
+  "baseline": {
+   "hmi_log": [
+    "10",
+    "5",
+    "4",
+    "16",
+    "18",
+    "18",
+    "19",
+    "4",
+    "100"
+   ],
+   "measured": [
+    [
+     -0.22,
+     0.0,
+     -20.0
+    ],
+    [
+     50.0,
+     20.0,
+     0.12
+    ]
+   ],
+   "offset": [
+    4.884981308350689e-17,
+    -0.22000000000000006,
+    0.12
+   ],
+   "frame19": [
+    1600.0,
+    -0.22000000000000006,
+    1450.12,
+    0.0,
+    0.0,
+    90.0
+   ],
+   "ctl": {
+    "oframe": [
+     [
+      1600.0,
+      -0.22,
+      1450.12
+     ],
+     [
+      0.707107,
+      0.0,
+      0.0,
+      0.707107
+     ]
+    ],
+    "pauses": 0.0,
+    "zone_made": 1.0,
+    "state_after": "running"
+   },
+   "error": null,
+   "elog": [
+    [
+     7836,
+     "10157",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The restart order was initiated by an action causing the UNDO handler to execute."
+    ],
+    [
+     7837,
+     "10133",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready with the execution of the UNDO handlers."
+    ],
+    [
+     7838,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7839,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TrRun by Default User."
+    ],
+    [
+     7840,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7841,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7842,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7843,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7844,
+     "10125",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that an external or internal stop has occurred."
+    ],
+    [
+     7845,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ]
+   ]
+  },
+  "shifted": {
+   "hmi_log": [
+    "10",
+    "5",
+    "4",
+    "16",
+    "18",
+    "18",
+    "19",
+    "4",
+    "100"
+   ],
+   "measured": [
+    [
+     2.68,
+     0.0,
+     -20.0
+    ],
+    [
+     50.0,
+     20.0,
+     -1.7
+    ]
+   ],
+   "offset": [
+    -5.950795411990839e-16,
+    2.6800000000000006,
+    -1.7
+   ],
+   "frame19": [
+    1600.0,
+    2.6800000000000006,
+    1448.3,
+    0.0,
+    0.0,
+    90.0
+   ],
+   "ctl": {
+    "oframe": [
+     [
+      1600.0,
+      2.68,
+      1448.3
+     ],
+     [
+      0.707107,
+      0.0,
+      0.0,
+      0.707107
+     ]
+    ],
+    "pauses": 0.0,
+    "zone_made": 1.0,
+    "state_after": "running"
+   },
+   "error": null,
+   "elog": [
+    [
+     7846,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7847,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TrRun by Default User."
+    ],
+    [
+     7848,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7849,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7850,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7851,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7852,
+     "10125",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that an external or internal stop has occurred."
+    ],
+    [
+     7853,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ]
+   ]
+  },
+  "aligned": {
+   "hmi_log": [
+    "10",
+    "5",
+    "4",
+    "16",
+    "18",
+    "18",
+    "19",
+    "4",
+    "100"
+   ],
+   "measured": [
+    [
+     3.04,
+     0.0,
+     -20.0
+    ],
+    [
+     50.0,
+     20.0,
+     -2.06
+    ]
+   ],
+   "offset": [
+    -6.750155989720952e-16,
+    3.040000000000001,
+    -2.06
+   ],
+   "frame19": [
+    1600.0,
+    3.040000000000001,
+    1447.94,
+    0.0,
+    0.0,
+    90.0
+   ],
+   "ctl": {
+    "oframe": [
+     [
+      1600.0,
+      3.04,
+      1447.94
+     ],
+     [
+      0.707107,
+      0.0,
+      0.0,
+      0.707107
+     ]
+    ],
+    "pauses": 0.0,
+    "zone_made": 1.0,
+    "state_after": "running"
+   },
+   "error": null,
+   "elog": [
+    [
+     7854,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7855,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TrRun by Default User."
+    ],
+    [
+     7856,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7857,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7858,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7859,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7860,
+     "40210",
+     "Interrupt removed from queue",
+     "All interrupts have been deleted from the interrupt queue in task T_ROB1."
+    ],
+    [
+     7861,
+     "10125",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that an external or internal stop has occurred."
+    ]
+   ]
+  }
+ },
+ "rows": [
+  [
+   "baseline: the full touch block ran, no pause",
+   true,
+   "['10', '5', '4', '16', '18', '18', '19', '4', '100'], pauses 0.0 "
+  ],
+  [
+   "baseline: touch on axis X at the (moved) face",
+   true,
+   "-0.220 mm past the face (need -0.390..1.005); measured [-0.220, 0.000, -20.000]"
+  ],
+  [
+   "baseline: touch on axis Z at the (moved) face",
+   true,
+   "-0.120 mm past the face (need -0.390..1.005); measured [50.000, 20.000, 0.120]"
+  ],
+  [
+   "baseline: HMI offset = the block shift",
+   true,
+   "delta_cad [-0.220, 0.000, 0.120] vs [0.000, 0.000, 0.000] (max err 0.220, need <= 0.39)"
+  ],
+  [
+   "baseline: controller oframe = the frame the HMI served",
+   true,
+   "oframe [1600.000, -0.220, 1450.120], |dmm| 0.0000, |dq| 2.2e-07"
+  ],
+  [
+   "shifted: the full touch block ran, no pause",
+   true,
+   "['10', '5', '4', '16', '18', '18', '19', '4', '100'], pauses 0.0 "
+  ],
+  [
+   "shifted: touch on axis X at the (moved) face",
+   true,
+   "-0.320 mm past the face (need -0.390..1.005); measured [2.680, 0.000, -20.000]"
+  ],
+  [
+   "shifted: touch on axis Z at the (moved) face",
+   true,
+   "-0.300 mm past the face (need -0.390..1.005); measured [50.000, 20.000, -1.700]"
+  ],
+  [
+   "shifted: HMI offset = the block shift",
+   true,
+   "delta_cad [2.680, 0.000, -1.700] vs [3.000, 0.000, -2.000] (max err 0.320, need <= 0.39)"
+  ],
+  [
+   "shifted: controller oframe = the frame the HMI served",
+   true,
+   "oframe [1600.000, 2.680, 1448.300], |dmm| 0.0000, |dq| 2.2e-07"
+  ],
+  [
+   "aligned: the full touch block ran, no pause",
+   true,
+   "['10', '5', '4', '16', '18', '18', '19', '4', '100'], pauses 0.0 "
+  ],
+  [
+   "aligned: touch on axis X at the (moved) face",
+   true,
+   "-0.200 mm past the face (need -0.390..1.005); measured [3.040, 0.000, -20.000]"
+  ],
+  [
+   "aligned: touch on axis Z at the (moved) face",
+   true,
+   "-0.100 mm past the face (need -0.390..1.005); measured [50.000, 20.000, -2.060]"
+  ],
+  [
+   "aligned: HMI offset = the block shift",
+   true,
+   "delta_cad [3.040, 0.000, -2.060] vs [3.240, 0.000, -2.160] (max err 0.200, need <= 0.39)"
+  ],
+  [
+   "aligned: controller oframe = the frame the HMI served",
+   true,
+   "oframe [1600.000, 3.040, 1447.940], |dmm| 0.0000, |dq| 2.2e-07"
+  ],
+  [
+   "shifted - baseline = the shift [3.000, 0.000, -2.000]",
+   true,
+   "[2.900, 0.000, -1.820], max err 0.1800 (need <= 0.390)"
+  ],
+  [
+   "aligned - baseline = the shift [3.240, 0.000, -2.160]",
+   true,
+   "[3.260, 0.000, -2.180], max err 0.0200 (need <= 0.030)"
+  ]
+ ]
+}

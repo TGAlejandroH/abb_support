@@ -1,0 +1,1683 @@
+{
+ "record": {
+  "X1": {
+   "raw": {
+    "stTpStep": "\"X1 done\"",
+    "nTpErrno": "0",
+    "nTpFaceZ": "1372.5",
+    "nTpSearchS": "3.544",
+    "nTpRetries": "0",
+    "nTpDiAtStart": "0",
+    "nTpFrameErr": "-1",
+    "nTpOffLine": "-1",
+    "nTpHitZ": "[1372.6,1372.6,1372.6]",
+    "nTpStopZ": "[1371.65,1371.65,1371.65]",
+    "pTpStart": "[[1738.92,0,1422.5],[0.5,0,0.866025,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpTo": "[[1738.92,0,1272.5],[0.5,0,0.866025,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHit": "[[1738.92,6.59417E-19,1372.6],[0.5,-9.61485E-17,0.866025,-5.55113E-17],[0,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStop": "[[1738.92,-1.36328E-19,1371.65],[0.5,-5.44075E-10,0.866025,-3.14122E-10],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpErrPos": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStartPart": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpToPart": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHitPart": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopPart": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopW": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTpPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]]"
+   },
+   "elog": [
+    [
+     7395,
+     "10157",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The restart order was initiated by an action causing the UNDO handler to execute."
+    ],
+    [
+     7396,
+     "10133",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready with the execution of the UNDO handlers."
+    ],
+    [
+     7397,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7398,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TpX1 by Default User."
+    ],
+    [
+     7399,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7400,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7401,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7402,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7403,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ],
+   "paused_seen": false,
+   "decoded": {
+    "start": {
+     "trans": [
+      1738.92,
+      0.0,
+      1422.5
+     ],
+     "rot": [
+      0.5,
+      0.0,
+      0.866025,
+      0.0
+     ]
+    },
+    "to": {
+     "trans": [
+      1738.92,
+      0.0,
+      1272.5
+     ],
+     "rot": [
+      0.5,
+      0.0,
+      0.866025,
+      0.0
+     ]
+    },
+    "hit": {
+     "trans": [
+      1738.92,
+      6.59417e-19,
+      1372.6
+     ],
+     "rot": [
+      0.5,
+      -9.61485e-17,
+      0.866025,
+      -5.55113e-17
+     ]
+    },
+    "stop": {
+     "trans": [
+      1738.92,
+      -1.36328e-19,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -5.44075e-10,
+      0.866025,
+      -3.14122e-10
+     ]
+    },
+    "err_pos": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "start_part": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "to_part": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "hit_part": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "stop_part": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "stop_w": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "step": "X1 done",
+    "errno": 0.0,
+    "face_z": 1372.5,
+    "search_s": 3.544,
+    "retries": 0.0,
+    "di_at_start": 0.0,
+    "frame_err": -1.0,
+    "off_line": -1.0,
+    "hit_z": [
+     1372.6,
+     1372.6,
+     1372.6
+    ],
+    "stop_z": [
+     1371.65,
+     1371.65,
+     1371.65
+    ],
+    "wobj": {
+     "uframe": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "oframe": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ]
+    }
+   }
+  },
+  "X2": {
+   "raw": {
+    "stTpStep": "\"X2 done\"",
+    "nTpErrno": "0",
+    "nTpFaceZ": "1372.5",
+    "nTpSearchS": "3.544",
+    "nTpRetries": "0",
+    "nTpDiAtStart": "-1",
+    "nTpFrameErr": "0.000122125",
+    "nTpOffLine": "2.52499E-5",
+    "nTpHitZ": "[1372.6,1372.6,1372.6]",
+    "nTpStopZ": "[1371.65,1371.65,1371.65]",
+    "pTpStart": "[[1738.92,8.03039E-20,1422.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[-1,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpTo": "[[1738.92,8.03039E-20,1272.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[-1,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHit": "[[1738.92,6.59417E-19,1372.6],[0.5,-9.61485E-17,0.866025,-5.55113E-17],[0,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStop": "[[1738.92,-1.36328E-19,1371.65],[0.5,-5.44075E-10,0.866025,-3.14122E-10],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpErrPos": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpToPart": "[[-25.4353,101.257,-0.336182],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHitPart": "[[-42.8169,67.5419,92.2946],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopPart": "[[-42.6533,67.8592,91.4229],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopW": "[[1738.92,7.785E-6,1371.65],[0.5,-8.7395E-9,0.866025,-2.8073E-9],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTpPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7404,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7405,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TpX2 by Default User."
+    ],
+    [
+     7406,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7407,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7408,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7409,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7410,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ],
+   "paused_seen": false,
+   "decoded": {
+    "start": {
+     "trans": [
+      1738.92,
+      8.03039e-20,
+      1422.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "to": {
+     "trans": [
+      1738.92,
+      8.03039e-20,
+      1272.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "hit": {
+     "trans": [
+      1738.92,
+      6.59417e-19,
+      1372.6
+     ],
+     "rot": [
+      0.5,
+      -9.61485e-17,
+      0.866025,
+      -5.55113e-17
+     ]
+    },
+    "stop": {
+     "trans": [
+      1738.92,
+      -1.36328e-19,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -5.44075e-10,
+      0.866025,
+      -3.14122e-10
+     ]
+    },
+    "err_pos": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "start_part": {
+     "trans": [
+      -51.4826,
+      50.7332,
+      138.476
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "to_part": {
+     "trans": [
+      -25.4353,
+      101.257,
+      -0.336182
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "hit_part": {
+     "trans": [
+      -42.8169,
+      67.5419,
+      92.2946
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_part": {
+     "trans": [
+      -42.6533,
+      67.8592,
+      91.4229
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_w": {
+     "trans": [
+      1738.92,
+      7.785e-06,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -8.7395e-09,
+      0.866025,
+      -2.8073e-09
+     ]
+    },
+    "step": "X2 done",
+    "errno": 0.0,
+    "face_z": 1372.5,
+    "search_s": 3.544,
+    "retries": 0.0,
+    "di_at_start": -1.0,
+    "frame_err": 0.000122125,
+    "off_line": 2.52499e-05,
+    "hit_z": [
+     1372.6,
+     1372.6,
+     1372.6
+    ],
+    "stop_z": [
+     1371.65,
+     1371.65,
+     1371.65
+    ],
+    "wobj": {
+     "uframe": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "oframe": [
+      [
+       1818.92,
+       -60.0,
+       1302.5
+      ],
+      [
+       0.931103,
+       -0.190791,
+       0.0298408,
+       0.309444
+      ]
+     ]
+    }
+   }
+  },
+  "X6": {
+   "raw": {
+    "stTpStep": "\"X6 done\"",
+    "nTpErrno": "0",
+    "nTpFaceZ": "1372.5",
+    "nTpSearchS": "1.24",
+    "nTpRetries": "0",
+    "nTpDiAtStart": "0",
+    "nTpFrameErr": "0.000122125",
+    "nTpOffLine": "2.52499E-5",
+    "nTpHitZ": "[1372.93,1372.6,1372.6]",
+    "nTpStopZ": "[1369.79,1371.65,1371.65]",
+    "pTpStart": "[[1738.92,2.54094E-19,1422.5],[0.5,-2.88445E-16,0.866025,-1.66534E-16],[0,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpTo": "[[1738.92,2.54094E-19,1272.5],[0.5,-2.88445E-16,0.866025,-1.66534E-16],[0,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHit": "[[1738.92,-3.53114E-18,1372.93],[0.5,-6.12944E-16,0.866025,-3.53885E-16],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStop": "[[1738.92,-4.54355E-18,1369.79],[0.5,1.90426E-9,0.866025,1.09943E-9],[-1,-1,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpErrPos": "[[0,0,0],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpToPart": "[[-25.4353,101.257,-0.336182],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHitPart": "[[-42.8169,67.5419,92.2946],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopPart": "[[-42.6533,67.8592,91.4229],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopW": "[[1738.92,7.785E-6,1371.65],[0.5,-8.7395E-9,0.866025,-2.8073E-9],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTpPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7411,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7412,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TpX6 by Default User."
+    ],
+    [
+     7413,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7414,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7415,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7416,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7417,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ],
+   "paused_seen": false,
+   "decoded": {
+    "start": {
+     "trans": [
+      1738.92,
+      2.54094e-19,
+      1422.5
+     ],
+     "rot": [
+      0.5,
+      -2.88445e-16,
+      0.866025,
+      -1.66534e-16
+     ]
+    },
+    "to": {
+     "trans": [
+      1738.92,
+      2.54094e-19,
+      1272.5
+     ],
+     "rot": [
+      0.5,
+      -2.88445e-16,
+      0.866025,
+      -1.66534e-16
+     ]
+    },
+    "hit": {
+     "trans": [
+      1738.92,
+      -3.53114e-18,
+      1372.93
+     ],
+     "rot": [
+      0.5,
+      -6.12944e-16,
+      0.866025,
+      -3.53885e-16
+     ]
+    },
+    "stop": {
+     "trans": [
+      1738.92,
+      -4.54355e-18,
+      1369.79
+     ],
+     "rot": [
+      0.5,
+      1.90426e-09,
+      0.866025,
+      1.09943e-09
+     ]
+    },
+    "err_pos": {
+     "trans": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rot": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "start_part": {
+     "trans": [
+      -51.4826,
+      50.7332,
+      138.476
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "to_part": {
+     "trans": [
+      -25.4353,
+      101.257,
+      -0.336182
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "hit_part": {
+     "trans": [
+      -42.8169,
+      67.5419,
+      92.2946
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_part": {
+     "trans": [
+      -42.6533,
+      67.8592,
+      91.4229
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_w": {
+     "trans": [
+      1738.92,
+      7.785e-06,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -8.7395e-09,
+      0.866025,
+      -2.8073e-09
+     ]
+    },
+    "step": "X6 done",
+    "errno": 0.0,
+    "face_z": 1372.5,
+    "search_s": 1.24,
+    "retries": 0.0,
+    "di_at_start": 0.0,
+    "frame_err": 0.000122125,
+    "off_line": 2.52499e-05,
+    "hit_z": [
+     1372.93,
+     1372.6,
+     1372.6
+    ],
+    "stop_z": [
+     1369.79,
+     1371.65,
+     1371.65
+    ],
+    "wobj": {
+     "uframe": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "oframe": [
+      [
+       1818.92,
+       -60.0,
+       1302.5
+      ],
+      [
+       0.931103,
+       -0.190791,
+       0.0298408,
+       0.309444
+      ]
+     ]
+    }
+   }
+  },
+  "X3a": {
+   "raw": {
+    "stTpStep": "\"X3a ERR_WHLSEARCH, back at S\"",
+    "nTpErrno": "1072",
+    "nTpFaceZ": "1372.5",
+    "nTpSearchS": "9.948",
+    "nTpRetries": "0",
+    "nTpDiAtStart": "-1",
+    "nTpFrameErr": "0.000122125",
+    "nTpOffLine": "2.52499E-5",
+    "nTpHitZ": "[1372.93,1372.6,1372.6]",
+    "nTpStopZ": "[1369.79,1371.65,1371.65]",
+    "pTpStart": "[[1738.92,4.1787E-19,1422.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpTo": "[[1738.92,4.1787E-19,1272.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHit": "[[1738.92,-3.53114E-18,1372.93],[0.5,-6.12944E-16,0.866025,-3.53885E-16],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStop": "[[1738.93,-0.00190615,1422.39],[0.499979,3.2049E-7,0.866037,-4.46392E-7],[-1,-1,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpErrPos": "[[1738.92,2.09815E-6,1273.17],[0.5,-5.22465E-10,0.866025,3.01645E-10],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpToPart": "[[-25.4353,101.257,-0.336182],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHitPart": "[[-42.8169,67.5419,92.2946],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopPart": "[[-42.6533,67.8592,91.4229],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopW": "[[1738.92,7.785E-6,1371.65],[0.5,-8.7395E-9,0.866025,-2.8073E-9],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTpPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7418,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7419,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TpX3Miss by Default User."
+    ],
+    [
+     7420,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7421,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7422,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7423,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7424,
+     "40574",
+     "Search Warning",
+     "Task: T_ROB1.Number of hits during search was 0. Before performing next search, make sure that TCP is moved back to the start position of the search path.Program ref: /TG_TouchProbe/TG_TpX3Miss/SearchL/246."
+    ],
+    [
+     7425,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ],
+   "paused_seen": false,
+   "decoded": {
+    "start": {
+     "trans": [
+      1738.92,
+      4.1787e-19,
+      1422.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "to": {
+     "trans": [
+      1738.92,
+      4.1787e-19,
+      1272.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "hit": {
+     "trans": [
+      1738.92,
+      -3.53114e-18,
+      1372.93
+     ],
+     "rot": [
+      0.5,
+      -6.12944e-16,
+      0.866025,
+      -3.53885e-16
+     ]
+    },
+    "stop": {
+     "trans": [
+      1738.93,
+      -0.00190615,
+      1422.39
+     ],
+     "rot": [
+      0.499979,
+      3.2049e-07,
+      0.866037,
+      -4.46392e-07
+     ]
+    },
+    "err_pos": {
+     "trans": [
+      1738.92,
+      2.09815e-06,
+      1273.17
+     ],
+     "rot": [
+      0.5,
+      -5.22465e-10,
+      0.866025,
+      3.01645e-10
+     ]
+    },
+    "start_part": {
+     "trans": [
+      -51.4826,
+      50.7332,
+      138.476
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "to_part": {
+     "trans": [
+      -25.4353,
+      101.257,
+      -0.336182
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "hit_part": {
+     "trans": [
+      -42.8169,
+      67.5419,
+      92.2946
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_part": {
+     "trans": [
+      -42.6533,
+      67.8592,
+      91.4229
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_w": {
+     "trans": [
+      1738.92,
+      7.785e-06,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -8.7395e-09,
+      0.866025,
+      -2.8073e-09
+     ]
+    },
+    "step": "X3a ERR_WHLSEARCH, back at S",
+    "errno": 1072.0,
+    "face_z": 1372.5,
+    "search_s": 9.948,
+    "retries": 0.0,
+    "di_at_start": -1.0,
+    "frame_err": 0.000122125,
+    "off_line": 2.52499e-05,
+    "hit_z": [
+     1372.93,
+     1372.6,
+     1372.6
+    ],
+    "stop_z": [
+     1369.79,
+     1371.65,
+     1371.65
+    ],
+    "wobj": {
+     "uframe": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "oframe": [
+      [
+       1818.92,
+       -60.0,
+       1302.5
+      ],
+      [
+       0.931103,
+       -0.190791,
+       0.0298408,
+       0.309444
+      ]
+     ]
+    }
+   }
+  },
+  "X3b": {
+   "raw": {
+    "stTpStep": "\"X3b ERR_SIGSUPSEARCH, back at S\"",
+    "nTpErrno": "1073",
+    "nTpFaceZ": "1372.5",
+    "nTpSearchS": "9.948",
+    "nTpRetries": "0",
+    "nTpDiAtStart": "1",
+    "nTpFrameErr": "0.000122125",
+    "nTpOffLine": "2.52499E-5",
+    "nTpHitZ": "[1372.93,1372.6,1372.6]",
+    "nTpStopZ": "[1369.79,1371.65,1371.65]",
+    "pTpStart": "[[1738.92,3.01831E-19,1422.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[-1,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpTo": "[[1738.92,3.01831E-19,1272.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[-1,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHit": "[[1738.92,-3.53114E-18,1372.93],[0.5,-6.12944E-16,0.866025,-3.53885E-16],[-1,-1,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStop": "[[1738.93,-0.00299755,1422.26],[0.499968,5.05839E-7,0.866044,-6.99875E-7],[-1,-1,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpErrPos": "[[1738.92,-1.01694E-18,1422.5],[0.5,9.61492E-17,0.866025,5.55119E-17],[-1,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpToPart": "[[-25.4353,101.257,-0.336182],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHitPart": "[[-42.8169,67.5419,92.2946],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopPart": "[[-42.6533,67.8592,91.4229],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopW": "[[1738.92,7.785E-6,1371.65],[0.5,-8.7395E-9,0.866025,-2.8073E-9],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTpPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7426,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7427,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TpX3Sig by Default User."
+    ],
+    [
+     7428,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7429,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7430,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7431,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7432,
+     "40661",
+     "Search Error",
+     "Task: T_ROB1.The signal diTG_SimTouched for the SearchX instruction is already set to the specified value (high or low) at the start of searching, or the I/O-device for the signal isn&apos;t up and running for the occasi"
+    ],
+    [
+     7433,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ],
+   "paused_seen": false,
+   "decoded": {
+    "start": {
+     "trans": [
+      1738.92,
+      3.01831e-19,
+      1422.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "to": {
+     "trans": [
+      1738.92,
+      3.01831e-19,
+      1272.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "hit": {
+     "trans": [
+      1738.92,
+      -3.53114e-18,
+      1372.93
+     ],
+     "rot": [
+      0.5,
+      -6.12944e-16,
+      0.866025,
+      -3.53885e-16
+     ]
+    },
+    "stop": {
+     "trans": [
+      1738.93,
+      -0.00299755,
+      1422.26
+     ],
+     "rot": [
+      0.499968,
+      5.05839e-07,
+      0.866044,
+      -6.99875e-07
+     ]
+    },
+    "err_pos": {
+     "trans": [
+      1738.92,
+      -1.01694e-18,
+      1422.5
+     ],
+     "rot": [
+      0.5,
+      9.61492e-17,
+      0.866025,
+      5.55119e-17
+     ]
+    },
+    "start_part": {
+     "trans": [
+      -51.4826,
+      50.7332,
+      138.476
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "to_part": {
+     "trans": [
+      -25.4353,
+      101.257,
+      -0.336182
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "hit_part": {
+     "trans": [
+      -42.8169,
+      67.5419,
+      92.2946
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_part": {
+     "trans": [
+      -42.6533,
+      67.8592,
+      91.4229
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_w": {
+     "trans": [
+      1738.92,
+      7.785e-06,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -8.7395e-09,
+      0.866025,
+      -2.8073e-09
+     ]
+    },
+    "step": "X3b ERR_SIGSUPSEARCH, back at S",
+    "errno": 1073.0,
+    "face_z": 1372.5,
+    "search_s": 9.948,
+    "retries": 0.0,
+    "di_at_start": 1.0,
+    "frame_err": 0.000122125,
+    "off_line": 2.52499e-05,
+    "hit_z": [
+     1372.93,
+     1372.6,
+     1372.6
+    ],
+    "stop_z": [
+     1369.79,
+     1371.65,
+     1371.65
+    ],
+    "wobj": {
+     "uframe": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "oframe": [
+      [
+       1818.92,
+       -60.0,
+       1302.5
+      ],
+      [
+       0.931103,
+       -0.190791,
+       0.0298408,
+       0.309444
+      ]
+     ]
+    }
+   }
+  },
+  "X3c": {
+   "raw": {
+    "stTpStep": "\"X3c hit after 1 retry | caller resumed\"",
+    "nTpErrno": "1072",
+    "nTpFaceZ": "1372.5",
+    "nTpSearchS": "9.948",
+    "nTpRetries": "1",
+    "nTpDiAtStart": "-1",
+    "nTpFrameErr": "0.000122125",
+    "nTpOffLine": "2.52499E-5",
+    "nTpHitZ": "[1372.93,1372.6,1372.6]",
+    "nTpStopZ": "[1369.79,1371.65,1371.65]",
+    "pTpStart": "[[1738.92,8.38149E-19,1422.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpTo": "[[1738.92,8.38149E-19,1272.5],[0.5,2.16334E-16,0.866025,1.24901E-16],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHit": "[[1738.92,1.40276E-17,1372.6],[0.5,-1.91095E-15,0.866025,-1.10328E-15],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStop": "[[1738.92,1.27357E-17,1371.65],[0.5,-5.44075E-10,0.866025,-3.14122E-10],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpErrPos": "[[1738.92,2.09815E-6,1273.17],[0.5,-5.22465E-10,0.866025,3.01645E-10],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStartPart": "[[-51.4826,50.7332,138.476],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpToPart": "[[-25.4353,101.257,-0.336182],[0.491394,0.363382,0.791438,0.0105077],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpHitPart": "[[-42.8169,67.5419,92.2946],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopPart": "[[-42.6533,67.8592,91.4229],[0.491394,0.363382,0.791438,0.0105077],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "pTpStopW": "[[1738.92,7.785E-6,1371.65],[0.5,-8.7395E-9,0.866025,-2.8073E-9],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]]",
+    "wobjTpPart": "[FALSE,TRUE,\"\",[[0,0,0],[1,0,0,0]],[[1818.92,-60,1302.5],[0.931103,-0.190791,0.0298408,0.309444]]]"
+   },
+   "elog": [
+    [
+     7434,
+     "10002",
+     "Program pointer has been reset",
+     "The program pointer of task T_ROB1 has been reset."
+    ],
+    [
+     7435,
+     "10149",
+     "Program Pointer moved to routine",
+     "The program pointer in task T_ROB1 has been moved to routine TG_TpX3Pause by Default User."
+    ],
+    [
+     7436,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7437,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7438,
+     "10151",
+     "Program started",
+     "Execution of task T_ROB1 has been started from the first instruction of the task&apos;s entry routine. The originator is an external client."
+    ],
+    [
+     7439,
+     "80003",
+     "\\n SmarTac Initialized\\n",
+     "\\n stdiSE_DET diWld1Touched\\n \\n stdoSE_SENSOR doWld1TouchOn\\n \\n stdiSE_SENSOR_ACT diWld1TouchActive\\n \\n \\n \\n"
+    ],
+    [
+     7440,
+     "40574",
+     "Search Warning",
+     "Task: T_ROB1.Number of hits during search was 0. Before performing next search, make sure that TCP is moved back to the start position of the search path.Program ref: /TG_TouchProbe/TG_TpX3PauseBody/SearchL/319."
+    ],
+    [
+     7441,
+     "10136",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task has reached a stop instruction."
+    ],
+    [
+     7442,
+     "10052",
+     "Regain start",
+     "A regain movement has started."
+    ],
+    [
+     7443,
+     "10053",
+     "Regain ready",
+     "The regain movement is ready."
+    ],
+    [
+     7444,
+     "10156",
+     "Program restarted",
+     "Execution of task T_ROB1 has been restarted from where it was previously stopped. The originator is an external client."
+    ],
+    [
+     7445,
+     "10122",
+     "Program stopped",
+     "The task T_ROB1 has stopped. The reason is that the task is ready."
+    ]
+   ],
+   "paused_seen": true,
+   "decoded": {
+    "start": {
+     "trans": [
+      1738.92,
+      8.38149e-19,
+      1422.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "to": {
+     "trans": [
+      1738.92,
+      8.38149e-19,
+      1272.5
+     ],
+     "rot": [
+      0.5,
+      2.16334e-16,
+      0.866025,
+      1.24901e-16
+     ]
+    },
+    "hit": {
+     "trans": [
+      1738.92,
+      1.40276e-17,
+      1372.6
+     ],
+     "rot": [
+      0.5,
+      -1.91095e-15,
+      0.866025,
+      -1.10328e-15
+     ]
+    },
+    "stop": {
+     "trans": [
+      1738.92,
+      1.27357e-17,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -5.44075e-10,
+      0.866025,
+      -3.14122e-10
+     ]
+    },
+    "err_pos": {
+     "trans": [
+      1738.92,
+      2.09815e-06,
+      1273.17
+     ],
+     "rot": [
+      0.5,
+      -5.22465e-10,
+      0.866025,
+      3.01645e-10
+     ]
+    },
+    "start_part": {
+     "trans": [
+      -51.4826,
+      50.7332,
+      138.476
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "to_part": {
+     "trans": [
+      -25.4353,
+      101.257,
+      -0.336182
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "hit_part": {
+     "trans": [
+      -42.8169,
+      67.5419,
+      92.2946
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_part": {
+     "trans": [
+      -42.6533,
+      67.8592,
+      91.4229
+     ],
+     "rot": [
+      0.491394,
+      0.363382,
+      0.791438,
+      0.0105077
+     ]
+    },
+    "stop_w": {
+     "trans": [
+      1738.92,
+      7.785e-06,
+      1371.65
+     ],
+     "rot": [
+      0.5,
+      -8.7395e-09,
+      0.866025,
+      -2.8073e-09
+     ]
+    },
+    "step": "X3c hit after 1 retry | caller resumed",
+    "errno": 1072.0,
+    "face_z": 1372.5,
+    "search_s": 9.948,
+    "retries": 1.0,
+    "di_at_start": -1.0,
+    "frame_err": 0.000122125,
+    "off_line": 2.52499e-05,
+    "hit_z": [
+     1372.93,
+     1372.6,
+     1372.6
+    ],
+    "stop_z": [
+     1369.79,
+     1371.65,
+     1371.65
+    ],
+    "wobj": {
+     "uframe": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "oframe": [
+      [
+       1818.92,
+       -60.0,
+       1302.5
+      ],
+      [
+       0.931103,
+       -0.190791,
+       0.0298408,
+       0.309444
+      ]
+     ]
+    }
+   }
+  }
+ },
+ "verdicts": [
+  [
+   "X1 ran to completion",
+   true,
+   "step 'X1 done', ERRNO 0.0"
+  ],
+  [
+   "X1 SearchL STOPPED on the DI (did not run the stroke to the ToPoint)",
+   true,
+   "stopped 99.15, 99.15, 99.15 mm short of the ToPoint (need >= 50)"
+  ],
+  [
+   "X1 SearchPoint AT the face (detection point, not stop point)",
+   true,
+   "hit -0.100, -0.100, -0.100 mm inside the face (need -0.225..1.005)"
+  ],
+  [
+   "X1 robot stopped PAST the hit (overshoot >= 0)",
+   true,
+   "overshoot 0.950, 0.950, 0.950 mm"
+  ],
+  [
+   "X1 repeatable (TRM: 0.1-0.3 mm)",
+   true,
+   "spread 0.000 mm"
+  ],
+  [
+   "X2 ran to completion",
+   true,
+   "step 'X2 done', ERRNO 0.0"
+  ],
+  [
+   "X2 uframe identity (THE RULE)",
+   true,
+   "uframe ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0))"
+  ],
+  [
+   "X2 CRobT(part) == inv(oframe) * CRobT(world) at the stop",
+   true,
+   "0.0043 mm (RAPID said 0.0001)"
+  ],
+  [
+   "X2 hit ON the part-frame search line",
+   true,
+   "0.0001 mm off the line (RAPID said 0.0000)"
+  ],
+  [
+   "X2 oframe * SearchPoint lands AT the world face",
+   true,
+   "-0.096 mm inside the face; hit_world [1738.920, 0.000, 1372.596]"
+  ],
+  [
+   "X2 same world hit as X1 (repeatability)",
+   true,
+   "z 1372.596 vs X1 mean 1372.600"
+  ],
+  [
+   "X2 (diagnostic) SearchPoint is NOT world coordinates",
+   true,
+   "read as world it would sit 1280.205 mm from the face"
+  ],
+  [
+   "X2 SearchPoint orientation = the part-frame tool orientation",
+   true,
+   "max quaternion component difference 0.00e+00"
+  ],
+  [
+   "X6 ran to completion",
+   true,
+   "step 'X6 done', ERRNO 0.0"
+  ],
+  [
+   "X6 SearchPoint at the face at 50 mm/s (same timing window)",
+   true,
+   "hit -0.430 mm inside the face (need -0.750..3.350)"
+  ],
+  [
+   "X6 overshoot larger than at 15 mm/s",
+   true,
+   "3.140 mm at 50 mm/s vs 0.950 mm at 15 mm/s"
+  ],
+  [
+   "X3a ERR_WHLSEARCH and recovered to S",
+   true,
+   "step 'X3a ERR_WHLSEARCH, back at S', ERRNO 1072.0"
+  ],
+  [
+   "X3a robot AT the ToPoint when the error arrives",
+   true,
+   "0.670 mm from the ToPoint"
+  ],
+  [
+   "X3a full 150 mm stroke at 15 mm/s",
+   true,
+   "9.95 s (need 9.5..13.0)"
+  ],
+  [
+   "X3a StorePath/MoveL/RestoPath/ClearPath/StartMove brought it back to S",
+   true,
+   "0.110 mm from S"
+  ],
+  [
+   "X3b ERR_SIGSUPSEARCH and recovered",
+   true,
+   "step 'X3b ERR_SIGSUPSEARCH, back at S', ERRNO 1073.0"
+  ],
+  [
+   "X3b DI was high before the search",
+   true,
+   "DInput = 1.0"
+  ],
+  [
+   "X3b robot stopped at the START of the search path",
+   true,
+   "0.000 mm from S"
+  ],
+  [
+   "X3c paused on the miss (Stop inside the ERROR handler)",
+   true,
+   "runner saw 'X3c paused': True"
+  ],
+  [
+   "X3c RETRY after Start hit the part, late-bound caller resumed",
+   true,
+   "step 'X3c hit after 1 retry | caller resumed', retries 1.0"
+  ],
+  [
+   "X3c first attempt ran to the ToPoint",
+   true,
+   "0.670 mm from the ToPoint"
+  ],
+  [
+   "X3c retried hit AT the face",
+   true,
+   "-0.100 mm inside the face"
+  ]
+ ]
+}

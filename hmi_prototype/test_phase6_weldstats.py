@@ -27,6 +27,7 @@ import threading
 import unittest
 
 from abb_server import AbbTgsHmi, fmt_real
+from fake_rapid import FakeHandshake
 from test_phase2 import TD05TEST_WELD_STATS, FakeTgsRobot, run_one_cycle
 from test_phase4_weld import TD05WELD_WELD_STATS, FakeWeldRobot, run_cycle
 
@@ -48,9 +49,14 @@ class OneRequestRobot(threading.Thread):
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
+        # The start handshake every cycle opens with (fake_rapid.py), on its own
+        # ephemeral port - never the real 2001.
+        self.handshake = FakeHandshake()
 
     def run(self):
         try:
+            if self.handshake.serve() != "1":
+                return                      # refused: the part ends, no run
             conn, _ = self.listener.accept()
             with conn:
                 conn.sendall(b"Give me the program ID")
@@ -62,13 +68,15 @@ class OneRequestRobot(threading.Thread):
             self.errors.append(exc)
         finally:
             self.listener.close()
+            self.handshake.close()
 
 
 def serve_one_stats_payload(payload, verbose=False):
     """Run OneRequestRobot against a fresh HMI; return the HMI."""
     robot = OneRequestRobot(payload)
     robot.start()
-    hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port, verbose=verbose)
+    hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port,
+                    handshake_port=robot.handshake.port, verbose=verbose)
     hmi.serve_cycle()
     robot.join(timeout=5)
     if robot.errors:
@@ -113,7 +121,8 @@ class TestStatsPayloadParsing(unittest.TestCase):
         """Two robot->HMI messages, so two acks - id and payload alike."""
         robot = OneRequestRobot("+0123.456,+0007.890,+0001.000")
         robot.start()
-        hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port, verbose=False)
+        hmi = AbbTgsHmi(host="127.0.0.1", port=robot.port,
+                        handshake_port=robot.handshake.port, verbose=False)
         hmi.serve_cycle()
         robot.join(timeout=5)
         self.assertEqual(robot.acks, [b"0", b"0"])
@@ -239,6 +248,7 @@ class TestPerCycleReset(unittest.TestCase):
         robot = FakeTgsRobot()
         robot.start()
         hmi.host, hmi.port = "127.0.0.1", robot.port
+        hmi.handshake_port = robot.handshake.port
         hmi.serve_cycle()
         robot.join(timeout=10)
         self.assertEqual(len(hmi.weld_stats_entries), 1,

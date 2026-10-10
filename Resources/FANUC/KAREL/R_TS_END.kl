@@ -1,0 +1,64 @@
+PROGRAM R_TS_END
+    -- Request Touch Sense End
+
+VAR
+    entry:                 INTEGER
+    comm_file:         FILE
+    status:                INTEGER
+    cmd:                  STRING[254]
+    resp:                  STRING[254]
+    flag:                   INTEGER
+    cpos: XYZWPR
+
+CONST
+    UFRAMENUM = 6
+
+BEGIN -- Begin main program
+
+    SET_FILE_ATR(comm_file, ATR_IA)
+    OPEN FILE comm_file ('rw', 'S3:')
+
+    -- Sending request ID
+    resp = '19' -- request id
+    WRITE comm_file (resp)
+    READ comm_file (cmd::1)
+   
+    cpos = CURPOS(0, 0)
+    WRITE comm_file ('Give me the frame x')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.x)
+    
+    WRITE comm_file ('Give me the frame y')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.y)
+    
+    WRITE comm_file ('Give me the frame z')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.z)
+    
+    WRITE comm_file ('Give me the frame w')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.w)
+    
+    WRITE comm_file ('Give me the frame p')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.p)
+    
+    WRITE comm_file ('Give me the frame r')
+     cmd = ''
+    READ comm_file (cmd::9)
+    CNV_STR_REAL(SUB_STR(cmd,1,9),cpos.r)
+      
+    -- Update new localization frame based on the newly found auto touch up offset.
+    SET_EPOS_REG(UFRAMENUM, cpos, status)
+    $MNUFRAME[1, UFRAMENUM] = cpos
+	
+	
+    CLOSE FILE comm_file
+
+END R_TS_END

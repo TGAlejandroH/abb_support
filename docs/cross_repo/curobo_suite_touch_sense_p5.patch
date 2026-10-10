@@ -1,0 +1,1688 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index a9710cf..6ce5929 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,6 +7,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
+ 
+ ## [Unreleased]
+ 
++### Touch Sensing
++
++**Added**
++
++- **Touch sensing (auto touch-ups) for ABB robots.** Welds with touch points can now be generated
++  for an ABB robot on the *ABB HMI Mode* output profile. Each touch searches the part with the
++  controller's `TG_TouchSearch` and reports the hit to the HMI, which moves the weld frame by the
++  measured offset, as on FANUC. Indexed welds only for now. A robot on the *No HMI* profile, or a
++  weld that moves with its positioner, gets a message explaining why touch generation was
++  refused. The HMI needs its own ABB touch-sense update before a cell runs these programs.
++
++**Fixed**
++
++- **ABB: the weld-frame check no longer reads the robot position while it is still moving.** The
++  check before a weld's first straight move could run while the move before it was still
++  blending, and then abort a correct program. This happened at every touch. The move before the
++  check now comes to a full stop.
++
+ ### Capture Generation
+ 
+ **Changed**
+diff --git a/docs/abb_hmi_request_contract_v1.md b/docs/abb_hmi_request_contract_v1.md
+index f2fbbcf..224ec77 100644
+--- a/docs/abb_hmi_request_contract_v1.md
++++ b/docs/abb_hmi_request_contract_v1.md
+@@ -101,8 +101,16 @@ Ported and working. IDs match the FANUC request table.
+ | 10 | `TG_ReqFileTransfer` | `R_F_T` | *(none)* | `nTG_FtpStatus`, `stTG_ProgName` |
+ | 11 | `TG_ReqGlobalCapDone` | `R_G_C_D` | *(none)* | `nTG_GlobalCapOK` |
+ | 14 | `TG_ReqWeldParams` | `R_W_P` | *(none)* | the weld-parameter `PERS` block |
++| 16 | `TG_ReqTouchSenseDo` | `R_TS_D` | *(none)* | `nTG_DoTouchSense` |
++| 18 | `TG_ReqTouchSensePoint` | `R_TS_P` | *(none)* | — (reports `rtTG_TouchHit`; clears `bTG_TouchHitOK`) |
++| 19 | `TG_ReqTouchSenseEnd` | `R_TS_END` | `\PERS wobjdata WObj` | `WObj.oframe` (the corrected frame) |
+ | 100 | `TG_ReqEnd` | `R_E` | `\PERS tooldata Tool, \PERS wobjdata WObj` | — |
+ 
++16/18/19 are the **offset touch-sense** family, ported 2026-09-26 (`abb_support`
++docs/abb_touch_sense_port_v1.md, P0-P3 VC-proven; the exporter side is touch-sense P5, see
++"Offset touch sensing" below). There is **no 17** (`R_TS_F`): an ABB search direction lives in the
++work object the frame request already served, so it rotates with the part for free.
++
+ ⚠ **Requests 1 and 4 write `.oframe`, not `.uframe`** — corrected 2026-09-04. The two rows above
+ said `WObj.uframe` until Phase 12, which contradicted this document's own §8 and the RAPID it is
+ derived from. Authority: `abb_support@2b2b5e7` `abb/rapid/TG_Comms.sys` — *"Request PROCs write
+@@ -140,12 +148,52 @@ the reported pose (job one of the two above) came out metres out of reach becaus
+ expressed against the previous weld's `oframe`. The exporter resolves the name at generation
+ time through the same path `setFrame` uses (`abb_coordinated_resident_wobj_name`).
+ 
++### Offset touch sensing — 16/18/19 — ported 2026-09-26
++
++The TSP block the exporter emits around one weld's touches (`AbbProgramBlocksProvider.
++build_touchsense_program_blocks`), line for line `abb_support:abb/rapid/TGS/TD05Touch.mod`:
++
++```rapid
++stTG_SubName:="TSP<weld>_full";
++TG_ReqWeldFrame \Tool:=tTG_Weld \WObj:=wobjTG_Weld;    ! localization only: the HMI clears the touch-up
++IF nTG_WeldStatus=2 GOTO abort_end;                     ! ABB only: a malformed frame, never search in it
++TG_ReqTouchSenseDo;                                     ! 16: nTG_DoTouchSense
++TG_CamClose;
++IF nTG_DoTouchSense=1 THEN
++    TG_TeachModeOn;                                     ! only with WELDER_ENABLE_FRONIUS_TEACH_MODE
++    ... bridge ...
++    MoveL <approach>, vApproach, fine, tTG_Weld \WObj:=wobjTG_Weld;
++    TG_TouchSearch <approach>, <contact>, tTG_Weld, wobjTG_Weld;   ! TG_Touch.sys
++    TG_ReqTouchSensePoint;                              ! 18: the hit, in wobjTG_Weld
++    WaitTime 0.5;
++    MoveL <approach>, vApproach, fine, tTG_Weld \WObj:=wobjTG_Weld;  ! THE return (auto return off)
++    ... one block per touch, in the project's touch-point order ...
++    TG_ReqTouchSenseEnd \WObj:=wobjTG_Weld;            ! 19: the corrected frame -> .oframe
++ENDIF
++```
++
++- `TG_TouchSearch` is the whole search: a fine move to the approach, `SearchL \Stop` up to
++  `nTG_TouchStroke` (150 mm) along approach -> contact at `nTG_TouchSpeed` (15 mm/s), a pause and
++  retry on a miss (FANUC THSR-017 parity). Speed and stroke are controller cell data, not program
++  data -- FANUC keeps them in the touch schedule. FANUC's `Search Start`/`Search End` have no
++  counterpart.
++- **The contact** is the planner's solved contact TCP (`search_contact_embedded_target`); only
++  its direction is used. Both robtargets are in the weld's CAD frame, so the direction is
++  `-snapped_axis`, the axis the HMI reads the hit along.
++- **The order of the 18s is the project's `weld_touch_points.order_index`**: the HMI fills touch
++  point N with the Nth report and has no id on the wire.
++- Preconditions: the ABB HMI Mode profile (only the HMI turns hits into an offset) and an indexed
++  weld (coordinated touch sensing is touch-sense P7). Generation refuses the rest.
++- The HMI must accept ABB touch requests (its touch-sense P4) before a cell runs one: an HMI
++  without it aborts the run at id 16.
++
+ ### Not ported — out of v1 scope
+ 
+-IDs **3** (`R_C_D`), **7/8** (camera calibration), **9** (touch test), **13** (`R_W_S` weld stats),
+-and **16–19** (the whole touch-sense family). The exporter must not emit calls for these in v1.
+-Touch sense additionally **cannot be validated offline** (**E17**) and `SearchL` may only run in the
+-main motion task (**E29**).
++IDs **3** (`R_C_D`), **7/8** (camera calibration), **9** (touch test), **13** (`R_W_S` weld stats)
++and **17** (`R_TS_F`, not needed on ABB — above). The exporter must not emit calls for these in
++v1. `SearchL` may only run in the main motion task (**E29**). (E17 -- "touch sensing cannot be
++validated offline" -- was corrected by `abb_support`'s P0: plain `SearchL` stops on its DI on a
++RobotWare 6.15 VC.)
+ 
+ ---
+ 
+@@ -173,7 +221,10 @@ because welding against a stale frame is the worse failure.
+ ### Cell macros — `TG_Cell.sys`
+ 
+ `TG_CamOpen` / `TG_CamClose` (working), `TG_WeldPrep` / `TG_CamPrep` / `TG_DryRunOn` /
+-`TG_DryRunOff` (**empty placeholders**, deliberately — an empty `PROC` body is legal RAPID). The
++`TG_DryRunOff` (**empty placeholders**, deliberately — an empty `PROC` body is legal RAPID).
++`TG_TeachModeOn` (FANUC `TEACHMODE_ON`) and `TG_TouchSenseOn`/`Off` drive the welder's touch I/O
++by name (`stTG_Touch*` cell data); the exporter calls only `TG_TeachModeOn`, the other two are
++`TG_TouchSearch`'s. The
+ exporter emits these in the FANUC call order today; the bodies get filled when the cell I/O is
+ known. **This is a real dependency on Monarch's I/O map.**
+ 
+diff --git a/docs/abb_integration_plan_v1.md b/docs/abb_integration_plan_v1.md
+index ee0f1ca..3da7b70 100644
+--- a/docs/abb_integration_plan_v1.md
++++ b/docs/abb_integration_plan_v1.md
+@@ -270,6 +270,7 @@ new cell's own backup (**Q11**).
+ | **D52** | **A resident work object's seeded pre-vision nominal comes from a program that actually welds in it: a real frame beats a wrapper's identity, whatever the order (F15).** First-frame-wins let the flattened main's auto-applied IDENTITY frame seed `wobjTG_Weld.oframe` while the weld robtargets were divided by the part's real frame (~1.4 m in front of the robot on `abb_coordinated_v2.tgs`) — the module's own nominal disagreed with its points' basis by the whole part pose, and the VC bench serving that nominal back reconstructed Weld1 ON the robot column (`50027`, the same fault D51 addresses at the confdata layer). Identity frames now only fill an empty seed slot; the first real frame claims the record in place (F13's declared-beats-ambient, for the wobj seeds); differing real frames keep first-wins + the existing warning; identity-only modules still seed identity (the stale-PERS reset). Coordinated per-station records untouched by construction. This also corrects the 2026-09-15 reading that the asset “parks the part at the robot base” — it never did; only the seed said so. |
+ | **D53** | **The coordinated `.oframe` seed is stated in the CONTROLLER'S station frame, not the URDF plate frame.** With the cell calibrated, RobotWare's ufmec frame and the URDF plate link describe the same axes but are different frames by construction — VC-measured constant at 180° about the plate axis + the table offset, across a 309° rotate sweep and across tilt 0/90; the ufmec frame equals the calibrated `ARM_TYPE.<plate>.rot_axis_pose` to 0.10 mm (TGuideWeldingHMI VC test log, session 10). A seed stated in the URDF frame welds a phantom part ~2 m away with no error. The positioner group now carries the calibrated frame (`export_v1.brands.abb.station_frame_pose`, meters + (w,x,y,z)) AND its URDF partner (`station_frame_pose_urdf`, the plate frame at the same axes-zero reference; MONARC's `build_tgs.py` bakes the customer values and computes the URDF pose from each station's own URDF chain), the compiler emits `seed_oframe_matrix = inv(station_frame) @ station_frame_pose_urdf @ oframe` — session 10's `G·N`, composed ON the record the D46 per-point context divides by — while the points keep the URDF-frame `oframe`: the pairing cancels any live-scene artifact and is what run 15 proved on the controller (all four welds on the part, both tilts, planner branch). **F18** (defect doc): the first formulation, `inv(station_frame) @ frame_world`, mixed configurations and broke that cancellation — the D54 guard caught it 116 mm off on its first VC run; `station_frame_pose` without its `_urdf` partner is refused with a compile warning. Key absent → byte-identical pre-D53 output, guarded at runtime by D54. The HMI's side of the contract: serve the module's own seed (parsed from the `.tgs` bundle) conjugated by the localization correction — zero correction serves the seed verbatim, which is the exact condition D54 checks. |
+ | **D54** | **The chain-entry pose guard.** Every weld block opens with a `MoveAbsJ` on the planner's solution for the chain's first Cartesian target, so at that move the torch already IS at the target — unless the live `.oframe` (seeded by D52/D53, rewritten by the HMI serve) is wrong, in which case the weld runs somewhere else with no error: the VC campaign measured 1.54 m (identity serve), 2.2 m (uncalibrated station) and 1.4 m (stale convention) from three distinct causes of exactly this class. The translator now emits `IF Distance(CPos(\Tool:=.. \WObj:=..), <target>.trans) > tol THEN … GOTO abort_end` before each chain's first Cartesian move; failure paths take the module's existing abort exit instead of welding. Profile field `weld_chain_entry_guard_mm` (0 = off, byte-identical); the built-in HMI profile sets 100 mm (raised from the initial 25 mm on 2026-09-16, owner call) — two orders of magnitude above legitimate settle/zone error and still below every measured failure, though the smallest one (F18, 116 mm) is caught with only ~16 % margin: re-check against that class before raising it further. `no_hmi` stays off (no runtime serve, no abort label). Also fixed with it: the D51 modal ConfL/ConfJ trackers now reset across branchy payload lines, so each weld block re-asserts its own supervision — the VC-measured hazard was a `ConfL \On` inside Weld1's skippable IF arming nothing on runs that skipped Weld1. |
++| **D55** | **ABB offset touch sensing (HMI 16/18/19) — touch-sense P5, 2026-09-26.** `supports_touch_generation` is ON for ABB, in HMI mode and for indexed welds only (`WeldTouchGenerationService._abb_touch_export_mode` refuses `no_hmi` -- nobody would turn the hits into an offset -- and coordinated welds, touch-sense P7). The RAPID side is `abb_support`'s (docs/abb_touch_sense_port_v1.md, P0-P3 VC-proven): `AbbProgramBlocksProvider.build_touchsense_program_blocks` frames the touches as `TD05Touch.mod` does -- TSP frame request, `IF nTG_WeldStatus=2 GOTO abort_end` (ABB only: a malformed frame leaves the previous `oframe`, and hits measured there would become a wrong touch-up the HMI saves), `TG_ReqTouchSenseDo`, `TG_CamClose`, `IF nTG_DoTouchSense=1`, `TG_TeachModeOn` on `WELDER_ENABLE_FRONIUS_TEACH_MODE`, per touch the planner's own touch program, `TG_ReqTouchSenseEnd`; no id 17 and no `Search Start`/`End`. `AbbTranslator.MoveLSearch` emits `TG_TouchSearch <approach>, <contact>, tTG_Weld, wobjTG_Weld;`: the contact is the planner's solved `search_contact_embedded_target`, which the compiler now hands over (`configure_next_search_contact`, `hasattr`-gated, so FANUC is byte-identical) -- FANUC's `Search[+X]` never needed it. Speed and stroke stay controller cell data (15 mm/s, 150 mm). The touch generator marks the provider's lines brand-native (FANUC unchanged, `runBrandCode` is `runCode`). Refusals keep the old `MoveL` + warning. VC-validated end to end through this exporter's own module (`abb_support` `vc_probes/planner_touch_vc.py`, robotstudio_setup.md §23); found and fixed on the way: **E58**. The HMI side (ABB overrides of 16/18/19) is TGuideWeldingHMI's touch-sense P4: until it lands, an HMI aborts an ABB run at id 16. |
+ 
+ 
+ 
+@@ -874,6 +875,11 @@ new cell's own backup (**Q11**).
+   It should **relax rather than transfer** when ABB search lands — `SearchL` searches along the
+   programmed path in any direction (**E29**) — so gating it now would encode the FANUC
+   limitation as if it were ours.
++  ⚠ **Touch-sense P5 caveat (2026-09-26):** ABB search HAS landed (**D55**), and the relaxation
++  must still wait. The HMI's offset math (`AutoTouchUpsOffset`) reads each hit along its touch
++  point's snapped axis only, so an oblique search would feed it a coordinate it does not model.
++  `AbbTranslator.MoveLSearch` warns on a search more than 0.5° off the work object's axes. Relax
++  only after the HMI's math models the direction.
+ - **E27** — The shipped asset library contains **exactly one robot bundle** (`fanuc_120_iD_12L`).
+   A bundle = URDF + ~25 STL meshes + USD + cuRobo sphere YAMLs + torch/camera mount YAMLs.
+   **There is no ABB robot model.**
+@@ -996,8 +1002,16 @@ new cell's own backup (**Q11**).
+   accepted on an IRC5 VC. *This retires the single biggest risk to the Milestone 1 plan.*
+ - **E16** — **All RobotWare options are free to enable under a virtual licence.** But `616-1` must be
+   **ticked in the virtual system** or `SocketCreate` fails with `Error 161: Option is missing`.
+-- **E17** — **`SearchL` does not function in a virtual controller** — it executes as a plain move,
+-  travelling the full stroke without stopping on the signal. Touch sensing cannot be validated offline.
++- **E17** — ~~**`SearchL` does not function in a virtual controller** — it executes as a plain move,
++  travelling the full stroke without stopping on the signal. Touch sensing cannot be validated offline.~~
++  ❌ **Wrong for plain `SearchL` — corrected 2026-09-26** (`abb_support`
++  docs/abb_touch_sense_port_v1.md P0, 27/27 on the Monarch VC). `SearchL \Stop` stops on its DI on a
++  RobotWare 6.15 VC when the DI changes, and its `SearchPoint` is the detection point in the `\WObj`
++  frame. With a World Zone driving a VC-only DI as the "part", the whole offset touch-up chain ran
++  offline -- search, report, the HMI's offset, the corrected frame, the weld in it -- first with
++  `abb_support`'s hand-written `TD05Touch.mod` (P3) and then with this exporter's own output
++  (touch-sense P5, **D55**). What stays hardware work is the sensing physics: the welder's touch
++  signals, their timing, Teach mode (Phase 15).
+ - **E18** — **Arc welding faults in a VC out of the box** — `AW_WELD_ERR` / "Arc ignition supervision
+   signal not set at start of welding" — until the weld I/O is simulated.
+   ✅ **Mechanism found 2026-08-31 (E44).** The arc system's `autoinhib_on = TRUE` lets arc motion
+@@ -1089,6 +1103,22 @@ new cell's own backup (**Q11**).
+   reason the motion run above used the torch-consistent baseline `4d332d7f` instead. Fixed; the
+   re-export for the coordinated-motion re-probe is torch-correct.
+ 
++- **E58** — **The D54 chain-entry guard read the TCP mid-blend; every touch-sensed weld aborted at its
++  first touch. VC-found 2026-09-26, fixed.** The first run of this exporter's touch output on the
++  Monarch VC (touch-sense P5, `abb_support` `vc_probes/planner_touch_vc.py`) went
++  `16 -> 100`: `TG_ReqTouchSenseDo`, then straight to `TG_ReqEnd`. The TCP trace had the robot
++  still at home, **201.7 mm** from the first touch approach, when the guard ran. The guard reads
++  `CPos` -- where the TCP is NOW -- and RAPID runs ahead of any move that ends in a zone. A touch
++  program's approach `MoveJ` inherits its bridge's blend (0.1 m, clamped to 25 mm), so the program
++  pointer reached the guard while the bridge was still moving, and `GOTO abort_end` fired. A weld's
++  own entry `MoveAbsJ` is `fine` by construction, which is why no weld ever showed it.
++  **Fix:** `_maybe_emit_chain_entry_guard` settles the arrival first (`_fine_terminate_last_move`,
++  R1's rule for any non-motion statement). With it the same six-cycle VC campaign passed. Found
++  with it: a bridge ends on the touch approach and the touch program opens with its own `MoveJ`
++  there -- a zero-length Cartesian segment; the redundant-move collapse now drops a Cartesian
++  `MoveJ` that repeats the one just emitted, as it already did for `MoveAbsJ` (commit `58a729c`).
++  Pinned: `tests/test_abb_touchsense.py` (`test_the_entry_guard_reads_a_settled_arrival`,
++  `test_a_repeated_cartesian_movej_is_one_move`), both red before the fix.
+ - **E57** — **`no_hmi`'s `welddata.weld_speed` carries the PPP *envelope* speed, not the weld's
+   real travel speed. Measured 114× on a real project, 2026-09-20. Diagnosed, NOT fixed.**
+   Found while validating the **D28** correction by exporting `tests/projects/abb.tgs` through the
+@@ -1912,7 +1942,8 @@ lives *inside* `TG_ReqWeldFrame`. The exporter emits no barrier.
+ 
+ - [ ] `616-1` installed on the new cell
+ - [ ] Two station base-frame calibrations
+-- [ ] Touch sensing on real hardware (cannot be validated offline — **E17**)
++- [ ] Touch sensing on real hardware -- the welder's touch signals, timing and Teach mode. Everything
++      else was validated offline (**E17** corrected; **D55**, VC 2026-09-26)
+ - [ ] SafeMove re-validation with the camera payload (**Q10**)
+ - [ ] Coordinated positioner welding on iron
+ 
+@@ -2134,3 +2165,4 @@ Robot Web Services and PC SDK reference: <https://developercenter.robotstudio.co
+ | 2026-09-04 | **Phase 12 review round 4 — the two escalated items MEASURED, two brittle tests hardened, diff otherwise clean (D42, E55).** A fresh-context adversarial review (Opus, high effort, over `git diff origin/develop...HEAD`, told to prefer running code and attack the newest commits — c4624dc/41cbf23/77bb747) found **no** blocking / should-fix / nit defect it could demonstrate; it re-proved `no_hmi` + FANUC byte-identity and the D35 activation-without-ownership asymmetry by compiling a real assembled HMI main and running the suites. **§3.67 measured (E55):** the shipped generator seeds the positioner into the flattened main's start joint map and rest-home and D23 carry-forward fills any later snapshot-free waypoint, while the only arm-only programs (`SHomeW2W`/`SHomeC2C`) are never in `call_sequence` — so no inlined move carries `9E9` on an activated axis; the error is **theoretical for the shipped generator**, downgraded from D41's *escalated/unknown* (still a Milestone-2 VC item, still unfixed by choice since a fix moves D35's E53-verified `no_hmi` emission). **`MechUnitLoad` decided:** the load record (`ldLoadStn1`) is cell-resident (`Irbp1Data.sys`) and un-inventable, and the production HMI path is PM-owned, so it **stays the cell's job**; only a `no_hmi` PP-direct run lacks it (a bring-up limitation). Two tests hardened + re-mutation-verified: the teardown-exit guard now compares the compiled epilogue to the provider's own footer (was a hardcoded `TG_ReqEnd` literal → `ValueError` on a rename), and the assembled-check-clean test now falls back to `HEAD` with distinct skip reasons instead of silently discarding the derived coverage in a fetch-less CI/scratch checkout. Finding-5 sweep: every VC-verification claim is correctly attributed to the `no_hmi` shape or `abb_support`'s own resident-code measurement; no new too-strong claim. Full sweep re-run baseline-clean against `origin/develop`. Docs-only + tests-only; no shipped code changed. |
+ | 2026-09-20 | **D28 overturned by measurement — `no_hmi` had been welding 2.36× too fast.** While validating the WS3/WS4 weld-parameter wire, the arc log and the cell's `PROC.cfg` (`US_UNITS`) disagreed with MONARCH's own 25 `welddata` records, whose weld speeds are *all* exact ipm→mm/s conversions. Rather than argue it, it was timed on the VC. No program-pointer control was needed (RWS refuses PP in AUTO): the robot was already looping in `tgs_main`, and between request 14 (weld params) and request 13 (weld stats) the program does nothing but the arc pass, so the wall time between them **is** the pass duration — and two welds at different speeds give two independent points plus a ratio that checks the method itself. Served 21 ipm (`weld_speed` 8.890): **8.648 mm/s** measured, mm/s predicts 8.890, ipm predicts 3.763. Served 30 ipm (12.700): **12.173**, against 12.700 and 5.376. pass1/pass2 = 1.408 vs the 1.429 either hypothesis predicts. Unanimous mm/s. **`PROC/ARC_UNITS` is a FlexPendant display unit** — it converts on entry and on display, never in storage, which is exactly why MONARCH's stored numbers *look* like converted ipm and made the 09-02 inference so plausible. Fixed in `AbbTranslator`: `_weld_speed_in_arc_units` → `_welddata_weld_speed` (identity, keeping the measurement in its docstring), the `_MM_S_TO_IPM` multiply gone from the emit path and kept only for the warning's pendant-display hint, and the warning inverted — it used to say the number follows `PROC/ARC_UNITS`, which would have sent an integrator to "fix" the cfg. `arc_units` / `configure_arc_units` / the profile field stay as a *declaration* of the cell's pendant setting. The HMI path was never wrong: `TG_ApplyWeldParams` converts ipm→mm/s in RAPID, and the exporter had been contradicting it. Tests: the ipm expectations flipped to mm/s, the three per-unit tests collapsed into one parametrized "mm/s under every system" (including `None`, so a future default flip cannot smuggle a conversion back), and a compiler-level guard now asserts 20.0 under **both** `SI_UNITS` and `US_UNITS`. ABB files: **159 passed**. |
+ | 2026-09-20 | **E57 — the export written to VALIDATE the D28 fix found a bigger defect on the same field: `no_hmi`'s `welddata.weld_speed` is the PPP envelope, measured 114×.** The D28 correction was pinned by unit tests over a synthetic instruction stream, so the last step was to push a real project (`tests/projects/abb.tgs`) through the real `no_hmi` profile and read the emitted `welddata`. It came out at **775.0 mm/s** — correct in the sense D28 cared about (unconverted mm/s, not 1830.7 ipm) and wrong in a way the unit tests could not see, because a synthetic stream's `setSpeed` is whatever the test passes. 775 mm/s is an approach speed. `AbbTranslator` takes `weld_speed` from the active `SET_SPEED`, which for a weld is the generated `"PPP Process Speed"` carrying `project.process_speed_m_s` — the envelope that sample generation and the collision audit ran at. The weld's real travel speed is in a **different field**, `weld_travel_speed_m_s`, stamped per arc-on move by `_apply_weld_sim_speed_rewrite` from the weld's `travel_speed` and documented "ignored by compile/audit/export": **6.773 mm/s** (16 IPM) on all three welds. Harmless on FANUC forever — the ArcTool schedule governs and the program only points at it — and first fatal on ABB, the same root asymmetry as the whole weld-parameter workstream (**E44**/**E54**). Bounded by **D19** (`no_hmi` never strikes a real arc), and HMI mode is unaffected. **Left unfixed deliberately**, as its own change: the `_apply_fanuc_weld_speed_rewrite` precedent has three call sites, the main one inside a FANUC capability gate with an endpoint-gate/touch-up sub-branch that adopts a pre-rewritten deepcopy, so placement is a design decision — and the fix changes generated instruction streams for every ABB project, which should not land mid-VC-validation of the weld-parameter wire. Recorded as **E57** and as an open Phase 7 item. *Method note worth keeping: the synthetic-stream test and the real-project export are not redundant. The first pins the translator, the second pins what the translator is HANDED, and only the second could have found this.* |
++| 2026-09-26 | **Touch-sense P5 — ABB offset touch sensing from the planner (D55, E17 corrected, E58).** The FANUC R_TS_* family was ported to RAPID in `abb_support` (P0-P3); this is the exporter half. The planner's own export of `TD05Touch.mod`'s part -- touch programs from `WeldTouchGenerationService`'s builders, compiled under the ABB HMI profile with the MONARC station modelled -- ran on the Monarch VC against a World Zone block through the real TG cycle with the prototype HMI reading the touch points from the `.tgs` as the real HMI does. First run: every touch-sensed weld aborted at its first touch (**E58**, the D54 guard reading a blended arrival); fixed, then the six-cycle campaign passed (see §23 of `abb_support` robotstudio_setup.md for the numbers). |
+diff --git a/docs/product/touch_sense.md b/docs/product/touch_sense.md
+index a8afa84..8270e60 100644
+--- a/docs/product/touch_sense.md
++++ b/docs/product/touch_sense.md
+@@ -16,7 +16,7 @@ Touch sense supports weld-local touch point authoring, generated touch programs,
+ - Manual orientation nudging normalizes the authored normal but does not apply the 40-50 degree optimized-normal cone clamp.
+ - Touch normal optimization clamps optimized touch directions to a 40-50 degree angle from the touch surface normal, including aligned/locked normals.
+ - Touch program generation uses the stored touch normal directly and searches yaw around that normal; it does not rotate through fallback normal-ring directions.
+-- Generated touch programs currently follow the native workflow generation path and are Fanuc-first where controller behavior is brand-specific.
++- Generated touch programs currently follow the native workflow generation path and are Fanuc-first where controller behavior is brand-specific. ABB is supported too, in HMI mode on indexed welds (see **ABB offset touch sensing** below).
+ - **Touch bridges (classic / Path offset).** Each weld's touch family carries one bridge program per
+   leg: weld approach → 1st touch approach, touch approach → next touch approach, last touch approach
+   → weld approach. Since 2026-09-24 every leg is planned with the endpoint touch-sense clearance
+@@ -49,6 +49,43 @@ Touch sense supports weld-local touch point authoring, generated touch programs,
+   regenerate the touch program to get the new bridges. Rationale and measurements:
+   `fanuc_endpoint_touch_sense_grouped_search_v2.md` §5.9 / §5.9.1 / §5.10.
+ 
++## ABB offset touch sensing (HMI mode, indexed welds)
++
++The same touch points and touch generation produce an ABB program. The HMI still computes the
++correction from the reported hits (HMI requests 16/18/19), exactly as on FANUC. The controller side
++is `abb_support`'s resident RAPID; its reference module is `TD05Touch.mod`.
++
++- **Where it works:** a robot group on the **ABB HMI Mode** output profile, on **indexed** welds.
++  Generation refuses the others with a message:
++  - `no_hmi`: nobody would turn the hits into a correction;
++  - coordinated welds: not ported yet.
++- **What is emitted per touch:**
++  - the approach move;
++  - `TG_TouchSearch <approach>, <contact>, tTG_Weld, wobjTG_Weld;`, where FANUC has
++    `L P[..] FINE Search[+X]`;
++  - `TG_ReqTouchSensePoint;`, a 0.5 s wait, and the move back to the approach.
++
++  Around the touches, the block has:
++  - the `TSP<weld>_full` frame request;
++  - a check that ends the run on a malformed frame;
++  - `TG_ReqTouchSenseDo`, with `TG_TeachModeOn` when *Fronius Teach mode* is on;
++  - `TG_ReqTouchSenseEnd`, which writes the corrected frame.
++
++  There is no FANUC `R_TS_F` and no `Search Start`/`Search End`.
++- **The search direction** comes from the solved contact point, so it is the touch point's snapped
++  CAD axis, the axis the HMI reads the hit along. The search speed and maximum distance are
++  controller settings in `TG_Touch.sys` (15 mm/s, 150 mm), as FANUC keeps them in its touch
++  schedule.
++- **Keep ABB searches on the snapped axis.** The HMI's correction math uses only the hit's
++  coordinate along that axis. The exporter warns on a search more than 0.5° off the work
++  object's axes.
++- **The HMI must accept ABB touch requests** (its own ABB update) before a cell runs one. An HMI
++  without it aborts the run at the first touch request.
++
++Design and the offline validation (a World Zone "part" on the MONARC virtual controller, the
++exporter's own output run through the real TG cycle) are in `abb_support`
++docs/abb_touch_sense_port_v1.md §6 P5. The tracker entry is `abb_integration_plan_v1.md` D55.
++
+ ## FANUC Built-in Endpoint Touch-Sense (second mode)
+ 
+ A second, mutually exclusive touch-correction mode for **single-segment straight welds** that uses
+diff --git a/tests/test_abb_touchsense.py b/tests/test_abb_touchsense.py
+new file mode 100644
+index 0000000..5f644b8
+--- /dev/null
++++ b/tests/test_abb_touchsense.py
+@@ -0,0 +1,700 @@
++"""Touch-sense **P5** -- ABB offset touch sensing (auto touch-ups) from the Weld Planner.
++
++The FANUC offset touch-sense family (HMI requests 16 R_TS_D, 17 R_TS_F, 18 R_TS_P, 19 R_TS_END)
++was ported to RAPID in `abb_support` (docs/abb_touch_sense_port_v1.md, P0-P3 VC-proven): the
++resident routines `TG_ReqTouchSenseDo` / `TG_ReqTouchSensePoint` / `TG_ReqTouchSenseEnd`
++(`TG_Comms.sys`), the search primitive `TG_TouchSearch` (`TG_Touch.sys`) and `TG_TeachModeOn`
++(`TG_Cell.sys`). Its reference module `abb_support:abb/rapid/TGS/TD05Touch.mod` is the executable
++spec of what this exporter must emit for a touch-sensed weld.
++
++Three pieces, one per layer, all pinned here:
++
++- **the blocks provider** frames the touches: the TSP frame request, the do-touch flag, Teach
++  mode, the touch-hit report and the end request -- FANUC's order, RAPID's routines, no id 17;
++- **the compiler** hands the translator the solved contact the planner already stores on every
++  search instruction (`search_contact_embedded_target`), which FANUC's `Search[+X]` never needed;
++- **the translator** emits one `TG_TouchSearch <approach>, <contact>, tTG_Weld, wobjTG_Weld;`
++  where FANUC emits `L P[n] FINE Search[+X]`, and refuses (plain `MoveL`, loud warning) where
++  there is no honest search to emit.
++
++And one precondition in generation: ABB touches only in HMI mode, and only on indexed welds.
++"""
++
++import os
++
++# Must precede `import numpy` -- see tests/test_abb_translator.py.
++os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
++os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
++
++import copy
++import math
++import re
++import types
++
++import numpy as np
++import pytest
++
++from tguide_lib.ProgramCompiler import ProgramCompiler
++from tguide_lib.ProgramInstruction import (
++    INSTR_CUSTOM_CODE,
++    INSTR_MOVE_J,
++    INSTR_MOVE_L_SEARCH,
++    INSTR_SET_FRAME,
++    EmbeddedTargetPose,
++    ProgramInstruction,
++)
++from tguide_lib.RobotGroup import RobotGroup
++from tguide_lib.RobotProgram import RobotProgram
++from tguide_lib.Translators.AbbTranslator import AbbTranslator
++from tguide_lib.Translators.FanucTranslator import FanucTranslator
++from tguide_lib.WeldWorkflowProject import WeldItem
++from tguide_lib.robot_brand_program_blocks.abb_program_blocks import ABB_ABORT_LABEL, AbbProgramBlocksProvider
++from tguide_lib.robot_brand_program_blocks.base_program_blocks import TouchsenseProgramBlocksContext
++from tguide_lib.robot_branding import ROBOT_BRAND_ABB, ROBOT_BRAND_FANUC
++from tguide_lib.workflows.abb_output_profiles import (
++    ABB_EXPORT_MODE_HMI,
++    ABB_EXPORT_MODE_NO_HMI,
++    ABB_OUTPUT_PROFILE_ID_HMI,
++    build_abb_program_export_config,
++    resolve_abb_output_profile,
++)
++import tguide_lib.workflows.weld_touch_generation_native as touch_module
++from tguide_lib.workflows.weld_touch_generation_native import WeldTouchGenerationError, WeldTouchGenerationService
++
++ARM = [f"joint_{i}" for i in range(1, 7)]
++
++# The TD05Touch.mod geometry (abb_support): the weld's CAD frame in world is [1600, 0, 1450 mm |
++# Rz 90]; touch 1 on the block's -X face (search +X), touch 2 on its top face (search -Z), each
++# approach 30 mm off along the snapped axis; one torch orientation in CAD for both.
++FRAME = np.array([[0.0, -1.0, 0.0, 1.6], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 1.45], [0.0, 0.0, 0.0, 1.0]])
++TOOL_Q_CAD = (0.353554, 0.612372, 0.612372, -0.353554)   # w, x, y, z
++TOUCHES = (
++    {"touch_mm": (0.0, 0.0, -20.0), "snapped_axis": (-1.0, 0.0, 0.0), "label": "+X"},
++    {"touch_mm": (50.0, 20.0, 0.0), "snapped_axis": (0.0, 0.0, 1.0), "label": "-Z"},
++)
++STANDOFF_MM = 30.0
++
++
++def _quat_matrix(w, x, y, z):
++    n = math.sqrt(w * w + x * x + y * y + z * z)
++    w, x, y, z = w / n, x / n, y / n, z / n
++    return np.array([
++        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
++        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
++        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
++    ])
++
++
++def _pose_world(xyz_mm_cad, frame=FRAME):
++    local = np.eye(4)
++    local[:3, :3] = _quat_matrix(*TOOL_Q_CAD)
++    local[:3, 3] = np.asarray(xyz_mm_cad, dtype=float) * 0.001
++    return np.asarray(frame) @ local
++
++
++def _approach_mm(touch):
++    return tuple(t + STANDOFF_MM * a for t, a in zip(touch["touch_mm"], touch["snapped_axis"]))
++
++
++def _joints(offset=0.0):
++    return {name: 0.1 * (index + 1) + offset for index, name in enumerate(ARM)}
++
++
++def _robtargets(body):
++    """{name: (x, y, z) mm} for every robtarget the module declares."""
++    out = {}
++    for match in re.finditer(r"LOCAL CONST robtarget (pTG\d{4}) := \[\[([^\]]+)\]", body):
++        out[match.group(1)] = tuple(float(v) for v in match.group(2).split(","))
++    return out
++
++
++def _statements(body):
++    """The PROC body's statements, stripped, without the D54 entry-guard blocks."""
++    lines = body.splitlines()
++    start = next(i for i, line in enumerate(lines) if line.strip().startswith("PROC "))
++    out, skipping = [], False
++    for line in lines[start + 1:]:
++        s = line.strip()
++        if s == "ENDPROC":
++            break
++        if s == "" or s.startswith("!"):
++            continue
++        if s.startswith("IF Distance(CPos("):
++            skipping = True
++            continue
++        if skipping:
++            if s == "ENDIF":
++                skipping = False
++            continue
++        out.append(s)
++    return out
++
++
++def _assert_in_order(statements, patterns):
++    """Each regex matches a statement, in order (other statements may sit between them)."""
++    position = 0
++    for pattern in patterns:
++        rx = re.compile(pattern)
++        while position < len(statements) and not rx.fullmatch(statements[position]):
++            position += 1
++        assert position < len(statements), f"{pattern!r} not found in order in:\n" + "\n".join(statements)
++        position += 1
++
++
++# ---------------------------------------------------------------------------
++# The blocks provider
++# ---------------------------------------------------------------------------
++
++def _touch_context(export_mode=ABB_EXPORT_MODE_HMI, teachmode_enabled=True):
++    return TouchsenseProgramBlocksContext(
++        weld_name="Weld2",
++        weld_program_name="PPP_Weld2",
++        subroutine_name="TSPWeld2_full",
++        touch_count=2,
++        enable_register_number=195,
++        enable_register_label="doTouchSense",
++        search_pr_number=10,
++        user_frame_index=6,
++        user_frame_pr_index=6,
++        user_tool_index=8,
++        user_tool_pr_index=8,
++        prep_routine_name="R_TS_D",
++        search_init_routine_name="R_TS_F",
++        touch_hit_routine_name="R_TS_P",
++        finish_routine_name="R_TS_END",
++        teachmode_routine_name="TEACHMODE_ON",
++        teachmode_enabled=teachmode_enabled,
++        export_mode=export_mode,
++    )
++
++
++def test_the_hmi_touch_frame_is_td05touch_line_for_line():
++    """`TD05Touch.mod`'s touch block: FANUC's order, RAPID's routines. No `R_TS_F` (id 17, D2)
++    and no `Search Start`/`Search End` (a FANUC schedule; `TG_TouchSearch` is self-contained)."""
++    bundle = AbbProgramBlocksProvider().build_touchsense_program_blocks(_touch_context())
++
++    assert bundle.wrapper_start_lines == [
++        'stTG_SubName:="TSPWeld2_full";',
++        "TG_ReqWeldFrame \\Tool:=tTG_Weld \\WObj:=wobjTG_Weld;",
++        f"IF nTG_WeldStatus=2 GOTO {ABB_ABORT_LABEL};",
++        "TG_ReqTouchSenseDo;",
++        "TG_CamClose;",
++        "IF nTG_DoTouchSense=1 THEN",
++        "TG_TeachModeOn;",
++    ]
++    assert bundle.wrapper_finish_lines == ["TG_ReqTouchSenseEnd \\WObj:=wobjTG_Weld;", "ENDIF"]
++    assert bundle.touch_hit_call_line == "TG_ReqTouchSensePoint;"
++
++
++def test_teach_mode_follows_the_fronius_teach_mode_switch():
++    """FANUC emits `TEACHMODE_ON` only when `WELDER_ENABLE_FRONIUS_TEACH_MODE` is on; so does ABB.
++    Nothing ever turns it off: touch sensing disables it per search and welding turns it off
++    (touch-sense D5, D11)."""
++    bundle = AbbProgramBlocksProvider().build_touchsense_program_blocks(_touch_context(teachmode_enabled=False))
++
++    assert "TG_TeachModeOn;" not in bundle.wrapper_start_lines
++    assert not any("TeachMode" in line for line in bundle.wrapper_finish_lines)
++
++
++def test_a_malformed_touch_frame_aborts_instead_of_searching():
++    """The one line FANUC does not have. `nTG_WeldStatus=2` is the robot-side sentinel for a
++    malformed frame payload, which leaves `wobjTG_Weld.oframe` holding the PREVIOUS frame; hits
++    measured there become a wrong touch-up the HMI saves to the project. It must come before the
++    first touch request, so the HMI never sees a touch block against a stale frame."""
++    lines = AbbProgramBlocksProvider().build_touchsense_program_blocks(_touch_context()).wrapper_start_lines
++
++    abort = lines.index(f"IF nTG_WeldStatus=2 GOTO {ABB_ABORT_LABEL};")
++    assert lines.index("TG_ReqWeldFrame \\Tool:=tTG_Weld \\WObj:=wobjTG_Weld;") < abort
++    assert abort < lines.index("TG_ReqTouchSenseDo;")
++
++
++@pytest.mark.parametrize("mode", [ABB_EXPORT_MODE_NO_HMI, ""])
++def test_no_touch_blocks_outside_hmi_mode(mode):
++    """No HMI, nobody to report the hits to: an empty bundle, like every other ABB block."""
++    bundle = AbbProgramBlocksProvider().build_touchsense_program_blocks(_touch_context(export_mode=mode))
++
++    assert bundle.wrapper_start_lines == []
++    assert bundle.wrapper_finish_lines == []
++    assert bundle.touch_hit_call_line == ""
++
++
++def test_no_fanuc_touch_syntax_reaches_the_abb_blocks():
++    bundle = AbbProgramBlocksProvider().build_touchsense_program_blocks(_touch_context())
++    text = "\n".join(bundle.wrapper_start_lines + bundle.wrapper_finish_lines + [bundle.touch_hit_call_line])
++
++    for fanuc in ("R_TS_", "Search Start", "Search End", "CALL ", "TEACHMODE_ON", "R[195", "PR[10"):
++        assert fanuc not in text
++
++
++# ---------------------------------------------------------------------------
++# The translator
++# ---------------------------------------------------------------------------
++
++def _hmi_translator():
++    translator = AbbTranslator("R")
++    translator.configure_export_mode(mode=ABB_EXPORT_MODE_HMI)
++    translator.configure_work_object_frames(enabled=False)
++    translator.configure_controller_data(tool_name="tTG_Weld", wobj_name="wobjTG_Weld")
++    translator.ProgStart("TouchDemo")
++    return translator
++
++
++def _search(translator, touch=TOUCHES[0], contact_mm=None, label=None):
++    translator.configure_next_search_contact(_pose_world(contact_mm or touch["touch_mm"]), None)
++    translator.MoveLSearch(_pose_world(_approach_mm(touch)), None, touch["label"] if label is None else label)
++
++
++def test_a_search_is_one_tg_touchsearch_from_the_approach_toward_the_contact():
++    """FANUC `L P[53] FINE Search[+X]` -> `TG_TouchSearch <approach>, <contact>, tTG_Weld,
++    wobjTG_Weld;`, both robtargets in the weld's CAD frame (the served `wobjTG_Weld`), so the
++    direction is -snapped_axis there -- the axis the HMI reads the hit along."""
++    translator = _hmi_translator()
++    translator.setFrame(FRAME)
++    _search(translator)
++    body = translator.get_program_string()
++
++    assert "TG_TouchSearch pTG0001, pTG0002, tTG_Weld, wobjTG_Weld;" in body
++    targets = _robtargets(body)
++    np.testing.assert_allclose(targets["pTG0001"], (-30.0, 0.0, -20.0), atol=1e-3)
++    np.testing.assert_allclose(targets["pTG0002"], (0.0, 0.0, -20.0), atol=1e-3)
++    assert not any("NOT search" in w or "off the work object" in w for w in translator.export_warnings)
++    # The search reports through the resident routines; nothing FANUC-shaped leaks.
++    assert "SearchL" not in body and "Search[" not in body
++
++
++def test_the_contact_keeps_the_approach_external_axes():
++    """An indexed positioner stands still during the search (D6): the contact robtarget carries
++    the approach's `extjoint` (the carry-forward), never `9E9` on an axis the approach commands."""
++    translator = _hmi_translator()
++    translator.setFrame(FRAME)
++    # The Monarch shape: tilt -> eax_b, rotate -> eax_c (E48/E51).
++    translator.configure_next_point_external_axes([
++        {"value": 0.0, "unit": "deg", "motion_role": "independent_group",
++         "mechanism_name": "P1", "joint_name": "tilt"},
++        {"value": 45.0, "unit": "deg", "motion_role": "independent_group",
++         "mechanism_name": "P1", "joint_name": "rot"},
++    ])
++    _search(translator)
++    body = translator.get_program_string()
++
++    declared = dict(re.findall(r"LOCAL CONST robtarget (pTG\d{4}) := (\[.*\]);", body))
++    extjoints = {name: literal.rsplit("],[", 1)[-1] for name, literal in declared.items()}
++    assert extjoints["pTG0001"] == extjoints["pTG0002"]
++    assert "45.000" in extjoints["pTG0002"]
++
++
++def test_a_search_outside_hmi_mode_stays_a_plain_move_with_a_warning():
++    translator = AbbTranslator("R")
++    translator.ProgStart("TouchDemo")
++    _search(translator)
++    body = translator.get_program_string()
++
++    assert "TG_TouchSearch" not in body
++    assert "MoveL pTG0001" in body
++    assert any("HMI Mode" in w and "will NOT search" in w for w in translator.export_warnings)
++
++
++def test_a_search_without_its_contact_stays_a_plain_move_with_a_warning():
++    """No contact, no direction: refuse rather than guess one from the axis label."""
++    translator = _hmi_translator()
++    translator.setFrame(FRAME)
++    translator.MoveLSearch(_pose_world(_approach_mm(TOUCHES[0])), None, "+X")
++    body = translator.get_program_string()
++
++    assert "TG_TouchSearch" not in body
++    assert any("without its solved contact" in w for w in translator.export_warnings)
++
++
++def test_the_contact_is_consumed_by_one_search_only():
++    translator = _hmi_translator()
++    translator.setFrame(FRAME)
++    _search(translator)
++    translator.MoveLSearch(_pose_world(_approach_mm(TOUCHES[1])), None, "-Z")
++    body = translator.get_program_string()
++
++    assert body.count("TG_TouchSearch ") == 1
++    assert any("without its solved contact" in w for w in translator.export_warnings)
++
++
++def test_a_coordinated_search_is_refused_for_now():
++    """Touch-sense P7: in a coordinated work object the HMI's offset composes differently."""
++    translator = _hmi_translator()
++    translator.configure_coordinated_resident_wobj(name_prefix="wobjTG_Weld")
++    translator.configure_next_frame_coordinated_station({"station_name": "STN1", "oframe_matrix": np.eye(4)})
++    translator.setFrame(FRAME)
++    assert translator._wobj_argument() == "wobjTG_WeldActStn"
++    _search(translator)
++
++    assert "TG_TouchSearch" not in translator.get_program_string()
++    assert any("coordinated touch sensing" in w for w in translator.export_warnings)
++
++
++def test_an_oblique_search_is_warned_about():
++    """The HMI reads each hit along its snapped axis only (curobo E30)."""
++    translator = _hmi_translator()
++    translator.setFrame(FRAME)
++    _search(translator, contact_mm=(0.0, 5.0, -20.0))
++
++    assert "TG_TouchSearch" in translator.get_program_string()
++    assert any("off the work object's axes" in w for w in translator.export_warnings)
++
++
++def test_a_search_label_that_disagrees_with_the_geometry_is_warned_about():
++    """The label is FANUC's `-snapped_axis` in the CAD frame; the geometry is the same thing in
++    the work object. They disagree only when the weld's reference frame is not its CAD frame."""
++    translator = _hmi_translator()
++    translator.setFrame(FRAME)
++    _search(translator, label="-X")
++
++    assert any("planned -X" in w for w in translator.export_warnings)
++
++
++def test_a_stroke_under_a_millimetre_is_warned_about():
++    """`TG_TouchSearch` ends the program on a search with no direction."""
++    translator = _hmi_translator()
++    translator.setFrame(FRAME)
++    _search(translator, contact_mm=(-29.5, 0.0, -20.0))
++
++    assert any("mm apart" in w for w in translator.export_warnings)
++
++
++def test_the_search_ends_a_held_joint_posture():
++    """`TG_TouchSearch` moves the arm. A `MoveAbsJ` to the posture held before the search is NOT
++    a zero-length repeat afterwards, so the collapse must not drop it."""
++    translator = _hmi_translator()
++    translator.configure_movej_joint_targets(enabled=True)
++    translator.configure_collapse_redundant_joint_moves(enabled=True)
++    translator.setFrame(FRAME)
++    joints = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
++    translator.MoveJ(_pose_world((0.0, 0.0, 100.0)), joints)
++    _search(translator)
++    translator.MoveJ(_pose_world((0.0, 0.0, 100.0)), joints)
++
++    assert translator.get_program_string().count("MoveAbsJ jtTG0001") == 2
++
++
++def test_the_entry_guard_reads_a_settled_arrival():
++    """VC-found (P5, 2026-09-26): the D54 guard reads `CPos` -- the TCP where it is NOW -- and
++    RAPID runs ahead of a move that ends in a zone. A touch approach `MoveJ` inherits its
++    bridge's 25 mm zone, so the guard read the TCP still at home (201.7 mm away), took
++    `GOTO abort_end`, and every touch-sensed weld ended at its first touch. The arrival before
++    the guard must be `fine`."""
++    translator = _hmi_translator()
++    translator.configure_weld_chain_entry_guard(tolerance_mm=100.0)
++    translator.configure_fine_terminate_handshakes(enabled=True)
++    translator.setFrame(FRAME)
++    translator.setRounding(0.1, "blend")
++    translator.MoveJ(_pose_world(_approach_mm(TOUCHES[0])), None)
++    translator.setRounding(0.0, "fine")
++    translator.MoveL(_pose_world(_approach_mm(TOUCHES[0])), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
++    lines = [line.strip() for line in translator.get_program_string().splitlines()]
++    guard = next(i for i, line in enumerate(lines) if line.startswith("IF Distance(CPos("))
++    arrival = next(line for line in reversed(lines[:guard]) if line.startswith("MoveJ "))
++
++    assert ", fine, " in arrival, arrival
++
++
++def test_a_repeated_cartesian_movej_is_one_move():
++    """A bridge ends on the touch approach and the touch program opens with its own `MoveJ`
++    there: a zero-length segment the VC stops at and warns on. Collapsed like MoveAbsJ repeats."""
++    translator = _hmi_translator()
++    translator.configure_collapse_redundant_joint_moves(enabled=True)
++    translator.setFrame(FRAME)
++    translator.setRounding(0.1, "blend")
++    approach = _pose_world(_approach_mm(TOUCHES[0]))
++    translator.MoveJ(approach, None)
++    translator.MoveJ(approach, None)
++    translator.setRounding(0.0, "fine")
++    translator.MoveJ(approach, None)
++    moves = [line.strip() for line in translator.get_program_string().splitlines()
++             if line.strip().startswith("MoveJ ")]
++
++    assert len(moves) == 1
++    assert ", fine, " in moves[0]
++
++
++def test_the_touch_routines_are_resident():
++    """Bare `TG_ReqTouchSenseDo;` / `TG_ReqTouchSensePoint;` / `TG_TeachModeOn;` resolve at load
++    (`abb_support@03b1b8e`); a closed allow-list that lacked them would report REFUSE TO LOAD."""
++    translator = _hmi_translator()
++    for line in ("TG_ReqTouchSenseDo;", "TG_TeachModeOn;", "TG_ReqTouchSensePoint;",
++                 "TG_TouchSenseOn;", "TG_TouchSenseOff;"):
++        translator.runBrandCode(line)
++    translator.get_program_string()
++
++    assert not any("REFUSE TO LOAD" in w for w in translator.export_warnings)
++
++
++# ---------------------------------------------------------------------------
++# End to end: the real touch builders -> compiler -> translator
++# ---------------------------------------------------------------------------
++
++class _MainWindowStub:
++    def __init__(self, teach_mode=True):
++        self.config = {"WELDER_ENABLE_FRONIUS_TEACH_MODE": bool(teach_mode)}
++        self.scene_tree = None
++        self._joint_names_for_group = lambda group_name, fallback_all=False: list(ARM)
++        self._infer_robot_configuration = lambda joint_map: ("Front", "Up", "No Flip")
++
++
++def _seed(robot_brand, export_mode):
++    return types.SimpleNamespace(
++        frame_name="CAD",
++        frame_world=FRAME,
++        weld_program_name="PPP_Weld2",
++        robot_group_name="Robot 1",
++        robot_brand=robot_brand,
++        tcp_name="tcp_torch",
++        export_mode=export_mode,
++    )
++
++
++def _solved(index, touch):
++    approach = _approach_mm(touch)
++    return types.SimpleNamespace(
++        touch_index=index,
++        touch_program_id=f"touch_program_weld_2_{index}",
++        touch_program_name=f"TSWeld2_{index}",
++        search_axis_label=touch["label"],
++        solve_mode="strict",
++        approach_pose_world=_pose_world(approach),
++        contact_pose_world=_pose_world(touch["touch_mm"]),
++        approach_joint_map=_joints(0.01 * index),
++        contact_joint_map=_joints(0.01 * index + 0.001),
++    )
++
++
++def _bridge(program_id, name, robot_brand, offset):
++    embedded = EmbeddedTargetPose(
++        parent_frame_name="CAD",
++        cartesian_matrix_local_flat=list(np.eye(4).reshape(-1)),
++        joint_values=_joints(offset),
++        external_joint_values={},
++        has_external_snapshot=False,
++    )
++    return RobotProgram(
++        program_id=program_id,
++        name=name,
++        parent_frame_name="CAD",
++        robot_group_name="Robot 1",
++        robot_brand=robot_brand,
++        instructions=[
++            ProgramInstruction(program_id=program_id, instruction_id=f"{program_id}_f",
++                               instr_type=INSTR_SET_FRAME, frame_name="CAD"),
++            ProgramInstruction(program_id=program_id, instruction_id=f"{program_id}_j",
++                               instr_type=INSTR_MOVE_J, embedded_target=embedded),
++        ],
++    )
++
++
++def _touch_family(robot_brand=ROBOT_BRAND_ABB, export_mode=ABB_EXPORT_MODE_HMI, teach_mode=True):
++    """The wrapper plus every program it CALLs, from the REAL builders (no IK, no Qt)."""
++    service = WeldTouchGenerationService(_MainWindowStub(teach_mode=teach_mode))
++    weld = WeldItem(weld_id="weld_2", name="Weld2")
++    seed = _seed(robot_brand, export_mode)
++    solved = [_solved(i, touch) for i, touch in enumerate(TOUCHES)]
++    touches = [service._build_touch_program(weld=weld, seed=seed, solved_touch=s) for s in solved]
++    bridges = [
++        _bridge("bridge_first", service._touch_bridge_name_first(weld), robot_brand, 0.2),
++        _bridge("bridge_mid", service._touch_bridge_name_between(solved[0].touch_program_name,
++                                                                 solved[1].touch_program_name), robot_brand, 0.3),
++        _bridge("bridge_last", service._touch_bridge_name_last(weld, solved[1].touch_program_name), robot_brand, 0.4),
++    ]
++    wrapper = service._build_wrapper_program(weld=weld, seed=seed, solved_touch_points=solved,
++                                             bridge_programs=bridges)
++    return wrapper, touches + bridges
++
++
++class _Scene:
++    robot_tools = []
++
++    def __init__(self, programs):
++        self._programs = {str(p.program_id): p for p in programs}
++        self.robot_groups = [RobotGroup(name="Robot 1", joint_names=ARM, arm_joint_names=ARM, robot_brand="abb")]
++
++    def get_robot_program(self, program_id):
++        return self._programs.get(str(program_id))
++
++    def get_cell_program(self, program_id):
++        return None
++
++    def get_robot_group(self, name):
++        return self.robot_groups[0] if str(name) == "Robot 1" else None
++
++    def get_robot_tool(self, name):
++        if str(name) != "tcp_torch":
++            return None
++        tool = np.eye(4)
++        tool[2, 3] = 0.4
++        return types.SimpleNamespace(name="tcp_torch", robot_group_name="Robot 1", tool_matrix=lambda: tool)
++
++    def get_robot_target(self, name):
++        return None
++
++    def get_external_axis_group(self, name):
++        return None
++
++    def get_all_external_axis_groups(self):
++        return []
++
++    def get_frame_by_name(self, name):
++        return object() if str(name) == "CAD" else None
++
++
++def _compile(wrapper, programs, translator, export_config=None):
++    compiler = ProgramCompiler(
++        scene_tree=_Scene([wrapper] + list(programs)),
++        get_target_cartesian_world_matrix_fn=lambda _name: None,
++        get_frame_world_matrix_fn=lambda name: FRAME if str(name) == "CAD" else None,
++        resolve_program_export_config_fn=lambda _program: (dict(export_config) if export_config else None),
++        get_joint_unit_fn=lambda _name: "rad",
++    )
++    success, message = compiler.compile(wrapper.program_id, translator, None, inline_called_programs=True)
++    assert success, message
++    return translator.get_program_string()
++
++
++def _hmi_config(program):
++    return build_abb_program_export_config(program, resolve_abb_output_profile(ABB_OUTPUT_PROFILE_ID_HMI))
++
++
++def test_a_generated_touch_block_compiles_to_the_td05touch_shape():
++    """The whole P5 chain -- provider -> real touch builders -> compiler -> HMI profile ->
++    translator -> RAPID -- against `TD05Touch.mod`'s touch block: frame request, abort check,
++    do-touch flag, camera close, the `IF`, Teach mode, then per touch approach -> search ->
++    report -> 0.5 s -> return, and the end request that writes the corrected frame."""
++    wrapper, programs = _touch_family()
++    translator = AbbTranslator("R")
++    body = _compile(wrapper, programs, translator, _hmi_config(wrapper))
++    statements = _statements(body)
++
++    per_touch = [
++        r"MoveJ pTG\d{4}, .*\\WObj:=wobjTG_Weld;",                           # Cartesian approach
++        r"MoveL pTG\d{4}, vTG\d{3}, fine, tTG_Weld \\WObj:=wobjTG_Weld;",   # the anchor
++        r"TG_TouchSearch pTG\d{4}, pTG\d{4}, tTG_Weld, wobjTG_Weld;",
++        r"TG_ReqTouchSensePoint;",
++        r"WaitTime 0\.5\d*;",
++        r"MoveL pTG\d{4}, vTG\d{3}, fine, tTG_Weld \\WObj:=wobjTG_Weld;",   # the return
++    ]
++    _assert_in_order(statements, [
++        r'stTG_SubName:="TSPWeld2_full";',
++        r"TG_ReqWeldFrame \\Tool:=tTG_Weld \\WObj:=wobjTG_Weld;",
++        r"IF nTG_WeldStatus=2 GOTO abort_end;",
++        r"TG_ReqTouchSenseDo;",
++        r"TG_CamClose;",
++        r"IF nTG_DoTouchSense=1 THEN",
++        r"TG_TeachModeOn;",
++        r"MoveAbsJ jtTG\d{4}, .*",                                   # the entry bridge
++        *per_touch,
++        r"MoveAbsJ jtTG\d{4}, .*",                                   # the bridge between touches
++        *per_touch,
++        r"MoveAbsJ jtTG\d{4}, .*",                                   # the exit bridge
++        r"TG_ReqTouchSenseEnd \\WObj:=wobjTG_Weld;",
++        r"ENDIF",
++    ])
++    # One search and one report per touch, in the planner's touch order -- the HMI fills touch
++    # point N with the Nth report.
++    assert sum(s.startswith("TG_TouchSearch ") for s in statements) == 2
++    assert statements.count("TG_ReqTouchSensePoint;") == 2
++    assert "! [not RAPID, not emitted]" not in body
++    # The one expected warning is the component's: `abort_end` belongs to the package main.
++    unexpected = [w for w in translator.export_warnings
++                  if ("REFUSE TO LOAD" in w and "abort_end" not in w)
++                  or "will NOT search" in w or "off the work object" in w]
++    assert unexpected == []
++
++
++def test_each_search_runs_from_its_approach_to_its_contact_in_cad():
++    """The numbers behind the shape: search N goes from touch N's approach (touch + 30 mm along
++    the snapped axis) to touch N itself, in the CAD frame the HMI stores the touch points in."""
++    wrapper, programs = _touch_family()
++    body = _compile(wrapper, programs, AbbTranslator("R"), _hmi_config(wrapper))
++    targets = _robtargets(body)
++    searches = re.findall(r"TG_TouchSearch (pTG\d{4}), (pTG\d{4}),", body)
++
++    assert len(searches) == 2
++    for (start, end), touch in zip(searches, TOUCHES):
++        np.testing.assert_allclose(targets[start], _approach_mm(touch), atol=1e-3)
++        np.testing.assert_allclose(targets[end], touch["touch_mm"], atol=1e-3)
++
++
++def test_no_teach_mode_line_when_the_switch_is_off():
++    wrapper, programs = _touch_family(teach_mode=False)
++    body = _compile(wrapper, programs, AbbTranslator("R"), _hmi_config(wrapper))
++
++    assert "TG_TeachModeOn" not in body
++    assert "TG_ReqTouchSenseDo;" in body
++
++
++def test_the_fanuc_touch_block_is_unchanged_by_the_native_marking():
++    """The provider's lines are now marked brand-native for every brand. FANUC's `runBrandCode`
++    is `runCode`, so the `.LS` must not change by one character."""
++    wrapper, programs = _touch_family(robot_brand=ROBOT_BRAND_FANUC, export_mode="")
++    marked = [instr for p in [wrapper] + programs for instr in p.instructions
++              if instr.instr_type == INSTR_CUSTOM_CODE]
++    assert marked and all(instr.brand_native_code for instr in marked)
++    body_marked = _compile(wrapper, programs, FanucTranslator())
++
++    unmarked_wrapper, unmarked_programs = copy.deepcopy(wrapper), copy.deepcopy(programs)
++    for program in [unmarked_wrapper] + unmarked_programs:
++        for instr in program.instructions:
++            instr.brand_native_code = False
++    body_unmarked = _compile(unmarked_wrapper, unmarked_programs, FanucTranslator())
++
++    assert body_marked == body_unmarked
++    assert "CALL R_TS_P" in body_marked and "Search[+X]" in body_marked
++
++
++def test_fanuc_searches_ignore_the_contact():
++    """The compiler queues the contact only for a translator that asks for it."""
++    assert not hasattr(FanucTranslator(), "configure_next_search_contact")
++    wrapper, programs = _touch_family(robot_brand=ROBOT_BRAND_FANUC, export_mode="")
++    search = next(i for p in programs for i in p.instructions if i.instr_type == INSTR_MOVE_L_SEARCH)
++    assert search.search_contact_embedded_target is not None
++
++
++# ---------------------------------------------------------------------------
++# Generation's ABB preconditions
++# ---------------------------------------------------------------------------
++
++def _service():
++    return WeldTouchGenerationService(_MainWindowStub())
++
++
++def test_abb_touch_generation_needs_the_hmi_profile(monkeypatch):
++    monkeypatch.setattr(touch_module, "resolve_robot_group_abb_export_mode", lambda *a, **k: ABB_EXPORT_MODE_NO_HMI)
++    monkeypatch.setattr(touch_module, "resolve_weld_abb_hmi_coordinated_wobj_name", lambda *a, **k: "")
++
++    with pytest.raises(WeldTouchGenerationError) as error:
++        _service()._abb_touch_export_mode(WeldItem(weld_id="w", name="W"), "Robot 1", ROBOT_BRAND_ABB)
++    assert error.value.reason_code == "abb_touch_requires_hmi"
++
++
++def test_abb_touch_generation_refuses_a_coordinated_weld(monkeypatch):
++    monkeypatch.setattr(touch_module, "resolve_robot_group_abb_export_mode", lambda *a, **k: ABB_EXPORT_MODE_HMI)
++    monkeypatch.setattr(touch_module, "resolve_weld_abb_hmi_coordinated_wobj_name",
++                        lambda *a, **k: "wobjTG_WeldActStn")
++
++    with pytest.raises(WeldTouchGenerationError) as error:
++        _service()._abb_touch_export_mode(WeldItem(weld_id="w", name="W"), "Robot 1", ROBOT_BRAND_ABB)
++    assert error.value.reason_code == "abb_touch_coordinated_unsupported"
++
++
++def test_an_indexed_hmi_weld_touches_in_hmi_mode(monkeypatch):
++    monkeypatch.setattr(touch_module, "resolve_robot_group_abb_export_mode", lambda *a, **k: ABB_EXPORT_MODE_HMI)
++    monkeypatch.setattr(touch_module, "resolve_weld_abb_hmi_coordinated_wobj_name", lambda *a, **k: "")
++
++    mode = _service()._abb_touch_export_mode(WeldItem(weld_id="w", name="W"), "Robot 1", ROBOT_BRAND_ABB)
++    assert mode == ABB_EXPORT_MODE_HMI
++
++
++def test_fanuc_touch_generation_is_untouched(monkeypatch):
++    """FANUC keeps its empty export mode (its touch blocks have always been HMI-shaped) and
++    never reaches the ABB resolvers."""
++    def _boom(*args, **kwargs):
++        raise AssertionError("an ABB resolver ran for a FANUC weld")
++
++    monkeypatch.setattr(touch_module, "resolve_robot_group_abb_export_mode", _boom)
++    monkeypatch.setattr(touch_module, "resolve_weld_abb_hmi_coordinated_wobj_name", _boom)
++
++    assert _service()._abb_touch_export_mode(WeldItem(weld_id="w", name="W"), "Robot 1", ROBOT_BRAND_FANUC) == ""
+diff --git a/tests/test_abb_translator.py b/tests/test_abb_translator.py
+index 633fefb..6e05104 100644
+--- a/tests/test_abb_translator.py
++++ b/tests/test_abb_translator.py
+@@ -1592,9 +1592,10 @@ def test_statements_emit_rapid_syntax():
+ 
+ 
+ def test_a_touch_search_is_refused_loudly_rather_than_faked():
+-    """`SearchL` is base RAPID (**E29**) so this is not a licensing gap -- but emitting a
+-    search that has never run on hardware produces a program that looks finished and is not
+-    (**E17**)."""
++    """Outside HMI mode, and without a solved contact, there is no honest search to emit:
++    nothing would turn the hit into an offset, and the search would have no direction. The
++    pre-P5 output stays -- a plain MoveL and a warning -- rather than a search that looks
++    finished and is not (touch-sense P5; the HMI-mode emission is `test_abb_touchsense.py`)."""
+     translator = _program(build=lambda t: t.MoveLSearch(_pose(), None, "+X"))
+ 
+     assert "MoveL" in translator.get_program_string()
+@@ -1644,9 +1645,10 @@ def test_abb_now_claims_program_export():
+     # capture programs. Neither pulls in the FANUC generation context above.
+     assert adapter.supports("supports_workflow_package") is True
+     assert adapter.supports("supports_global_capture_generation") is True
++    # Touch-sense P5: offset touch sensing (HMI mode, indexed welds) against `TG_TouchSearch`.
++    assert adapter.supports("supports_touch_generation") is True
+     # Everything else is still unimplemented, and saying so is the point of the flag set.
+     assert adapter.supports("supports_cell_program") is False
+-    assert adapter.supports("supports_touch_generation") is False
+ 
+ 
+ def test_a_single_mod_is_the_deliverable():
+diff --git a/tests/test_robot_brand_adapters.py b/tests/test_robot_brand_adapters.py
+index e67f462..6031974 100644
+--- a/tests/test_robot_brand_adapters.py
++++ b/tests/test_robot_brand_adapters.py
+@@ -84,7 +84,7 @@ def test_unimplemented_brands_claim_nothing(brand):
+         assert getattr(caps, field_name) is False, field_name
+ 
+ 
+-def test_abb_claims_exactly_what_is_delivered_through_phase_12():
++def test_abb_claims_exactly_what_is_delivered_through_touch_sense_p5():
+     """The flag set doubles as a progress marker, so it is worth stating exactly which flags are
+     on. An extra one here would promise generation that does not exist.
+ 
+@@ -94,10 +94,13 @@ def test_abb_claims_exactly_what_is_delivered_through_phase_12():
+     point of a capture pose) and `supports_workflow_package` (`TG_Main` loads exactly ONE module
+     per run, so the whole run must be one flattened package main).
+ 
++    Touch-sense P5 (2026-09-26) added `supports_touch_generation`: offset touch sensing in HMI
++    mode, indexed welds only, against `abb_support`'s VC-proven `TG_TouchSearch`.
++
+     Still off, and each for its own reason: `supports_output_profile_export_context` because ABB
+     does not resolve a FANUC-style generation-time export context (**E40**);
+     `supports_cell_program` because a multi-robot cell program is a separate feature no ABB cell
+-    needs; `supports_touch_generation` and `supports_endpoint_search` because they are not built.
++    needs; `supports_endpoint_search` because FANUC's built-in endpoint search is not ported.
+     """
+     caps = get_adapter(ROBOT_BRAND_ABB).capabilities
+     claimed = {
+@@ -110,6 +113,7 @@ def test_abb_claims_exactly_what_is_delivered_through_phase_12():
+         "supports_output_profiles",
+         "supports_global_capture_generation",
+         "supports_workflow_package",
++        "supports_touch_generation",
+     }
+ 
+ 
+@@ -126,7 +130,7 @@ def test_brand_supports_tolerates_unknown_brands():
+     """The convenience form, for gates reading data of uncertain provenance such as an
+     old project with an empty `robot_brand` column."""
+     assert brand_supports(ROBOT_BRAND_FANUC, "supports_touch_generation") is True
+-    assert brand_supports(ROBOT_BRAND_ABB, "supports_touch_generation") is False
++    assert brand_supports(ROBOT_BRAND_ABB, "supports_touch_generation") is True
+     assert brand_supports("", "supports_touch_generation") is False
+     assert brand_supports("yaskawa", "supports_touch_generation") is False
+ 
+diff --git a/tests/test_weld_generation_user_messages_reason_codes.py b/tests/test_weld_generation_user_messages_reason_codes.py
+index e26e36d..9043e2d 100644
+--- a/tests/test_weld_generation_user_messages_reason_codes.py
++++ b/tests/test_weld_generation_user_messages_reason_codes.py
+@@ -62,8 +62,23 @@ from tguide_lib.workflows.weld_generation_user_messages import (
+         (
+             "touch",
+             "robot_brand_unsupported",
+-            "Step 19 touch generation currently supports Fanuc only.",
+-            ["Touch sensing", "Fanuc"],
++            "Step 19 touch generation is not supported for kuka yet.",
++            ["Touch sensing", "Fanuc and ABB"],
++        ),
++        # ABB touch sensing's preconditions (touch-sense P5).
++        (
++            "touch",
++            "abb_touch_requires_hmi",
++            "ABB touch sensing needs the ABB HMI Mode output profile: the HMI turns the touches into "
++            "the weld's offset. Select it for this robot group, or remove the weld's touch points.",
++            ["ABB HMI Mode", "remove the weld's touch points"],
++        ),
++        (
++            "touch",
++            "abb_touch_coordinated_unsupported",
++            "ABB touch sensing supports indexed welds only for now; this weld is coordinated with its "
++            "positioner (wobjTG_WeldActStn).",
++            ["indexed welds only", "positioner"],
+         ),
+         (
+             "global_capture",
+@@ -99,6 +114,7 @@ def test_reason_code_maps_to_friendly_message(domain, reason_code, raw_message,
+     # Internal jargon and rejection-dict dumps must never reach the user.
+     assert "Step 19" not in message
+     assert "Step 20" not in message
++    assert "wobjTG_" not in message
+     assert "solve={" not in message
+     assert "validate={" not in message
+     assert "IK context" not in message
+diff --git a/tguide_lib/ProgramCompiler.py b/tguide_lib/ProgramCompiler.py
+index 6f7acaa..c5a3568 100644
+--- a/tguide_lib/ProgramCompiler.py
++++ b/tguide_lib/ProgramCompiler.py
+@@ -359,6 +359,11 @@ class ProgramCompiler:
+         elif role == "end":
+             embedded = getattr(instruction, "embedded_end_target", None)
+             target_name = str(getattr(instruction, "end_target_name", "") or "")
++        elif role == "contact":
++            # A touch search's solved contact TCP (touch-sense P5). Embedded only: there is no
++            # named-target field for it.
++            embedded = getattr(instruction, "search_contact_embedded_target", None)
++            target_name = ""
+         else:
+             embedded = getattr(instruction, "embedded_target", None)
+             target_name = str(getattr(instruction, "target_name", "") or "")
+@@ -3162,6 +3167,24 @@ class ProgramCompiler:
+                          include_external_snapshot=include_external_snapshot,
+                          coordinated_positioner_joint_names=coordinated_positioner_joint_names,
+                      )
++                     if hasattr(translator, "configure_next_search_contact"):
++                         # Touch-sense P5: `TG_TouchSearch` takes its direction from the solved
++                         # contact, which FANUC's `Search[+X]` never needed. Only a translator
++                         # that asks for it gets it, so FANUC output is byte-identical; a
++                         # missing or unresolvable contact queues None and the translator
++                         # refuses the search rather than guessing a direction.
++                         contact_pose, contact_joints, contact_err = self._resolve_instruction_target(
++                             instr,
++                             robot_urdf,
++                             role="contact",
++                             include_external_snapshot=include_external_snapshot,
++                             robot_group_name=robot_group_name,
++                             export_config=export_config,
++                         )
++                         translator.configure_next_search_contact(
++                             contact_pose if contact_err is None else None,
++                             contact_joints if contact_err is None else None,
++                         )
+                      translator.MoveLSearch(
+                          pose,
+                          joints,
+diff --git a/tguide_lib/Translators/AbbTranslator.py b/tguide_lib/Translators/AbbTranslator.py
+index 48952f1..83be21d 100644
+--- a/tguide_lib/Translators/AbbTranslator.py
++++ b/tguide_lib/Translators/AbbTranslator.py
+@@ -341,11 +341,22 @@ _RAPID_PARAMETERLESS_INSTRUCTIONS = frozenset(
+     )
+ )
+ 
++#: The resident search primitive (`abb_support` TG_Touch.sys, touch-sense P2): one call per
++#: touch, `TG_TouchSearch <approach>, <contact>, <tool>, <wobj>;`. A MOVING statement, unlike every
++#: other `TG_*` call, which the move-run and held-posture trackers treat as transparent.
++_TOUCH_SEARCH_ROUTINE = "TG_TouchSearch"
++#: `TG_TouchSearch` ends the program when approach and contact are closer than this (no direction).
++_TOUCH_SEARCH_MIN_MM = 1.0
++#: How far off the work object's axes a search may run before the HMI's per-axis offset math
++#: (it reads each hit along its snapped axis only) is fed a coordinate it does not model.
++_TOUCH_SEARCH_AXIS_TOL_DEG = 0.5
++
+ #: Routines the CONTROLLER declares, so a call to one resolves at load.
+ #:
+ #: Authority: every global `PROC` in `abb_support@2b2b5e7` -- `TG_Comms.sys`, `TG_Cell.sys` and
+-#: `TG_Weld.sys`. (`TG_Main.mod`'s helpers are `LOCAL` and unreachable from our module, so they
+-#: are not here.)
++#: `TG_Weld.sys` -- plus the touch-sense routines `abb_support@03b1b8e` added to `TG_Comms.sys` and
++#: `TG_Cell.sys`, and its new `TG_Touch.sys`. (`TG_Main.mod`'s helpers are `LOCAL` and unreachable
++#: from our module, so they are not here.)
+ #:
+ #: ⚠ **This answers "does the routine exist", NOT "is the exporter allowed to call it".** The
+ #: first version conflated the two and left `TG_ReqWeldStats` / `TG_ReqProgSel` /
+@@ -363,11 +374,16 @@ _RAPID_RESIDENT_ROUTINES = frozenset(
+         "TG_ReqPassCheck", "TG_ReqCamFrame", "TG_ReqCapture", "TG_ReqGlobalCapDone",
+         "TG_ReqWeldFrame", "TG_ReqWeldParams", "TG_ReqWeldStats", "TG_ReqEnd",
+         "TG_ReqFileTransfer", "TG_ReqProgSel", "TG_SocketCom", "TG_SocketDisc",
++        # TG_Comms.sys, the offset touch-sense family (ids 16/18/19; there is no 17 on ABB)
++        "TG_ReqTouchSenseDo", "TG_ReqTouchSensePoint", "TG_ReqTouchSenseEnd",
+         # TG_Cell.sys
+         "TG_CamOpen", "TG_CamClose", "TG_CamPrep", "TG_WeldPrep", "TG_DryRunOn", "TG_DryRunOff",
+         _HMI_ACTIVATE_MECH_UNIT_ROUTINE,
++        "TG_TeachModeOn", "TG_TouchSenseOn", "TG_TouchSenseOff",
+         # TG_Weld.sys
+         "TG_ApplyWeldParams",
++        # TG_Touch.sys
++        _TOUCH_SEARCH_ROUTINE,
+     )
+ )
+ 
+@@ -882,6 +898,9 @@ class AbbTranslator(BaseTranslator):
+         # `configure_next_point_wobj_local_pose`.
+         self._next_point_wobj_local_pose = None
+         self._next_point_wobj_local_pose_sequence = []
++        # Touch-sense P5: the solved contact the compiler queues for the next `MoveLSearch`
++        # (`configure_next_search_contact`), consumed there. `(pose_world, joint_array)` or None.
++        self._next_search_contact = None
+ 
+         # Process state. `_process_active` is what makes `ArcL` rather than `MoveL`; see
+         # docs/abb_integration_plan_v1.md §5.3 and Phase 3.
+@@ -1069,6 +1088,9 @@ class AbbTranslator(BaseTranslator):
+         # not modal, and a point with nothing queued must fall back to the world division.
+         self._next_point_wobj_local_pose = None
+         self._next_point_wobj_local_pose_sequence = []
++        # Touch-sense P5: the solved contact the compiler queues for the next `MoveLSearch`
++        # (`configure_next_search_contact`), consumed there. `(pose_world, joint_array)` or None.
++        self._next_search_contact = None
+         self._process_active = False
+         self._process_first_move_pending = False
+         self._last_process_move_index = None
+@@ -2024,6 +2046,21 @@ class AbbTranslator(BaseTranslator):
+                 self._held_absj_index = len(self._body) - 1
+                 return
+         target = self._target_const(pose_matrix, joint_array)
++        # The Cartesian twin of the MoveAbsJ collapse above: a `MoveJ` to the robtarget the move
++        # just emitted already goes to is a zero-length segment, which the VC executes as a stop
++        # point and warns on (50501 / 50024). Touch sensing emits exactly that at every touch
++        # (touch-sense P5): a bridge ends on the touch approach and the touch program opens with
++        # its own `MoveJ` there. Same rule as the MoveAbsJ case: the pooled name is the exact
++        # destination (wobj included), so the repeat is a physical no-op, and a `fine` repeat
++        # re-terminates the surviving arrival `fine` instead.
++        if (
++            self.collapse_redundant_joint_moves
++            and len(self._body) > 0
++            and self._body[-1].startswith(f"MoveJ {target}, ")
++        ):
++            if self._zone_token() == "fine":
++                self._reterminate_move_line_fine(len(self._body) - 1)
++            return
+         # D51: a Cartesian MoveJ is governed by ConfJ, not ConfL. With `movej_joint_targets` on
+         # this path only carries targets the compiler withheld a solution from
+         # (`export_movej_as_cartesian` -- HMI-corrected moves), whose placeholder confdata keeps
+@@ -2091,20 +2128,136 @@ class AbbTranslator(BaseTranslator):
+         )
+         self.MoveL(pose_matrix, joint_array)
+ 
++    def configure_next_search_contact(self, pose_matrix=None, joint_array=None):
++        """Queue the solved contact for the next `MoveLSearch` (touch-sense P5).
++
++        FANUC's `L P[n] FINE Search[+X]` needs only the approach -- the search runs along the
++        touch frame's axis for the schedule's distance -- so the neutral `MoveLSearch` carries
++        only that. `TG_TouchSearch` takes its direction from a second robtarget instead, and the
++        planner already solves it: `ProgramInstruction.search_contact_embedded_target`, the
++        contact TCP, which the compiler resolves and hands over here. `None` clears it, so a
++        search that arrives without one takes the refusal path in `MoveLSearch`.
++        """
++        if pose_matrix is None:
++            self._next_search_contact = None
++            return
++        self._next_search_contact = (
++            np.asarray(pose_matrix, dtype=np.float64).reshape((4, 4)),
++            joint_array,
++        )
++
+     def MoveLSearch(self, pose_matrix, joint_array, search_axis_label, reuse_key=None):
+-        """Touch sensing is Phase 15 and cannot be validated offline (**E17**).
++        """One offset touch, as `TG_TouchSearch` (touch-sense P5, `abb_support` TG_Touch.sys).
++
++        The planner's touch program is FANUC's, instruction for instruction: the approach
++        `MoveL` (anchor), THIS search, the touch-hit request, `WaitTime 0.5`, the retreat
++        `MoveL`. So this emits exactly the one statement FANUC's `L P[53] FINE Search[+X]` is:
++
++            TG_TouchSearch <approach>, <contact>, tTG_Weld, wobjTG_Weld;
++
++        The resident routine does the rest, VC-proven (`abb_support` robotstudio_setup.md
++        section 21): a fine move to the approach, `SearchL \\Stop` up to 150 mm along
++        approach -> contact at 15 mm/s (cell data), the hit into `rtTG_TouchHit` for
++        `TG_ReqTouchSensePoint`, and a pause-and-retry on a miss. No return move: the retreat
++        `MoveL` that follows IS the return, as FANUC runs its schedules with auto return off.
++
++        The contact contributes only its DIRECTION (and a readable nominal). Both robtargets are
++        in the active work object -- the weld's CAD frame, which the HMI serves -- so the
++        direction is the planner's -snapped axis there, the axis the HMI's offset math reads
++        the hit along.
+ 
+-        `SearchL` exists in base RAPID (**E29**) so this is not a licensing gap, but emitting
+-        a search that has never run on hardware would produce a program that looks finished
+-        and is not. `MoveL` plus a loud warning is the honest output.
++        Refused -- a plain `MoveL` plus a loud warning, the pre-P5 output -- when the search
++        cannot be emitted honestly: outside HMI mode (only the HMI turns hits into an offset),
++        without a solved contact, or in a coordinated work object (touch-sense P7, not v1).
+         """
+-        del search_axis_label
+-        self._warn_once(
+-            "abb_search_l",
+-            "Touch-sense search is not implemented for ABB (Phase 15); emitted as a plain "
+-            "MoveL. The exported program will NOT search.",
++        del reuse_key
++        contact = self._next_search_contact
++        self._next_search_contact = None
++        refusal = self._touch_search_refusal(contact)
++        if refusal is not None:
++            key, message = refusal
++            self._warn_once(key, message)
++            self.MoveL(pose_matrix, joint_array)
++            return
++        contact_pose, contact_joints = contact
++        self._check_touch_search_axis(pose_matrix, contact_pose, search_axis_label)
++        # A procedure call, not a move this translator can blend: settle the move before it the
++        # way every other non-motion statement does (R1).
++        self._fine_terminate_last_move()
++        start = self._target_const(pose_matrix, joint_array)
++        # The contact carries the approach's external axes (the carry-forward in
++        # `_consume_next_point_external_axes`), and `TG_TouchSearch` copies them from the start
++        # anyway: an indexed positioner stands still during the search (touch-sense D6).
++        end = self._target_const(contact_pose, contact_joints)
++        self._maybe_emit_chain_entry_guard(start)
++        self._ensure_conf_supervision(
++            linear=True,
++            enabled=(self._target_conf_derived.get(start, False)
++                     and self._target_conf_derived.get(end, False)),
++        )
++        self._append_motion(
++            f"{_TOUCH_SEARCH_ROUTINE} {start}, {end}, {self._tool_argument()}, {self._wobj_argument()};"
+         )
+-        self.MoveL(pose_matrix, joint_array, reuse_key=reuse_key)
++
++    def _touch_search_refusal(self, contact):
++        """`(warning key, message)` when this search cannot be emitted as `TG_TouchSearch`."""
++        tail = " Emitted as a plain MoveL: the exported program will NOT search."
++        if not self._hmi_mode():
++            return (
++                "abb_search_l",
++                "Touch-sense search needs the ABB HMI Mode output profile: only the HMI turns the "
++                "touches into the weld's offset (TG_ReqTouchSensePoint / TG_ReqTouchSenseEnd)."
++                + tail,
++            )
++        if contact is None:
++            return (
++                "abb_search_no_contact",
++                "A touch-sense search arrived without its solved contact point, so it has no "
++                "direction. Regenerate the weld's touch program." + tail,
++            )
++        if self._wobj_argument() != self.wobj_name:
++            return (
++                "abb_search_coordinated",
++                f"A touch-sense search runs in {self._wobj_argument()}, not {self.wobj_name}: "
++                "coordinated touch sensing is not ported yet (touch-sense P7)." + tail,
++            )
++        return None
++
++    def _check_touch_search_axis(self, approach_pose, contact_pose, search_axis_label):
++        """Warn when the search does not run along one axis of the work object (touch-sense 3.5).
++
++        The HMI reads each hit along its touch point's snapped axis only, so an oblique search
++        feeds its offset math a coordinate it does not model (curobo **E30**: ABB could search
++        in any direction; the HMI could not use it). The planner places the approach at
++        touch + snapped_axis * standoff in the weld's CAD frame, so this holds by construction;
++        the check catches a reference frame that is not that CAD frame, and a stroke too short
++        for `TG_TouchSearch`, which ends the program on one."""
++        a = self._pose_in_active_frame(approach_pose)
++        c = self._pose_in_active_frame(contact_pose)
++        if a is None or c is None:
++            return
++        d = (np.asarray(c, dtype=np.float64)[:3, 3] - np.asarray(a, dtype=np.float64)[:3, 3]) * 1000.0
++        length = float(np.linalg.norm(d))
++        if length < _TOUCH_SEARCH_MIN_MM:
++            self._warn_once(
++                "abb_search_too_short",
++                f"A touch-sense search's approach and contact are {length:.3f} mm apart (under "
++                f"{_TOUCH_SEARCH_MIN_MM:g} mm): TG_TouchSearch has no direction and ends the "
++                "program there. Check the touch point's approach distance.",
++            )
++            return
++        index = int(np.argmax(np.abs(d)))
++        off_axis_deg = math.degrees(math.acos(min(1.0, abs(float(d[index])) / length)))
++        label = ("+" if d[index] > 0 else "-") + "XYZ"[index]
++        wanted = str(search_axis_label or "").strip().upper()
++        if off_axis_deg > _TOUCH_SEARCH_AXIS_TOL_DEG or (wanted != "" and wanted != label):
++            self._warn_once(
++                "abb_search_off_axis",
++                f"A touch-sense search runs {off_axis_deg:.2f} deg off the work object's axes "
++                f"(direction {label}, planned {wanted or 'unlabelled'}). The HMI reads each hit "
++                "along its snapped axis only, so this touch would shift the weld wrongly. The "
++                "weld's reference frame is probably not its CAD frame.",
++            )
+ 
+     def move_positioner_index(self, reuse_key=None):
+         """Emit a positioner-only index move using the Monarch idiom, not `MoveExtJ` (**D35**).
+@@ -2263,6 +2416,10 @@ class AbbTranslator(BaseTranslator):
+             return
+         if s.endswith(";"):
+             head = s.split(" ", 1)[0].rstrip(";").upper()
++            if head == _TOUCH_SEARCH_ROUTINE.upper():
++                # The one `TG_*` call that moves the arm (touch-sense P5).
++                self._clear_held_posture()
++                return
+             if head.startswith("TG_") or head in ("TPWRITE", "WAITTIME"):
+                 return
+             if ":=" in s and not u.startswith(("IF ", "GOTO ", "RETURN")):
+@@ -2292,6 +2449,13 @@ class AbbTranslator(BaseTranslator):
+         self._pending_chain_entry_guard = False
+         if self.weld_chain_entry_guard_mm <= 0.0:
+             return
++        # The guard reads `CPos`, the TCP where it is NOW; RAPID runs ahead of a move that ends
++        # in a zone, so after a blended arrival `CPos` is wherever the blend has got to. Settle the
++        # arrival first, as R1 does before any non-motion statement. VC-found (touch-sense P5,
++        # 2026-09-26): a touch program's approach `MoveJ` inherits its bridge's 25 mm zone, the
++        # guard read the TCP still on the way and every touch-sensed weld aborted at its first
++        # touch. A weld's own entry `MoveAbsJ` is `fine` by construction, which hid it.
++        self._fine_terminate_last_move()
+         tolerance = "%g" % float(self.weld_chain_entry_guard_mm)
+         self._body.append(
+             "IF Distance(CPos(\\Tool:=" + self._tool_argument()
+@@ -2366,6 +2530,10 @@ class AbbTranslator(BaseTranslator):
+             return True
+         if re.match(r"^[A-Za-z_]\w*\s*:$", s):
+             return True
++        # The one `TG_*` call that MOVES the arm (touch-sense P5): the last `MoveAbsJ` is not
++        # where the arm is after a search.
++        if re.match(r"^" + _TOUCH_SEARCH_ROUTINE + r"\b", s, re.IGNORECASE):
++            return True
+         return False
+ 
+     # ==========================================================================
+diff --git a/tguide_lib/robot_brand_program_blocks/abb_program_blocks.py b/tguide_lib/robot_brand_program_blocks/abb_program_blocks.py
+index 09cb530..12aca05 100644
+--- a/tguide_lib/robot_brand_program_blocks/abb_program_blocks.py
++++ b/tguide_lib/robot_brand_program_blocks/abb_program_blocks.py
+@@ -28,9 +28,11 @@ knows about work objects and arc instructions.
+    same property FANUC's HMI weld programs have: they are components of a package, not programs.
+ 
+ **Not emitted, on purpose.** `TG_ReqWeldStats` (FANUC `R_W_S`, request 13) is listed under
+-"Not ported -- out of v1 scope" in the contract's 3, together with the touch-sense family and
+-camera calibration. The kickoff brief's table (e) says FANUC calls it after `WELD END`; the
+-contract wins, because it is the document the RAPID side was written against. `TG_ReqWeldFrame`
++"Not ported -- out of v1 scope" in the contract's 3, together with camera calibration. The
++kickoff brief's table (e) says FANUC calls it after `WELD END`; the contract wins, because it is
++the document the RAPID side was written against. The offset touch-sense family (16/18/19) WAS
++ported afterwards (`abb_support` docs/abb_touch_sense_port_v1.md, P1-P3 VC-proven): see
++`build_touchsense_program_blocks`. `TG_ReqWeldFrame`
+ also gets **no motion barrier** -- no `fine` point, no `StopMove`/`StartMove` -- because FANUC
+ emits none and the settling ladder (`WaitRob \\InPos` + `\\ZeroSpeed`) lives INSIDE the routine
+ (**O-3**, closed by the same precedent).
+@@ -43,6 +45,8 @@ from tguide_lib.robot_brand_program_blocks.base_program_blocks import (
+     BaseRobotBrandProgramBlocksProvider,
+     GlobalCapturePoseProgramBlockBundle,
+     GlobalCapturePoseProgramBlocksContext,
++    TouchsenseProgramBlockBundle,
++    TouchsenseProgramBlocksContext,
+     WeldProgramBlocksContext,
+     WorkflowPackageProgramBlockBundle,
+     WorkflowPackageProgramBlocksContext,
+@@ -185,6 +189,62 @@ class AbbProgramBlocksProvider(BaseRobotBrandProgramBlocksProvider):
+             emit_default_set_frame=True,
+         )
+ 
++    def build_touchsense_program_blocks(self, context: TouchsenseProgramBlocksContext) -> TouchsenseProgramBlockBundle:
++        """The offset touch-sense frame around one weld's touches (touch-sense P5).
++
++        FANUC (`fanuc_program_blocks.py`, the sample `TD05tRJYQd.ls` lines 76-196):
++        `SET_SUB('TSP<weld>_full')` -> `R_W_F` -> `R_TS_D` -> `CAM_CLOSE` -> `IF R[195]=1 THEN` ->
++        `R_TS_F` -> `TEACHMODE_ON` -> `Search Start [n] PR[10]` ... `Search End` -> `R_TS_END` ->
++        `ENDIF`, and `R_TS_P` after every search.
++
++        ABB, same order and the same positions, against `abb_support`'s resident routines
++        (reference module `abb_support:abb/rapid/TGS/TD05Touch.mod`, VC-proven end to end):
++
++        - no `R_TS_F` (id 17): an ABB search direction lives in the work object the frame
++          request already served, so it rotates with the part for free (touch-sense D2);
++        - no `Search Start` / `Search End`: they select and close a FANUC touch schedule. Speed
++          and stroke are `TG_Touch.sys` cell data (15 mm/s, 150 mm -- D9), and each
++          `TG_TouchSearch` is self-contained;
++        - `TG_TeachModeOn` where FANUC calls `TEACHMODE_ON`, on the same config switch
++          (`WELDER_ENABLE_FRONIUS_TEACH_MODE`); touch sensing on disables it per search and
++          welding turns it off (D5, D11), so nothing turns it off here either;
++        - `TG_ReqTouchSensePoint` is the touch-hit line; the translator's `MoveLSearch` emits the
++          `TG_TouchSearch` it reports;
++        - ONE line FANUC does not have: `IF nTG_WeldStatus=2 GOTO abort_end;` after the frame
++          request. 2 is the robot-side sentinel for a malformed frame (and the HMI's own abort),
++          and with it `wobjTG_Weld.oframe` still holds the previous frame -- searching there
++          would hand the HMI hits it turns into a wrong touch-up and SAVES to the project.
++          Skip (0) needs no branch: FANUC touches regardless of the weld status and so does
++          this; only `nTG_DoTouchSense` gates the block.
++
++        The routine names are fixed RAPID names: the context's FANUC routine names and register
++        numbers (R_TS_*, R[195], PR[10], UF6/UT8) have no meaning here and are ignored, as the
++        weld blocks ignore FANUC's registers. Base-referenced `wobjTG_Weld` always: touch
++        generation refuses a coordinated ABB weld (touch-sense D6, P7).
++        """
++        if not _is_hmi(context):
++            return TouchsenseProgramBlockBundle()
++
++        wrapper_start = [
++            _sub_name_assignment(getattr(context, "subroutine_name", "")),
++            f"TG_ReqWeldFrame \\Tool:={ABB_HMI_TOOL_NAME} \\WObj:={ABB_HMI_WOBJ_NAME};",
++            f"IF nTG_WeldStatus={WELD_STATUS_ABORT} GOTO {ABB_ABORT_LABEL};",
++            "TG_ReqTouchSenseDo;",
++            # FANUC's `CALL CAM_CLOSE`, in the same place and for the same reason as the weld's.
++            "TG_CamClose;",
++            "IF nTG_DoTouchSense=1 THEN",
++        ]
++        if bool(getattr(context, "teachmode_enabled", False)):
++            wrapper_start.append("TG_TeachModeOn;")
++        return TouchsenseProgramBlockBundle(
++            wrapper_start_lines=[line for line in wrapper_start if str(line).strip() != ""],
++            wrapper_finish_lines=[
++                f"TG_ReqTouchSenseEnd \\WObj:={ABB_HMI_WOBJ_NAME};",
++                "ENDIF",
++            ],
++            touch_hit_call_line="TG_ReqTouchSensePoint;",
++        )
++
+     def build_global_capture_pose_program_blocks(
+         self,
+         context: GlobalCapturePoseProgramBlocksContext,
+diff --git a/tguide_lib/robot_brands/abb.py b/tguide_lib/robot_brands/abb.py
+index 5a399b5..4535187 100644
+--- a/tguide_lib/robot_brands/abb.py
++++ b/tguide_lib/robot_brands/abb.py
+@@ -53,7 +53,18 @@ Each flag flips on as its phase lands -- see docs/abb_integration_plan_v1.md:
+                                              stays off. `abb_program_blocks` returns an EMPTY
+                                              bundle for a `no_hmi` group, so a capture program
+                                              generated there is bare motion, exactly as before
+-- `supports_touch_generation`                Phase 15, cannot be validated offline (**E17**)
++- `supports_touch_generation`                ON (touch-sense P5, 2026-09-26): offset touch
++                                             sensing -- Step 19's classic touch points, the HMI
++                                             auto touch-up (ids 16/18/19). HMI mode and indexed
++                                             welds only; generation refuses the rest
++                                             (`WeldTouchGenerationService._abb_touch_export_mode`).
++                                             **E17 was wrong for plain `SearchL`**: it stops on
++                                             its DI on a RobotWare 6.15 VC, so the RAPID side
++                                             (`abb_support` TG_Touch.sys) and this emission were
++                                             validated offline end to end. Real-cell sensing
++                                             (the welder's touch signals, timing, Teach mode)
++                                             stays hardware work, and the HMI must accept ABB
++                                             touch requests (its P4) before a cell runs one.
+ - `supports_endpoint_search`                 never as-is: FANUC Simple TouchSense has no
+                                              one-instruction ABB equivalent. ABB `SearchL` is
+                                              *less* constrained (**E29**), so the eventual ABB
+@@ -115,4 +126,7 @@ class AbbBrandAdapter(RobotBrandAdapter):
+         # Phase 10 for that reason. `supports_workflow_cell_program` stays off: a multi-robot
+         # cell program is a separate feature no ABB cell needs yet.
+         supports_workflow_package=True,
++        # Touch-sense P5: offset touch sensing (ids 16/18/19) in HMI mode, indexed welds only. The
++        # search is `abb_support`'s resident `TG_TouchSearch` (`AbbTranslator.MoveLSearch`).
++        supports_touch_generation=True,
+     )
+diff --git a/tguide_lib/workflows/weld_generation_user_messages.py b/tguide_lib/workflows/weld_generation_user_messages.py
+index 80fbb4d..4bf9a08 100644
+--- a/tguide_lib/workflows/weld_generation_user_messages.py
++++ b/tguide_lib/workflows/weld_generation_user_messages.py
+@@ -53,7 +53,7 @@ def _message_for_reason_code(domain: str, reason_code: str, raw_message: str) ->
+ 
+     if code == "robot_brand_unsupported":
+         if domain == "touch":
+-            return "Touch sensing can currently only be generated for Fanuc robots."
++            return "Touch sensing can currently only be generated for Fanuc and ABB robots."
+         if domain in {"global_capture", "global_capture_master"}:
+             return "Global capture programs can currently only be generated for Fanuc robots."
+         return "This step can currently only be generated for Fanuc robots."
+@@ -65,6 +65,18 @@ def _message_for_reason_code(domain: str, reason_code: str, raw_message: str) ->
+         return "Couldn't determine which robot to use for global capture. Check the capture set's robot assignment and try again."
+     if code == "touch_weld_seed_invalid":
+         return "Couldn't use the weld program as a starting point for touch sensing. Regenerate the weld program, then generate touch again."
++    # ABB touch sensing's two preconditions (WeldTouchGenerationService._abb_touch_export_mode).
++    if code == "abb_touch_requires_hmi":
++        return (
++            "Touch sensing on an ABB robot needs the ABB HMI Mode output profile, because the HMI "
++            "turns the touches into the weld's correction. Select it for this robot, or remove the "
++            "weld's touch points."
++        )
++    if code == "abb_touch_coordinated_unsupported":
++        return (
++            "Touch sensing on an ABB robot works on indexed welds only for now. This weld moves "
++            "with its positioner, so remove its touch points to generate it."
++        )
+ 
+     point = _touch_point_label_from_raw(raw_message)
+     if code == "touch_unreachable":
+diff --git a/tguide_lib/workflows/weld_touch_generation_native.py b/tguide_lib/workflows/weld_touch_generation_native.py
+index eb862a0..48fed13 100644
+--- a/tguide_lib/workflows/weld_touch_generation_native.py
++++ b/tguide_lib/workflows/weld_touch_generation_native.py
+@@ -34,9 +34,19 @@ from tguide_lib.qt_lifecycle import drain_deferred_deletes
+ from tguide_lib.progress_overlay import ThemedProgressOverlay as QProgressDialog
+ from tguide_lib.robot_brand_program_blocks import TouchsenseProgramBlocksContext, get_robot_brand_program_blocks_provider
+ from tguide_lib.robot_brands import brand_supports
+-from tguide_lib.robot_branding import ROBOT_BRAND_FANUC, normalize_robot_brand, resolve_robot_group_robot_brand
++from tguide_lib.robot_branding import (
++    ROBOT_BRAND_ABB,
++    ROBOT_BRAND_FANUC,
++    normalize_robot_brand,
++    resolve_robot_group_robot_brand,
++)
+ from tguide_lib.robot_posture_config import resolve_fanuc_config_text_from_fk
+ from tguide_lib.robot_tool_reference import compose_rigid_matrix4, inverse_rigid_matrix4
++from tguide_lib.workflows.abb_export_context import (
++    resolve_robot_group_abb_export_mode,
++    resolve_weld_abb_hmi_coordinated_wobj_name,
++)
++from tguide_lib.workflows.abb_output_profiles import ABB_EXPORT_MODE_HMI
+ from tguide_lib.workflows.weld_rz_pool import generation_in_progress
+ from tguide_lib.workflows.weld_external_axis_support import (
+     deserialize_joint_map,
+@@ -124,6 +134,10 @@ class _TouchSeed:
+     midpoint_joint_map: Dict[str, float]
+     requested_config: Tuple[str, str, str]
+     y_axis_hint_world: np.ndarray
++    # The blocks provider's export mode (`TouchsenseProgramBlocksContext.export_mode`). `""` for
++    # FANUC, whose touch blocks have always been built in the HMI shape; the ABB output profile's
++    # mode for ABB, which only touches in HMI mode (touch-sense P5, `_abb_touch_export_mode`).
++    export_mode: str = ""
+ 
+ 
+ @dataclass(frozen=True)
+@@ -532,10 +546,13 @@ class WeldTouchGenerationService:
+             raise WeldTouchGenerationError("Weld robot group is missing.")
+         robot_brand = normalize_robot_brand(resolve_robot_group_robot_brand(self.main_window, robot_group_name))
+         if not brand_supports(robot_brand, "supports_touch_generation"):
++            # Names the brand, as the package gate does: "Fanuc only" stopped being true when ABB
++            # touch sensing landed (touch-sense P5).
+             raise WeldTouchGenerationError(
+-                "Step 19 touch generation currently supports Fanuc only.",
++                f"Step 19 touch generation is not supported for {robot_brand or 'this robot brand'} yet.",
+                 reason_code="robot_brand_unsupported",
+             )
++        export_mode = self._abb_touch_export_mode(weld, robot_group_name, robot_brand)
+         touch_tcp_name = self._resolve_touch_tcp_name(robot_group_name)
+ 
+         frame_binding_payload = generated_output_binding_payload(weld, "reference_frame")
+@@ -633,7 +650,49 @@ class WeldTouchGenerationService:
+             midpoint_joint_map={str(k): float(v) for k, v in dict(midpoint_joint_map or {}).items()},
+             requested_config=(str(requested_config[0]), str(requested_config[1]), str(requested_config[2])),
+             y_axis_hint_world=np.asarray(y_axis_hint, dtype=np.float64),
++            export_mode=str(export_mode),
++        )
++
++    def _abb_touch_export_mode(self, weld, robot_group_name: str, robot_brand: str) -> str:
++        """The blocks-provider export mode for this touch program; `""` for every non-ABB brand.
++
++        ABB offset touch sensing (`abb_support` docs/abb_touch_sense_port_v1.md, P1-P3 VC-proven)
++        has two preconditions FANUC does not:
++
++        - **HMI mode.** The HMI computes the offset from the reported hits
++          (`TG_ReqTouchSensePoint` / `TG_ReqTouchSenseEnd`); a `no_hmi` program has nobody to
++          report to, and its provider returns no touch blocks at all, so generating would ship
++          searches whose results go nowhere.
++        - **An indexed weld.** A coordinated weld's frame lives in the station work object, where
++          the HMI's offset composes differently (touch-sense 3.3 item 5); that is P7, not v1 (D6).
++        """
++        if normalize_robot_brand(robot_brand) != ROBOT_BRAND_ABB:
++            return ""
++        export_mode = resolve_robot_group_abb_export_mode(
++            self.main_window,
++            robot_group_name=robot_group_name,
++            explicit_robot_brand=robot_brand,
+         )
++        if str(export_mode or "").strip().lower() != ABB_EXPORT_MODE_HMI:
++            raise WeldTouchGenerationError(
++                "ABB touch sensing needs the ABB HMI Mode output profile: the HMI turns the "
++                "touches into the weld's offset. Select it for this robot group, or remove the "
++                "weld's touch points.",
++                reason_code="abb_touch_requires_hmi",
++            )
++        coordinated_wobj = resolve_weld_abb_hmi_coordinated_wobj_name(
++            self.main_window,
++            weld,
++            robot_group_name=robot_group_name,
++            explicit_robot_brand=robot_brand,
++        )
++        if str(coordinated_wobj or "").strip() != "":
++            raise WeldTouchGenerationError(
++                "ABB touch sensing supports indexed welds only for now; this weld is coordinated "
++                f"with its positioner ({coordinated_wobj}).",
++                reason_code="abb_touch_coordinated_unsupported",
++            )
++        return str(export_mode)
+ 
+     def _resolve_touch_tcp_name(self, robot_group_name: str) -> str:
+         try:
+@@ -1952,6 +2011,7 @@ class WeldTouchGenerationService:
+                 finish_routine_name=str(config["fanuc_finish_routine_name"]),
+                 teachmode_routine_name=str(config["fanuc_teachmode_routine_name"]),
+                 teachmode_enabled=bool(config["fanuc_teachmode_enabled"]),
++                export_mode=str(getattr(seed, "export_mode", "") or ""),
+             )
+         )
+         approach_joint_target = self._touch_movej_target(
+@@ -2037,6 +2097,10 @@ class WeldTouchGenerationService:
+                 instr_type=INSTR_CUSTOM_CODE,
+                 custom_code=str(getattr(touch_blocks, "touch_hit_call_line", "") or f"CALL {str(config['fanuc_touch_hit_routine_name'])}"),
+                 name="Touch Hit Routine",
++                # The provider's line is this brand's own syntax, so it is emitted verbatim
++                # (`AbbTranslator` comments out anything else, E37/E39); `runBrandCode` defaults to
++                # `runCode`, so FANUC is byte-identical. The FANUC-named fallback stays unmarked.
++                brand_native_code=str(getattr(touch_blocks, "touch_hit_call_line", "") or "").strip() != "",
+             ),
+             ProgramInstruction(
+                 program_id="",
+@@ -2353,6 +2417,7 @@ class WeldTouchGenerationService:
+                 finish_routine_name=str(config["fanuc_finish_routine_name"]),
+                 teachmode_routine_name=str(config["fanuc_teachmode_routine_name"]),
+                 teachmode_enabled=bool(config["fanuc_teachmode_enabled"]),
++                export_mode=str(getattr(seed, "export_mode", "") or ""),
+             )
+         )
+ 
+@@ -2366,6 +2431,8 @@ class WeldTouchGenerationService:
+                     instr_type=INSTR_CUSTOM_CODE,
+                     custom_code=str(line),
+                     name=f"Wrapper Start {index + 1}",
++                    # Provider-generated, so this brand's own syntax (see the touch-hit line).
++                    brand_native_code=True,
+                 )
+             )
+ 
+@@ -2430,6 +2497,7 @@ class WeldTouchGenerationService:
+                     instr_type=INSTR_CUSTOM_CODE,
+                     custom_code=str(line),
+                     name=f"Wrapper Finish {index + 1}",
++                    brand_native_code=True,
+                 )
+             )
+ 

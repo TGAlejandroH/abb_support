@@ -15,6 +15,10 @@ Inline cross-references live next to the affected design decisions in
 F-4 was added 2026-08-31 during Phase 5 (touch-up staging) validation; its
 inline notes live in [robotstudio_setup.md](robotstudio_setup.md) §16.3 and
 [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v1.md) §8.
+F-5 was added 2026-09-25 during the touch-sense P0 experiments
+([abb_touch_sense_port_v1.md](abb_touch_sense_port_v1.md) §6); its inline note
+lives in [robotstudio_setup.md](robotstudio_setup.md) §19.
+F-6 was added 2026-09-26 during touch-sense P3; see [robotstudio_setup.md](robotstudio_setup.md) §22.
 
 ---
 
@@ -201,6 +205,69 @@ destroys an unsaved touch-up before Phase 5's staging can see it. Operator
 rule for the touch-up workflow: stop → edit on the pendant → resume; never
 PP-to-main in between.
 
+## F-5 — A global PERS declared in two loaded modules locks the whole task
+
+**Symptom** (MONARC VC, RW 6.15.08, touch-sense P0, 2026-09-25):
+1. `TG_TouchProbe.mod` loaded (`10040`), then logged **`40160` "Errors in RAPID program"**
+   at once.
+2. From then on the whole task was stuck: PP-to-main was refused (`10067` "Unable to reset
+   the program pointer"; RWS `resetpp` → HTTP 400), and so was every start.
+3. Asking the controller to check the program (RWS task `action=build`) only returned
+   `SYS_CTRL_E_RAPID_SEMANTIC_ERROR` (-1073442802). **No event, and no RWS answer, names the
+   offending symbol.**
+
+**Cause, bisected.** The method was to load one-declaration modules and ask
+`action=build` after each.
+- An empty module built clean. So did modules holding each suspect construct:
+  - `wztemporary.wz` access, `WZBoxDef`/`WZDOSet`, `SearchL` with PERS robtargets and
+    a speeddata parameter;
+  - late binding with `Stop`/`RETRY` in an ERROR handler;
+  - pose math and `DInput`.
+- Two modules failed:
+  - `PERS string stPrbStep:="";`, whose name is already declared by `TG_UfmecProbe`
+    (a probe still loaded on that VC). It failed **even with the identical current value**
+    `"home done"`.
+  - `PERS num nPrbStn:=0;`, also owned by `TG_UfmecProbe`.
+- Same name, same type, same value is still a semantic error when two modules of one task
+  declare it.
+
+**The rule.**
+- **Every global `PERS` name must be unique across all modules loaded in the task.**
+- The failure is task-wide, not module-local. One clashing module blocks PP-to-main and
+  start for the entire program until it is unloaded; under Production Manager that is a
+  stopped cell.
+- For the Weld-Planner exporter: a `.tgs` module must never declare a global `PERS` that a
+  resident TG module (or anything else on the controller) declares. Keep exported data
+  `LOCAL`, as `TD05Weld.mod` already does.
+- Not tested: what a RAPID `Load` of such a module reports. `TG_Main` loads `.tgs` modules
+  that way, not through RWS.
+- For probes: give every global a probe-unique infix (`TG_TouchProbe` uses `Tp`), and unload
+  finished probes.
+- Diagnosing it: the event log will not name the symbol, so bisect with
+  one-declaration modules. Mind F-1 while doing it, which bit the first bisect: modules
+  named like their own routine loaded as `TG_TpB0#2` and would not unload by name.
+
+## F-6 — A component of a function result is a syntax error
+
+**Symptom** (MONARC VC, touch-sense P3, 2026-09-26):
+1. The first `TGS/TD05Touch.mod` failed to load with **40322** "RAPID syntax error(s) in
+   file HOME:/TGS/TD05Touch.mod".
+2. `TG_Main`'s load error path absorbed it cleanly: the HMI saw requests `['10']`, then the
+   end of the cycle.
+3. The same module loaded and built clean once one line changed:
+
+```
+r.extax:=CJointT().extax;        ! 40322
+jt:=CJointT();  r.extax:=jt.extax;   ! fine
+```
+
+**The rule.** RAPID has no member access on a call result: `Func(...).component` does not
+parse. Copy the result into a variable first.
+
+`tools/rapid_check.py` now reports the pattern, ignoring strings and comments. For the
+exporter: never emit `CRobT(...).trans`, `CJointT().extax` and the like; go through a
+`VAR`.
+
 ## Related observation (not a defect) — FIXED 2026-08-28
 
 Within a cycle, `R_C_F` and `R_C` reported poses differing by roughly 3 mm and
@@ -257,6 +324,31 @@ Exporter note either way: pose-reporting requests should follow a **stop point**
 
 ---
 
+## Related observation 2 (VC, not yet a defect) — a TPWrite burst can stall the task
+
+**Observed** on the MONARC VC, touch-sense P1, 2026-09-26.
+1. Several `TD05TsWire` cycles ran back to back through `TG_Main`. Each cycle writes about
+   25 `TPWrite` lines within a couple of seconds.
+2. The VC logged **41617** "Too intense frequency of Write Instructions … forced the program
+   execution to slow down". Its recommended action: *"Add wait instructions, such as
+   WaitTime, when many write instructions are used in conjunction."*
+3. From then on, the next program start sat on the **first** `TPWrite` of `tgs_main`
+   (TG_Main line 27) for more than 75 s. This happened across stops and restarts. The
+   listener it was about to open never appeared, so the HMI saw a refused port.
+4. A warm restart cleared it (`POST /ctrl`, `restart-mode=restart`). With 10 s between
+   cycles, the same three cycles then ran clean.
+
+**Why it matters beyond the VC.** TG_Comms logs every request to the pendant.
+- On a real controller the FlexPendant drains the queue, so the likely symptom is a slower
+  cycle, not a stall. That is unverified.
+- A cycle with many requests packed tightly is exactly the pattern 41617 names:
+  touch-sensing adds three request types per weld.
+
+**To watch on the cell (P6).** Look for 41617 in the event log after a multi-weld run. If
+it appears, thin the TG_Comms `TPWrite` lines to one per request, or move them to
+`ErrWrite \I`, which goes to the event log instead of the pendant. Not changed yet: it
+has not been seen on a controller that has a FlexPendant.
+
 ## How the three were caught (verification takeaway)
 
 | Finding | Caught by | Would the Python tests catch it? |
@@ -264,6 +356,8 @@ Exporter note either way: pose-reporting requests should follow a **stop point**
 | F-1 module name ambiguous | RAPID program check, at load | No — never reaches the wire |
 | F-2 stale frame copy | **Numeric analysis of the run transcript** | No — the protocol was correct, the geometry was not |
 | F-3 PERS parameter | RAPID program check, after the F-2 fix | No — RAPID semantics only |
+| F-5 duplicate global PERS | Bisecting with one-declaration modules + RWS `action=build` | No — RAPID semantics only, and the controller names no symbol |
+| F-6 call-result component | RAPID load, 40322 (now also `tools/rapid_check.py`) | No — RAPID syntax only |
 
 Two of three surfaced as controller error messages and were mechanical to fix.
 The one that mattered most, F-2, produced a perfectly well-formed protocol

@@ -118,6 +118,73 @@ class TestStrings(unittest.TestCase):
         self.assertEqual(rapid_check.check_text(src, "m.sys"), [])
 
 
+class TestCallResultComponent(unittest.TestCase):
+    """The TD05Touch.mod load failure of 2026-09-26 (40322): no member access on a call."""
+
+    def test_a_component_of_a_function_result_is_caught(self):
+        src = "MODULE X_Mod\n    PROC P()\n        r.extax:=CJointT().extax;\n    ENDPROC\nENDMODULE\n"
+        findings = rapid_check.check_text(src, "x.mod")
+        self.assertEqual(len(findings), 1)
+        self.assertIn("CJointT().extax", findings[0])
+
+    def test_calls_and_the_pattern_in_strings_or_comments_are_fine(self):
+        src = ('MODULE X_Mod\n    PROC P()\n        TPWrite "CJointT().extax";\n'
+               '        ! r.extax:=CJointT().extax;\n        p:=Offs(p,1,2,3);\n'
+               '        jt:=CJointT();\n        r.extax:=jt.extax;\n    ENDPROC\nENDMODULE\n')
+        self.assertEqual(rapid_check.check_text(src, "x.mod"), [])
+
+
+class TestDuplicateGlobals(unittest.TestCase):
+    """F-5: the clash that locked the MONARC VC on 2026-09-25 must be caught offline."""
+
+    A = '''MODULE TG_UfmecProbe
+    PERS string stPrbStep:="";
+    PERS num nPrbStn:=0;
+    PROC TG_PrbHome()
+        VAR num nLocalOnly:=0;
+    ENDPROC
+ENDMODULE
+'''
+
+    def test_the_real_clash_is_reported(self):
+        b = 'MODULE TG_TouchProbe\n    PERS string STPRBSTEP:="";\n    PROC TG_TpX1()\n    ENDPROC\nENDMODULE\n'
+        findings = rapid_check.check_duplicate_globals([("A.mod", self.A), ("B.mod", b)])
+        self.assertEqual(len(findings), 1)
+        self.assertIn("stPrbStep", findings[0])       # case-insensitive, as RAPID is
+        self.assertIn("F-5", findings[0])
+
+    def test_routines_clash_too(self):
+        b = "MODULE Other_Mod\n    PROC TG_PrbHome()\n    ENDPROC\nENDMODULE\n"
+        self.assertEqual(len(rapid_check.check_duplicate_globals([("A.mod", self.A), ("B.mod", b)])), 1)
+
+    def test_local_and_routine_local_names_do_not_clash(self):
+        b = '''MODULE Other_Mod
+    LOCAL PERS string stPrbStep:="";
+    LOCAL PROC TG_PrbHome()
+    ENDPROC
+    PROC Other()
+        VAR num nPrbStn:=1;
+        VAR num nLocalOnly:=2;
+    ENDPROC
+ENDMODULE
+'''
+        self.assertEqual(rapid_check.check_duplicate_globals([("A.mod", self.A), ("B.mod", b)]), [])
+
+    def test_globals_are_actually_collected(self):
+        names = [n for n, _ in rapid_check.global_symbols(self.A)]
+        self.assertEqual(names, ["stPrbStep", "nPrbStn", "TG_PrbHome"])
+
+    def test_the_resident_modules_do_not_clash(self):
+        rapid = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "abb", "rapid")
+        named = []
+        for dirpath, _dirs, files in os.walk(rapid):
+            for filename in files:
+                if filename.endswith((".sys", ".mod")):
+                    with open(os.path.join(dirpath, filename), "rb") as fh:
+                        named.append((filename, fh.read().decode("utf-8", "replace")))
+        self.assertEqual(rapid_check.check_duplicate_globals(named), [])
+
+
 class TestTheRepoIsClean(unittest.TestCase):
     def test_every_shipped_rapid_file_passes(self):
         root = os.path.join(

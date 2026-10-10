@@ -38,9 +38,65 @@ MODULE TG_Main
         ENDWHILE
     ENDPROC
 
+    PROC TG_VisionOnce()
+        ! Production Manager entry point (socket_start_trigger_hmi_plan_v1.md,
+        ! S1 and phase R1). PM dispatches a TG part -> the thin per-part
+        ! wrapper in TG_Parts.mod stamps nTG_PartNo and calls this -> we
+        ! serve exactly ONE HMI session and RETURN, so PM can run
+        ! EE_POST_PART, count the part and report doJobComplete.
+        !
+        ! The ONLY difference from the standalone entry (main) is the loop:
+        ! identical cycle, served once. Deliberately absent: any indexing or
+        ! pre-positioning. Under PM the station choreography belongs to the
+        ! part's partadv (plan S10) and doing it here would fight the engine.
+        !
+        ! On a Production Manager cell the customer's program already owns
+        ! main, so this module's standalone main cannot be loaded as-is there
+        ! (the ProjectMonarch VC bench renames it tgs_main locally).
+        TPWrite "TG: vision cycle started, part "\Num:=nTG_PartNo;
+        tg_module_loaded:=FALSE;
+        ! No TG_SocketDisc here since 2026-09-25 (socket start latency item
+        ! 1): its 2 s wait sat between the operator's START and the first
+        ! motion on every part. The clean-socket precondition still holds -
+        ! the handshake's listener open closes both sockets first and retries
+        ! a port that is not free yet (tgOpenListener, TG_Comms) - and the
+        ! previous part already ended with TG_SocketDisc and its wait. The
+        ! standalone main keeps its TG_SocketDisc: it runs once, not per part.
+        tgMainCycle;
+        TPWrite "TG: vision cycle finished - returning to Production Manager";
+    ENDPROC
+
     LOCAL PROC tgMainCycle()
-        ! One HMI session: connect, serve one program selection, disconnect.
-        ! Mirrors TGMAINKL: prog-sel -> file transfer -> run the .tgs program.
+        ! One HMI session: the start handshake, then connect, serve one
+        ! program selection, disconnect. Mirrors TGMAINKL: prog-sel -> file
+        ! transfer -> run the .tgs program.
+        VAR num nVerdict;
+        ! Socket-based start trigger, handshake connection (plan S14-S17,
+        ! 2026-09-24): START, the active station's frame, the HMI's verdict.
+        ! Its own port, closed BEFORE the run connection is accepted, so the
+        ! run below is byte-identical to the pre-handshake cycle and an HMI
+        ! that skips the handshake cannot connect at all. Sent on BOTH paths
+        ! - standalone bench and PM part - so the wire has one shape and the
+        ! HMI needs no mode flag to read it.
+        TG_HandshakeCom;
+        TG_SendStart;
+        ! Bind wobjTG_WeldActStn to the station at the robot before its frame
+        ! is read. Under Production Manager the station is already active
+        ! (EE_PRE_PART), so this only binds; the .tgs program's own call
+        ! later in the run is then a no-op as well.
+        TG_ActMechUnit;
+        TG_SendStnFrame;
+        nVerdict:=TG_ReqVerdict();
+        TG_HandshakeDisc;
+        IF nVerdict<>1 THEN
+            ! Refused (plan S17): end the part gracefully - Production
+            ! Manager books it as completed and continues; the HMI shows the
+            ! reason, this leaves the trace on the pendant and in the event
+            ! log. No program is requested, nothing moves.
+            TPWrite "TG: part refused by HMI - ending cycle";
+            ErrWrite \W,"TG: part refused by the vision HMI","The HMI declined part "+NumToStr(nTG_PartNo,0)+" for station "+NumToStr(nTG_PartStn,0)+"."\RL2:="See the HMI screen for the reason. Nothing was welded.";
+            RETURN;
+        ENDIF
         TG_SocketCom;
         TG_ReqProgSel;
         IF nTG_ProgSel=1 THEN

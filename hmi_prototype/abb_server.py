@@ -19,6 +19,11 @@ Phase 2 scope: program selection + all priority requests
 (1 R_C_F, 2 R_C, 4 R_W_F, 5 R_P_C, 10 R_F_T, 11 R_G_C_D, 14 R_W_P, 100 R_E).
 Dummy, configurable answers everywhere; no real HMI/camera logic.
 
+Touch-sense P1 (2026-09-26, docs/abb_touch_sense_port_v1.md): the auto touch-up
+requests 16 R_TS_D, 18 R_TS_P and 19 R_TS_END, with the HMI's own offset math
+mirrored in ``auto_touchup_offset``. There is no 17 (R_TS_F) on ABB (plan D2) -
+a robot that sends it gets "no handler", on purpose.
+
 Usage:
     python abb_server.py [host] [port] [cycles] [transfer]
     defaults: 127.0.0.1 2000 2 (no module transfer)
@@ -234,6 +239,179 @@ def fmt_seam_phases(values):
 
 
 # ---------------------------------------------------------------------------
+# Auto touch-up offset: a mirror of the HMI's math
+# ---------------------------------------------------------------------------
+#
+# TGuideWeldingHMI WeldLibrary.cpp AutoTouchUpsOffset (read 2026-09-25, plan 1.4):
+#   * each touch point contributes ONE coordinate - the one along its snapped
+#     axis, in the search frame; the other two are ignored;
+#   * N / M = the nominal / measured points built that way (zero elsewhere);
+#     delta_cad = M - N; delta_base = R(base_T_cad) * delta_cad;
+#   * the corrected frame is T(delta_base) * base_T_cad - a pure translation in
+#     the robot base, the frame's rotation untouched;
+#   * two touches on the same axis: the later one wins (no averaging).
+# For .tgs projects the search frame is the CAD frame (cad_T_searchFrame =
+# identity, WeldLibrary.cpp:861), which is the only case ABB supports (plan D2).
+# Snapped axes are normalized to their dominant +/-1 component, as the .tgs
+# loader does (TGuideProjectTgsStore NormalizeLegacyTouchAxis). The sign only
+# selects the search direction; the math uses the axis.
+
+
+def touch_axis_index(snapped_axis):
+    """0/1/2 for the dominant component of a snapped axis (sign ignored)."""
+    mags = [abs(float(c)) for c in snapped_axis]
+    if len(mags) != 3 or max(mags) == 0.0:
+        raise ValueError(f"not a snapped axis: {snapped_axis!r}")
+    return mags.index(max(mags))
+
+
+def rotate_by_wpr(w_deg, p_deg, r_deg, v):
+    """Rotate v by the FANUC W,P,R rotation (R = Rz*Ry*Rx)."""
+    w, x, y, z = euler_wpr_to_quat(w_deg, p_deg, r_deg)
+    rows = ((1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)),
+            (2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)),
+            (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)))
+    return tuple(sum(a * b for a, b in zip(row, v)) for row in rows)
+
+
+def auto_touchup_offset(frame_xyzwpr, touch_points, measured_xyz):
+    """delta_base (mm) for one weld: see the block comment above.
+
+    frame_xyzwpr: base_T_cad, the frame the TSP R_W_F served (localization only).
+    touch_points: [{"nominal": (x, y, z), "snapped_axis": (sx, sy, sz)}, ...] in CAD.
+    measured_xyz: the id-18 reports, in order, in the same frame.
+
+    Stricter than the HMI on purpose: it refuses a point count that differs
+    from the weld's, where the HMI (no bounds check) would read a stale point.
+    """
+    if len(measured_xyz) != len(touch_points):
+        raise ValueError(f"{len(measured_xyz)} touch reports for a weld with "
+                         f"{len(touch_points)} touch points")
+    nominal = [0.0, 0.0, 0.0]
+    measured = [0.0, 0.0, 0.0]
+    for point, xyz in zip(touch_points, measured_xyz):
+        axis = touch_axis_index(point["snapped_axis"])
+        nominal[axis] = float(point["nominal"][axis])
+        measured[axis] = float(xyz[axis])
+    delta_cad = tuple(m - n for m, n in zip(measured, nominal))
+    w, p, r = (float(v) for v in frame_xyzwpr[3:6])
+    return rotate_by_wpr(w, p, r, delta_cad)
+
+
+def translate_frame(frame_xyzwpr, delta):
+    """T(delta) * frame: shift the origin in the parent frame, keep the rotation."""
+    x, y, z = (float(v) + float(d) for v, d in zip(frame_xyzwpr[:3], delta))
+    return [x, y, z] + [float(v) for v in frame_xyzwpr[3:6]]
+
+
+def normalize_touch_axis(axis):
+    """The dominant component of `axis` as a signed unit axis; (0, 0, 1) if unusable.
+
+    TGuideProjectTgsStore.cpp NormalizeLegacyTouchAxis: ties go to the lower index, and a
+    zero dominant component counts as positive."""
+    try:
+        values = [float(v) for v in axis]
+    except (TypeError, ValueError):
+        return (0.0, 0.0, 1.0)
+    if len(values) < 3:
+        return (0.0, 0.0, 1.0)
+    index = 0
+    for k in (1, 2):
+        if abs(values[k]) > abs(values[index]):
+            index = k
+    out = [0.0, 0.0, 0.0]
+    out[index] = 1.0 if values[index] >= 0.0 else -1.0
+    return tuple(out)
+
+
+def weld_name_from_sub(sub):
+    """The weld an R_W_F token names: "TSP<weld>_full" (the touch block) or "P<weld>" (the
+    weld), as the Weld Planner names them; None for anything else ("none", captures)."""
+    token = str(sub or "").strip()
+    if token.startswith("TSP") and token.endswith("_full") and len(token) > len("TSP_full"):
+        return token[3:-len("_full")]
+    if token.startswith("P") and len(token) > 1 and token.lower() != "none":
+        return token[1:]
+    return None
+
+
+def load_tgs_touch_points(tgs_path):
+    """{weld name: [{"nominal", "snapped_axis"}, ...]} from a native .tgs project.
+
+    What the HMI reads (TGuideProjectTgsStore.cpp): `weld_touch_points` rows by weld and
+    `order_index`, each payload normalized as NormalizeTouchPointPayload does -
+    `touch_point_cad_local_mm` becomes the nominal and `snapped_axis_cad_local` the axis,
+    snapped to its dominant component; a payload without them keeps its own `touch_point` /
+    `snapped_axis`. The HMI fills touch point N with the Nth id-18 report, so this order IS
+    the order the robot must search in. Read-only: the project is never written."""
+    import json
+    import sqlite3
+    uri = "file:" + os.path.abspath(tgs_path).replace("\\", "/") + "?mode=ro"
+    db = sqlite3.connect(uri, uri=True)
+    try:
+        names = dict(db.execute("SELECT weld_id, name FROM weld_items"))
+        out = {}
+        for weld_id, _, payload_json in db.execute(
+                "SELECT weld_id, order_index, payload_json FROM weld_touch_points "
+                "ORDER BY weld_id, order_index"):
+            if weld_id not in names:
+                continue
+            payload = json.loads(payload_json)
+            if not isinstance(payload, dict):
+                continue
+            nominal = payload.get("touch_point_cad_local_mm", payload.get("touch_point"))
+            if "snapped_axis_cad_local" in payload:
+                axis = normalize_touch_axis(payload["snapped_axis_cad_local"])
+            else:
+                axis = payload.get("snapped_axis")
+            if nominal is None or axis is None:
+                continue                       # the HMI skips it too
+            out.setdefault(names[weld_id], []).append(
+                {"nominal": tuple(float(v) for v in nominal[:3]),
+                 "snapped_axis": tuple(float(v) for v in axis[:3])})
+        return out
+    finally:
+        db.close()
+
+
+# touch-wire script (mode "touch-wire"): the NOMINAL touch points of the weld
+# TGS/TD05TsWire.mod touch-senses. The module pretends measured points that
+# differ by +3.000 mm in X (touch 1, Search[+X]) and -2.000 mm in Z (touch 2,
+# Search[-Z]), with junk in the coordinates each search does not measure.
+# The two MUST agree: change one, change the other.
+TOUCH_WIRE_DEMO = {
+    "touch_points": [
+        {"nominal": (100.0, 0.0, 20.0), "snapped_axis": (-1.0, 0.0, 0.0)},  # search +X
+        {"nominal": (60.0, 25.0, 0.0), "snapped_axis": (0.0, 0.0, 1.0)},    # search -Z
+    ],
+    # What TD05TsWire.mod reports (rtTsHit1 / rtTsHit2).
+    "measured": [(103.0, 0.7, 20.4), (59.6, 25.3, -2.0)],
+    "delta_cad": (3.0, 0.0, -2.0),
+}
+
+
+# touch-real script (mode "touch-real", touch-sense P3): TGS/TD05Touch.mod touch-senses a
+# block with REAL searches (TG_TouchSearch). The "part" is the VC-only World Zone box of
+# vc_probes/TG_TrRig.mod, which is this block mapped to world by the frame below.
+# The frame turns the part 90 deg about Z, so part X is world +Y: the offset math's
+# rotation into the base is exercised, while both touched faces stay world-aligned, as a
+# World Zone box must be. The touched faces are the block's -X face (touch 1, Search[+X]) and
+# its top face (touch 2, Search[-Z]); approaches stand 30 mm off along the snapped axis.
+# TD05Touch.mod, TG_TrRig.mod and this dict MUST agree - test_phase8_touchsense.py checks
+# all three against each other.
+TOUCH_REAL_DEMO = {
+    "prog_name": "TD05Touch",
+    "weld_frame_xyzwpr": [1600.0, 0.0, 1450.0, 0.0, 0.0, 90.0],
+    "block": ((0.0, -50.0, -200.0), (100.0, 50.0, 0.0)),     # part-frame corners (min, max)
+    "standoff": 30.0,
+    "touch_points": [
+        {"nominal": (0.0, 0.0, -20.0), "snapped_axis": (-1.0, 0.0, 0.0)},   # -X face, search +X
+        {"nominal": (50.0, 20.0, 0.0), "snapped_axis": (0.0, 0.0, 1.0)},    # top face, search -Z
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
 # The HMI prototype
 # ---------------------------------------------------------------------------
 
@@ -306,9 +484,14 @@ class AbbTgsHmi:
     """Application-level request server / transport-level TCP client."""
 
     def __init__(self, host="127.0.0.1", port=2000, program_selection=1,
-                 verbose=True, vc_home_dir=None, rws=None):
+                 verbose=True, vc_home_dir=None, rws=None, handshake_port=2001):
         self.host = host
         self.port = port
+        # Socket-start handshake port (socket plan S14, 2026-09-24): every cycle begins
+        # with a short connection here (START, STNFRAME, STNAXES, verdict) before the
+        # robot listens on `port` for the run.
+        self.handshake_port = handshake_port
+        self.last_start = None
         self.program_selection = program_selection
         self.verbose = verbose
         self.sock = None
@@ -370,6 +553,25 @@ class AbbTgsHmi:
         self.weld_param_sequence = None
         self._weld_param_calls = 0
 
+        # ---- auto touch-ups (ids 16/18/19, touch-sense P1) ----------------
+        # auto_touchups stands in for the operator's Tools-menu mode ("Touchups
+        # + Weld"); touch_points for the current weld's points from the project.
+        # The HMI answers id 16 with 1 only when both are set (RobotCell.cpp
+        # IsWeldGoingToPerformAutoTouchedupsOffsets).
+        self.auto_touchups = False
+        self.touch_points = []
+        # {weld name: touch points} from a project (load_tgs_touch_points); when set, each
+        # R_W_F picks its weld's points, as the HMI's current weld does. None = touch_points
+        # is the one weld's list, set directly (the P1/P3 demos).
+        self.touch_points_by_weld = None
+        self.touch_measured_xyz = []      # the id-18 reports of the current block
+        # The weld's stored touch-up (a base-frame translation, mm) that R_W_F
+        # composes onto the localization: cleared by the TSP R_W_F, set by id 19.
+        self.touch_offset_base = None
+        self.last_touch_frame_xyzwpr = None
+        self.last_touch_points = None     # the reports id 19 consumed, for tests/VC checks
+        self.corrupt_touch_frame = False  # fault injection for id 19
+
         # ---- last-received data, for tests / future HMI logic
         self.last_pose_xyzwpr = None
         self.last_sub_name = None
@@ -391,6 +593,10 @@ class AbbTgsHmi:
             "11": self.handle_global_captures_done_req, # R_G_C_D
             "13": self.handle_weld_stats_req,           # R_W_S
             "14": self.handle_weld_params_req,          # R_W_P
+            "16": self.handle_touch_sense_do_req,       # R_TS_D
+            "18": self.handle_touch_point_req,          # R_TS_P
+            "19": self.handle_touch_end_req,            # R_TS_END
+            # no "17" (R_TS_F): not on ABB, plan D2
             "100": self.handle_end_req,                 # R_E
         }
 
@@ -417,6 +623,75 @@ class AbbTgsHmi:
             self.sock.close()
             self.sock = None
             self._log("connection closed")
+
+    # -- socket-start handshake (socket plan S14-S17, 2026-09-24) ------------
+
+    HANDSHAKE_TIMEOUT = 30.0
+
+    def handshake_connect(self, retry_seconds=30.0):
+        """Connect to the handshake port, retrying while the robot is not listening."""
+        deadline = time.monotonic() + retry_seconds
+        while True:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.settimeout(self.HANDSHAKE_TIMEOUT)
+                s.connect((self.host, self.handshake_port))
+                self.sock = s
+                self._log(f"handshake: connected to {self.host}:{self.handshake_port}")
+                return
+            except OSError:
+                s.close()
+                self.sock = None
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.5)
+
+    def decide_start(self, event):
+        """Verdict for this part: 1 = run, anything else = refuse. The base client always
+        runs; SocketStartRun maps the part id and checks the station (plan S15)."""
+        return 1
+
+    def handshake(self):
+        """One handshake connection: START, STNFRAME + pose, STNAXES, then the verdict on
+        the robot's prompt, then wait for the robot to close (listener first, then the
+        client - plan S14) before anything reconnects. Returns the StartEvent dict."""
+        self.handshake_connect()
+        event = {"verdict": 0}
+        try:
+            start = self.do_receive()
+            toks = start.split()
+            if not toks or toks[0] != "START":
+                raise RuntimeError(f"handshake: expected START, got {start!r}")
+            event["seq"] = int(toks[1])
+            event["part"] = toks[2] if len(toks) > 2 else "0"
+            event["station"] = int(toks[3]) if len(toks) > 3 and toks[3].lstrip("-").isdigit() else 0
+            header = self.do_receive().strip()
+            if header != "STNFRAME":
+                raise RuntimeError(f"handshake: expected STNFRAME, got {header!r}")
+            event["station_frame"] = self.do_receive().strip()
+            event["station_frame_xyzwpr"] = pose_literal_to_xyzwpr(event["station_frame"])
+            axes = self.do_receive().split()
+            if not axes or axes[0] != "STNAXES":
+                raise RuntimeError(f"handshake: expected STNAXES, got {axes!r}")
+            event["tilt_deg"] = float(axes[1]) if len(axes) > 1 else None
+            event["chuck_deg"] = float(axes[2]) if len(axes) > 2 else None
+            event["verdict"] = int(self.decide_start(event))
+            prompt = self.do_send(str(event["verdict"]))
+            if "verdict" not in prompt:
+                self._log(f"WARNING: unexpected verdict prompt: {prompt!r}")
+            # The robot closes its listener, then this client; read until end-of-file so
+            # a reconnect (to any port) never races the close.
+            try:
+                trailing = self.sock.recv(RECV_MAX)
+                if trailing:
+                    self._log(f"handshake: unexpected trailing data {trailing!r}")
+                else:
+                    self._log("handshake: robot closed the connection")
+            except socket.timeout:
+                self._log("handshake: robot did not close within the timeout")
+            return event
+        finally:
+            self.close()
 
     def _recv(self):
         data = self.sock.recv(RECV_MAX)
@@ -484,13 +759,75 @@ class AbbTgsHmi:
         the RAPID side receives the full sequence on every reply mode.
         """
         self._recv_pose_and_sub()
+        sub = self.last_sub_name or ""
+        weld = weld_name_from_sub(sub)
+        if self.touch_points_by_weld is not None and weld is not None:
+            # A project's touch points belong to ONE weld, named by the R_W_F token - the
+            # HMI's current weld (ABBRobot strips "TSP..._full"; "P<weld>" names the weld).
+            self.touch_points = list(self.touch_points_by_weld.get(weld, []))
+        if (sub.startswith("TSP") and sub.endswith("_full")
+                and self.auto_touchups and self.touch_points):
+            # First auto-touch-up pass of the weld: the HMI clears the stored
+            # touch-up so the points are measured against the localization
+            # alone (RobotCell.cpp, "touchup offset cleared").
+            self.touch_offset_base = None
         if self.corrupt_weld_frame:
             self.do_send(CORRUPT_FRAME_PAYLOAD)
         else:
-            self.do_send(xyzwpr_to_pose_literal(self.weld_frame_xyzwpr))
+            self.do_send(xyzwpr_to_pose_literal(self.served_weld_frame()))
         self.do_send(str(self.weld_status))
         for value in self.touchup_offsets_in:
             self.do_send(fmt_real(value))
+
+    def served_weld_frame(self):
+        """The frame R_W_F serves: the stored touch-up composed onto the
+        localization (Weld.cpp: GetTouchupOffset() * localization)."""
+        if self.touch_offset_base is None:
+            return list(self.weld_frame_xyzwpr)
+        return translate_frame(self.weld_frame_xyzwpr, self.touch_offset_base)
+
+    def handle_touch_sense_do_req(self):
+        """FANUC R_TS_D (id 16): 1 = run this weld's touch block.
+
+        Always answers. The production HMI sends nothing when it has no
+        current weld, which leaves the robot blocked on the prompt (HMI repo,
+        docs/endpoint_touch_sense_hmi_plan_v1.md: the id-16 nullptr deadlock)."""
+        flag = 1 if (self.auto_touchups and self.touch_points) else 0
+        self.touch_measured_xyz = []
+        prompt = self.do_send(str(flag))
+        if "TS status" not in prompt:
+            self._log(f"WARNING: unexpected touch-sense prompt: {prompt!r}")
+
+    def handle_touch_point_req(self):
+        """FANUC R_TS_P (id 18): one contact point, as a pose literal on ABB.
+
+        Only x, y, z are used - coordinates in the frame the TSP R_W_F served,
+        which is what SearchL's SearchPoint is in the weld work object."""
+        xyz = pose_literal_to_xyzwpr(self.do_receive())[:3]
+        if len(self.touch_measured_xyz) >= len(self.touch_points):
+            raise RuntimeError(
+                f"touch point {len(self.touch_measured_xyz) + 1} reported for a weld "
+                f"with {len(self.touch_points)} touch points")
+        self.touch_measured_xyz.append(xyz)
+        self._log(f"  touch point {len(self.touch_measured_xyz)}: "
+                  f"{['%.3f' % v for v in xyz]}")
+
+    def handle_touch_end_req(self):
+        """FANUC R_TS_END (id 19): compute the offset, serve the corrected frame."""
+        delta = auto_touchup_offset(self.weld_frame_xyzwpr, self.touch_points,
+                                    self.touch_measured_xyz)
+        self.touch_offset_base = delta
+        self.last_touch_points = list(self.touch_measured_xyz)
+        frame = self.served_weld_frame()
+        self.last_touch_frame_xyzwpr = frame
+        self._log(f"  auto touch-up offset (base, mm): {['%.3f' % v for v in delta]}")
+        if self.corrupt_touch_frame:
+            prompt = self.do_send(CORRUPT_FRAME_PAYLOAD)
+        else:
+            prompt = self.do_send(xyzwpr_to_pose_literal(frame))
+        if "frame" not in prompt:
+            self._log(f"WARNING: unexpected touch-end prompt: {prompt!r}")
+        self.touch_measured_xyz = []
 
     def handle_pass_check_req(self):
         """FANUC R_P_C (id 5): pose + sub + password in; 2-char status out
@@ -628,10 +965,14 @@ class AbbTgsHmi:
     # -- main loop -----------------------------------------------------------
 
     def serve_cycle(self):
-        """One robot cycle: connect, program selection, serve requests until
-        the robot disconnects (which it does right after request 100)."""
-        self.connect()
+        """One robot cycle: the start handshake, then connect, program selection, serve
+        requests until the robot disconnects (which it does right after request 100)."""
         self.request_log = []
+        self.last_start = self.handshake()
+        if self.last_start["verdict"] != 1:
+            self._log("handshake: refused - the robot ends the part, no run this cycle")
+            return
+        self.connect()
         self._weld_param_calls = 0
         # One analytics "session" per cycle, like the real HMI (it opens a
         # weld session per run and inserts a row per successful weld).
@@ -683,14 +1024,30 @@ def main(argv):
         # both branches of TG_ApplyWeldParams.
         hmi.prog_name = "TD05Weld"
         hmi.weld_param_sequence = WELD_DEMO_SEQUENCE
+    elif mode in ("touch-wire", "touch-off", "touch-corrupt"):
+        # Touch-sense P1: TGS/TD05TsWire.mod. touch-wire serves auto
+        # touch-ups on; touch-off answers id 16 with 0 (the block is skipped);
+        # touch-corrupt sends a malformed id-19 frame (the robot abandons).
+        hmi.prog_name = "TD05TsWire"
+        hmi.touch_points = [dict(p) for p in TOUCH_WIRE_DEMO["touch_points"]]
+        hmi.auto_touchups = mode != "touch-off"
+        hmi.corrupt_touch_frame = mode == "touch-corrupt"
+    elif mode == "touch-real":
+        # Touch-sense P3: TGS/TD05Touch.mod, real searches on the VC's World Zone rig
+        # (vc_probes/TG_TrRig.mod + touch_real_vc.py).
+        hmi.prog_name = TOUCH_REAL_DEMO["prog_name"]
+        hmi.weld_frame_xyzwpr = list(TOUCH_REAL_DEMO["weld_frame_xyzwpr"])
+        hmi.touch_points = [dict(p) for p in TOUCH_REAL_DEMO["touch_points"]]
+        hmi.auto_touchups = True
     elif mode == "dry-run":
         # Welding inhibited. The robot still serves every request, R_W_S
         # included, but reports succ_ae = 0 (nTG_SuccArcEnd := 1-nTG_DryRun),
         # so no weld may be recorded - see handle_weld_stats_req.
         hmi.dry_run = 1
     elif mode is not None:
-        raise SystemExit(f"unknown mode {mode!r} (use corrupt-cam, "
-                         "corrupt-weld, weld-demo or dry-run)")
+        raise SystemExit(f"unknown mode {mode!r} (use corrupt-cam, corrupt-weld, "
+                         "weld-demo, dry-run, touch-wire, touch-off, touch-corrupt or "
+                         "touch-real)")
     for i in range(cycles):
         print(f"--- cycle {i + 1}/{cycles} ---", flush=True)
         hmi.serve_cycle()

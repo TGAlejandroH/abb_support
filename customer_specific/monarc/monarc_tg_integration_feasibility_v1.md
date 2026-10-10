@@ -22,11 +22,11 @@ the Weld Selector / HMI without authorization (folder README).
 
 | # | Finding | Kind | What it means |
 |---|---|---|---|
-| **B1** | **Option `616-1 PC Interface` is not installed** on this controller (`system.xml`, `BACKINFO/backinfo.txt`; the 2026-08-27 site survey found the same on the surveyed controller). On RobotWare 6 the RAPID socket instructions (`SocketCreate/Bind/Listen/Accept/Send/Receive`) belong to that option. Our own prototype VC needed 616-1 to compile `TG_Comms.sys`. | **Blocker** | TG_Comms cannot load, let alone run, until the option is bought and installed (ABB license key + system re-installation via Installation Manager, then restore). Fallback transports exist (section 2.1) but each is a redesign. |
+| **B1** | **CLOSED 2026-09-24: 616-1 is installed on the target `4600-804589`** ([site comms test](monarc_comms_test_20260924.md)). Original finding: **Option `616-1 PC Interface` is not installed** on this controller (`system.xml`, `BACKINFO/backinfo.txt`; the 2026-08-27 site survey found the same on the surveyed controller). On RobotWare 6 the RAPID socket instructions (`SocketCreate/Bind/Listen/Accept/Send/Receive`) belong to that option. Our own prototype VC needed 616-1 to compile `TG_Comms.sys`. | **Blocker** | TG_Comms cannot load, let alone run, until the option is bought and installed (ABB license key + system re-installation via Installation Manager, then restore). Fallback transports exist (section 2.1) but each is a redesign. |
 | **B2** | The backup's main program is **Production Manager (option 812-1)**: `gapMain.main()` is the single line `ExecEngine;`. Every customer program is a *part* or a *service menu* that the engine dispatches on a PLC job number. | Architecture | This is good news: PM already has a **PLC-commanded routine mechanism** (`giJobSel` + `diR1MenuOrder`, codes 101-110 used today) and discovers `partdata` / `menudata` declared in *any* loaded module. We can register our entry routine **without editing a single customer file** (section 3). |
 | **B3** | Our `TG_Main.mod` declares `PROC main()`. Their task already has `main()` in `gapMain`. Two globals of the same name will not load. | Must fix (ours) | Split TG_Main into a host-agnostic entry `TG_VisionMode()` plus a tiny standalone wrapper that owns `main()` only on greenfield cells. Generic improvement, not MONARC-specific. |
 | **B4** | The cell welds in **positioner-coordinated work objects** (`wobj_Stn1`: `ufprog=FALSE, ufmec="STN1"`). Our request PROCs write the served frame into `WObj.uframe`, which is ignored for a coordinated wobj, and report poses in whatever frame the wobj resolves to. | Design gap | Frames must land in **`oframe`** when the wobj is coordinated, and capture poses must be reported **relative to the station plate** (which a coordinated wobj gives for free). We declare **our own** coordinated work objects, one per station, and never write into the customer's. Needs a write rule plus an exporter assertion in TG_Comms (section 2.4). The Weld Planner built and controller-verified the `no_hmi` half of this on 2026-09-01/02; the HMI half is contract open item **O-1**, still open and waiting on us. |
-| **B5** | The backup is controller **4600-803651 with a Miller Auto-Axcess E (Miller_EIP)**. The Weld Planner tracker records the *target* as MONARC's **new cell with a Fronius**, and the surveyed controller as **4600-804589**. Three identities, one target. | Open | Every welder-specific mapping in TG_Weld (Fronius arc-length correction, +/-10 clamp) and every calibrated number in this backup is provisional until MONARC confirms which controller and which power source we are integrating with. |
+| **B5** | **CLOSED 2026-09-24: the target is `4600-804589` with a Fronius TPS/i, and its backup is in hand** ([site comms test](monarc_comms_test_20260924.md)). Original finding: the backup is controller **4600-803651 with a Miller Auto-Axcess E (Miller_EIP)**. The Weld Planner tracker records the *target* as MONARC's **new cell with a Fronius**, and the surveyed controller as **4600-804589**. Three identities, one target. | Open | Every welder-specific mapping in TG_Weld (Fronius arc-length correction, +/-10 clamp) and every calibrated number in this backup is provisional until MONARC confirms which controller and which power source we are integrating with. |
 
 **Recommended insertion (section 3):** a **TG overlay** of six files under `HOME:/TG/` plus two config
 fragments, auto-loaded by `SYS.cfg`; the entry routine is exposed to Production Manager as a **service
@@ -36,6 +36,13 @@ parts keep running unchanged whenever the mode is off. No customer RAPID is edit
 "delete the TG files and the TG config rows".
 
 ---
+
+> **Update 2026-09-24 (site comms test, [monarc_comms_test_20260924.md](monarc_comms_test_20260924.md)).**
+> The target is controller **`4600-804589`** (RobotWare 6.16.02, Fronius TPS/i) and its backup is in hand.
+> **616-1 PC Interface is installed** there. The vision PC reaches it on the WAN port at **`10.8.8.56`**:
+> ping, RWS (incl. file writes) and the RAPID socket echo all pass, and RWS also passes on the service port.
+> B1, B5, questions 1-3 and 9, and risks R1, R2, R9 are closed below; their original text is kept as the
+> record of what the older `4600-803651` backup showed. Everything else in this document still applies.
 
 ## 1. What we are inserting into (facts that drive the design)
 
@@ -504,8 +511,8 @@ convention promises ([tg_naming_convention.md](../../docs/tg_naming_convention.m
 
 | ID | Risk | Severity | Evidence | Mitigation / owner |
 |---|---|---|---|---|
-| R1 | 616-1 absent: no sockets | **Critical** | `system.xml`; tracker E23; our VC needs it | Purchase + ABB install (2.1). Design a transport seam so an RWS mailbox can follow if procurement fails. |
-| R2 | Wrong target: backup is Miller 4600-803651; tracker says new Fronius cell; survey saw 4600-804589 | **High** | tracker D1/D16, 2026-09-01 log; `PROC.cfg` | Get MONARC to name the target controller and send *its* backup; treat every number here as a proxy until then. |
+| R1 | **CLOSED 2026-09-24** (616-1 installed on `4600-804589`). 616-1 absent: no sockets | **Critical** | `system.xml`; tracker E23; our VC needs it | Purchase + ABB install (2.1). Design a transport seam so an RWS mailbox can follow if procurement fails. |
+| R2 | **CLOSED 2026-09-24** (target `4600-804589`, Fronius TPS/i). Wrong target: backup is Miller 4600-803651; tracker says new Fronius cell; survey saw 4600-804589 | **High** | tracker D1/D16, 2026-09-01 log; `PROC.cfg` | Get MONARC to name the target controller and send *its* backup; treat every number here as a proxy until then. |
 | R3 | `main` collision blocks loading our modules | Medium (easy) | `gapMain.mod` vs `TG_Main.mod` | Restructure TG_Main (B3). Generic. |
 | R4 | Frames written to `uframe` are ignored on coordinated wobjs; base-frame poses meaningless when the table moves | **High** | `wobj_Database.sys`; TG_Comms request PROCs | Write rule plus `\Mec` assertion in TG_Comms; our own coordinated work objects; plate-frame reporting; HMI/planner confirmation (2.4). |
 | R4b | No HMI-mode work-object carrier and no coordinated declaration yet, so a MONARC frame test can prove the wire but not the geometry | **High** | contract **O-1** open; Phase 8 unchecked; the `no_hmi` carrier is built and VC-verified (**E50**) | Close O-1 with 2.4b and 2.4c, then Phase 8 flips `ufprog`/`ufmec` and moves the entry assignment to `oframe` (2.4e). |
@@ -514,7 +521,7 @@ convention promises ([tg_naming_convention.md](../../docs/tg_naming_convention.m
 | R6 | Camera on the torch invalidates the SafeMove tool model/TCP and Collision Detection load; capture poses vs zones | **High** (safety) | `SafeMove_configuration.xml`; teardown TCP mismatch | Safety engineer updates and re-seals the configuration; planner world model carries the zones; `tWeldGun` load data updated by MONARC. |
 | R7 | Station activation errors: two stations active, `9E9` on an active unit, tilted arms during index | **High** (motion) | `MOC.cfg`; `Utility.sys` menus 103/104 | Template rules in 2.4; add arm leveling before index to the `.tgs` template; VC test. |
 | R8 | Weld data mapping wrong for the actual welder; clamp +/-10 is Fronius-only; unit assumption in TG_Weld header contradicted | Medium | `PROC.cfg`, `mDeclarations.sys` | Cell-adapter PERS for map/limits; seed library from customer data; re-measure units on the MONARC VC. |
-| R9 | Vision PC network path unknown (WAN IP unconfigured; RWS-over-WAN vs 616-1 unclear) | Medium | `SIO.cfg` | MONARC IT assigns the WAN IP; ask ABB about RWS reachability on RW 6.16 without 616-1. |
+| R9 | **CLOSED 2026-09-24** (WAN `10.8.8.56`; RWS and sockets pass; static/DHCP to confirm). Vision PC network path unknown (WAN IP unconfigured; RWS-over-WAN vs 616-1 unclear) | Medium | `SIO.cfg` | MONARC IT assigns the WAN IP; ask ABB about RWS reachability on RW 6.16 without 616-1. |
 | R10 | Restore hazard when the system is re-installed for the option: `HOME:/ApplSys` templates vs the saved program | Medium | teardown "Restore hazard" | Establish the authoritative program before the option install; backup before/after; our rows are add-only. |
 | R11 | PLC changes depend on MONARC's integrator (code 9001, two bits, interlock) | Medium | `EIO.cfg`, `PROC.cfg` | Section 3.3 is the spec; agree early. |
 | R12 | VC fidelity: local VC is 6.15.8029 not 6.16.0025; no SafeMove config in the VC; no welder | Medium | teardown risk ledger; `option_registry.xml` | Install 6.16.0025 media; import the safety config for visualization; use the Simulated Welder or `autoinhib`. |
@@ -528,10 +535,10 @@ convention promises ([tg_naming_convention.md](../../docs/tg_naming_convention.m
 ## 5. Open questions
 
 For MONARC:
-1. Which controller is the target (4600-803651, 4600-804589, other), old or new cell, and which power
+1. **Answered 2026-09-24: `4600-804589`, Fronius TPS/i, backup received.** Which controller is the target (4600-803651, 4600-804589, other), old or new cell, and which power
    source? Please send that controller's backup.
-2. Will MONARC purchase 616-1 PC Interface, and when can ABB install it (downtime window)?
-3. WAN port IP and network policy for the vision PC.
+2. **Answered 2026-09-24: already installed on `4600-804589`.** Will MONARC purchase 616-1 PC Interface, and when can ABB install it (downtime window)?
+3. **Answered 2026-09-24: `10.8.8.56` on the WAN port; static address or DHCP reservation still to confirm with IT.** WAN port IP and network policy for the vision PC.
 4. Who owns the PLC program; can they add command 9001 and two bits (3.3)?
 5. Camera mounting: who updates and re-seals the SafeMove configuration and the torch load data?
 6. Mode semantics: latched mode (option B) or one order per job (option A)?
@@ -541,7 +548,7 @@ For MONARC:
    `voltage` on each Miller weld list (if Miller is the target).
 
 For ABB:
-9. Is RWS reachable over the WAN port on RW 6.16 without 616-1?
+9. **Moot 2026-09-24: 616-1 is installed, and RWS plus sockets work over the WAN port.** Is RWS reachable over the WAN port on RW 6.16 without 616-1?
 10. Programmatic weld inhibit ("dry run") mechanism available with the installed Arc equipment class.
 
 Internal (HMI / Weld Planner):

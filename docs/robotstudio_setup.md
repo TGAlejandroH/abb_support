@@ -34,6 +34,13 @@ Notes:
   edit the PERS value to the controller's LAN IP (RAPID → TG_Comms →
   `stTG_ServerIP`), or change it from the FlexPendant (Program Data → string).
   Port lives in `nTG_Port` (default 2000).
+- Since 2026-09-24 every cycle begins with a short **handshake connection on
+  `nTG_HandshakePort` (default 2001)** — `START`, the active station's frame, the
+  HMI's verdict — and only then does the controller listen on 2000 for the run
+  (socket start plan S14–S17). A client that connects straight to 2000 is refused
+  until a handshake happened; `hmi_prototype/abb_server.py` and
+  `tgs_socket_run.py` do the handshake themselves. On a real IRC5 both ports
+  bind `stTG_ServerIP`; PC Interface covers both, no further option.
 
 ## 3. Run the smoke test
 
@@ -45,6 +52,14 @@ Robot side:
    ```
    TG: main started
    TG: socket disconnected
+   TG: waiting for HMI handshake on port 2001
+   ```
+   and, once the client has answered the verdict:
+   ```
+   TG: START sent, seq=1
+   TG: station frame sent, ufmec STN1
+   TG: verdict = 1
+   TG: handshake closed
    TG: waiting for HMI on port 2000
    ```
 
@@ -249,6 +264,20 @@ Create the signal (once per controller system):
 Then load `abb/rapid/TG_Cell.sys` into `T_ROB1` the same way as `TG_Comms.sys`
 (it is resident, like TG_Comms — the .tgs programs call it via the task-wide
 global scope) and Apply.
+
+**`TG_ActMechUnit` makes this module cell-specific (2026-09-23).** Its body
+references the MONARC mechanical units `STN1` / `STN2` and the in-position
+signals `siGap_AtStn_1` / `siGap_AtStn_2`. The program check fails on a system
+that lacks any of them, so on a different cell rewrite that routine's body
+first. Every HMI-mode `.tgs` module that drives a positioner calls it, so reload
+`TG_Cell.sys` before running a module exported after that date.
+
+It also calls the IRBP positioner package's `ActStn1`/`ActStn2` and
+`DeactStn1`/`DeactStn2`, and binds the station-free coordinated work object
+`wobjTG_WeldActStn` that `TG_Comms.sys` declares, so **load `TG_Comms.sys` first**
+(or both together; a transient 40160 after the first load clears once the second
+is in). Coordinated modules exported after 2026-09-23 reference
+`wobjTG_WeldActStn`, so they need both files from that date.
 
 What to watch during a run:
 
@@ -1163,3 +1192,600 @@ python hmi_prototype/abb_server.py 127.0.0.1 2000 2 <VC-HOME> weld-demo
 exchanges, and **the §15.4 and §17.3 criteria still hold** (speeds, clamp,
 stats payloads byte-identical to the earlier passes) — the insertion must not
 disturb the phase-4/6 choreography.
+
+## 19. Touch-sense P0: `SearchL` on the VC (touch-sense plan §6)
+
+What is being checked, before any production touch-sense RAPID exists
+([abb_touch_sense_port_v1.md](abb_touch_sense_port_v1.md) §6 P0, decisions D1/D4):
+
+- does plain `SearchL \Stop` stop on its DI in a virtual controller? (curobo E17 says no);
+- is `SearchPoint` the detection point or the stop point;
+- which frame is it in;
+- how do the two search errors and the D3 pause-and-retry policy behave.
+
+**Files**, all in `hmi_prototype/vc_probes/`:
+- `TG_TouchSimEIO.cfg`: the VC-only I/O.
+- `TG_TouchProbe.mod`: the probe, never for a real cell.
+- `touch_probe.py`: the runner.
+- `touch_probe_math.py`: the judge, unit-tested by `hmi_prototype/test_touch_probe_math.py`.
+
+**The "part" is a World Zone box** (option 608-1).
+- `WZDOSet` drives `doTG_SimTouch` while the TCP is inside the box. A cross connection
+  copies it to `diTG_SimTouched`, which `SearchL` supervises.
+- The box top face is a known plane, 50 mm below the search start. The start is PM's safe
+  pose (robot axes 0,0,0,0,30,0) lowered by 150 mm.
+- No Miller signal and no `TG_*` data is touched.
+
+**Prerequisites:**
+- The MONARC VC (`ProjectMonarch`, `4600-803651_Virtual`), which has 608-1.
+- Production Manager idle, PP in `gapMain`. The runner refuses to start otherwise, so a
+  TG cycle is never interrupted.
+- RWS on `127.0.0.1:80`, or set `TG_VC_RWS_URL`.
+
+### 19.1 Once: the VC-only signals
+
+```
+cd hmi_prototype/vc_probes
+python touch_probe.py setup-io
+```
+
+What it does:
+1. Uploads the cfg to `HOME:/TGS/`, then validates and loads it (`add`).
+2. Warm-restarts the controller.
+   - The restart form is `POST /ctrl` with `restart-mode=restart`.
+   - `/ctrl?action=restart` answers 400 on RW 6.15.
+3. Checks that each DO shows up on its DI.
+
+Expected at the end:
+
+```
+PASS  doTG_SimTouch -> diTG_SimTouched: DO 1/0 read back on the DI as 1/0
+PASS  doTG_SimSensorOn -> diTG_SimSensorActive: DO 1/0 read back on the DI as 1/0
+```
+
+A second run just re-checks: "VC-only signals already present".
+
+**Removal** (after the touch-sense phases no longer need it):
+1. RobotStudio → Controller → Configuration → I/O System.
+2. Delete Signal `doTG_SimTouch`, `diTG_SimTouched`, `doTG_SimSensorOn`,
+   `diTG_SimSensorActive`, and Cross Connection `TG_SimTouchCross`, `TG_SimSensorCross`.
+3. Restart the controller.
+
+### 19.2 The experiments
+
+```
+python touch_probe.py run
+```
+
+This takes ~80 s.
+1. It loads the probe, then runs X1, X2, X6, X3a, X3b and X3c, each by PP-to-routine.
+   - X3c stops itself inside its ERROR handler, and the runner presses Start as the
+     operator.
+2. It saves `touch_probe_<timestamp>.json`, **before** any clean-up step.
+3. It parks the robot, unloads the probe and restarts PM from main.
+
+**Expected** event-log lines, and only these, besides the PP and start/stop events:
+
+| Event | When |
+|---|---|
+| `80003` "SmarTac Initialized" | at every program start (SmarTac's START hook, informational) |
+| `40574` "Search Warning … Number of hits during search was 0" | X3a, and X3c's first attempt |
+| `40661` "Search Error … already set … at the start of searching" | X3b |
+| `10136` "reached a stop instruction", then `10156` "Program restarted" | X3c |
+
+**Pass criterion:** every verdict row prints `PASS` (27 rows) and the exit code is 0.
+
+Result 2026-09-25 (`touch_probe_20260925_235715.json`): **27/27 PASS.**
+
+| Experiment | Measured |
+|---|---|
+| X1, 3 × at 15 mm/s | stopped 99.15 mm short of the ToPoint; SearchPoint 0.10 mm above the face; stop 0.95 mm past the hit; spread 0.000 mm |
+| X6, 50 mm/s | SearchPoint 0.43 mm above the face; stop 3.14 mm past the hit |
+| X2, oframe `[[+80,-60,-120] from S, OrientZYX(35,10,-20)]` | `oframe × SearchPoint` = X1's world hit to 0.004 mm; 0.0001 mm off the search line; `CRobT` consistency 0.004 mm |
+| X3a, no part | `ERR_WHLSEARCH` = **1072** after 9.95 s, at the ToPoint (0.67 mm); recovery back to S within 0.11 mm |
+| X3b, touching at the start | `ERR_SIGSUPSEARCH` = **1073**; stopped at S (0.000 mm) |
+| X3c, D3 through late binding | paused, Start, `RETRY` hit at the face; the late-bound caller resumed |
+
+If a run fails:
+- **A `40160` at load** is F-5 ([rapid_validation_findings_v1.md](rapid_validation_findings_v1.md)).
+  Some other loaded module owns one of the probe's global names. The probe prefixes every
+  global with `Tp` for that reason; `TG_UfmecProbe` owns `stPrbStep` and `nPrbStn`.
+- **A `CLEAN-UP STEP FAILED` line** means the robot, module or PM was left mid-way. Park
+  the robot (`TG_TpHome`), unload `TG_TouchProbe`, then PP to main and start.
+
+## 20. Touch-sense P1: the auto touch-up wire, ids 16/18/19 (touch-sense plan §6)
+
+What is being checked ([abb_touch_sense_port_v1.md](abb_touch_sense_port_v1.md) §3.2, §6 P1):
+- the three new request routines in `TG_Comms.sys`;
+- the `.oframe` write of id 19;
+- the two refusals, end to end, through the real `TG_Main` cycle: handshake, file
+  transfer, `Load \Dynamic`, late-bound call.
+
+The searches are pretended: `TGS/TD05TsWire.mod` writes the contact points itself, so
+this runs on any VC with no World Zone.
+
+**Offline first:** `python -m unittest discover -s hmi_prototype`. Expect 150 tests OK,
+including `test_phase8_touchsense.py`.
+
+**Files:**
+- `abb/rapid/TG_Comms.sys`: the new routines.
+- `abb/rapid/TGS/TD05TsWire.mod`: the sample program.
+- `hmi_prototype/abb_server.py`: modes `touch-wire`, `touch-off`, `touch-corrupt`.
+- `hmi_prototype/vc_probes/touch_wire_vc.py`: the runner.
+
+**Prerequisites:**
+- The MONARC VC, with PM idle (PP in `gapMain`).
+- Exactly one station reading in position: `siGap_AtStn_1/2`, because `TG_ActMechUnit`
+  EXITs otherwise. After a controller restart both read 0 until PM has run once, so do PP
+  to main and start first.
+- The bench `TG_Main.mod` with `tgs_main`, the standalone loop.
+
+### 20.1 Run
+
+```
+cd hmi_prototype/vc_probes
+python touch_wire_vc.py              # deploys abb/rapid/TG_Comms.sys first
+python touch_wire_vc.py --no-deploy  # against the TG_Comms.sys already loaded
+```
+
+**The deploy step:**
+1. Uploads `TG_Comms.sys` and swaps it in: unload, then load.
+2. Asks the controller to build the program.
+3. On any error it reloads the git HEAD version.
+
+Loading resets TG_Comms' PERS to their declared values, as every deploy does.
+
+**Each scenario:**
+1. PP to `TG_Main/tgs_main`, then start.
+2. Wait 3.5 s. A program stopped inside `TG_HandshakeCom` keeps its listener; the restarted
+   `TG_SocketDisc` closes it, and an HMI that connected sooner would land on it and time out.
+3. One `serve_cycle` of the prototype HMI, in-process, with the module sent over RWS at id 10.
+4. Stop, then read `TG_Comms` PERS over RWS.
+5. A 10 s pause before the next scenario (see 41617 below).
+
+At the end, PP goes to main and PM restarts.
+
+**Expected**, abridged (the HMI transcript is prefixed `hmi |`):
+
+```
+=== touch-wire: request log ['10', '5', '4', '16', '18', '18', '19', '4', '100']
+      hmi |   touch point 1: ['103.000', '0.700', '20.400']
+      hmi |   touch point 2: ['59.600', '25.300', '-2.000']
+      hmi |   auto touch-up offset (base, mm): ['0.087', '2.872', '-2.178']
+=== touch-off: request log ['10', '5', '4', '16', '4', '100']
+=== touch-corrupt: request log ['10', '5', '4', '16', '18', '18', '19']
+  elog [80001] TG: touch sensing aborted | bad touch-sense frame payload ...
+```
+
+`(0.087, 2.872, -2.178)` is R·(3, 0, -2) for the prototype's weld frame
+`[900, 80, 350, -2.5, 3.5, 90]`.
+
+**Pass criterion:** all 13 rows `PASS`, exit code 0. In particular:
+- `touch-wire`: the controller's own `wobjTG_Weld.oframe` equals the localization plus
+  R·(3,0,-2) within 0.006 mm, with its rotation unchanged. `nTG_DoTouchSense` = 1 and
+  `bTG_TouchHitOK` = FALSE (consumed).
+- `touch-off`: `nTG_DoTouchSense` = 0, and `oframe` is exactly the localization.
+- `touch-corrupt`: no id 4/100 after the 19, event 80001, and `oframe` still the TSP frame.
+
+Result 2026-09-26: **13/13 PASS.** The touch-wire oframe was `[900.090, 82.870, 347.820]`,
+0.0028 mm from expected, with rotation |Δq| 4e-7.
+
+**If the handshake port is refused for 30 s:** check the event log for **41617** "Too
+intense frequency of Write Instructions". After bursts of TG `TPWrite` lines, the VC once
+left the next `TPWrite` blocked for more than 75 s (findings, related observation 2).
+1. Warm-restart the controller (`POST /ctrl`, `restart-mode=restart`).
+2. PP to main and start PM once, so the station signals come back.
+3. Re-run.
+
+## 21. Touch-sense P2: the search primitive `TG_TouchSearch` (touch-sense plan §6)
+
+What is being checked ([abb_touch_sense_port_v1.md](abb_touch_sense_port_v1.md) §6 P2,
+D3/D5/D9/D12): the **production** `TG_Touch.TG_TouchSearch` and the `TG_Cell` touch macros.
+They run on the P0 World Zone rig (§19), in a work object with a tilted `oframe`:
+- one clean hit;
+- four failures, each of which must pause for the right reason, then search again and hit
+  once the "operator" has fixed the cause.
+
+**Offline first:**
+- `python -m unittest discover -s hmi_prototype`: 159 tests OK, including the F-5
+  cross-module check and the P2 judge.
+- `python tools/rapid_check.py --all`: 0 findings, including "cross-module globals (F-5)".
+
+**Files:**
+- `abb/rapid/TG_Touch.sys`: new; loaded resident after `TG_Cell`.
+- `abb/rapid/TG_Cell.sys`: the touch macros and the welder signal names.
+- `hmi_prototype/vc_probes/TG_TsProbe.mod`: the probe; never for a real cell.
+- `hmi_prototype/vc_probes/touch_search_vc.py`: the runner.
+
+**Prerequisites:**
+- The §19 rig signals: `touch_probe.py setup-io`.
+- The P1 `TG_Comms.sys`, which declares `rtTG_TouchHit` / `bTG_TouchHitOK`.
+- PM idle.
+
+### 21.1 Run
+
+```
+cd hmi_prototype/vc_probes
+python touch_search_vc.py              # deploys TG_Cell.sys + TG_Touch.sys first
+python touch_search_vc.py --no-deploy
+```
+
+**The deploy step:**
+1. Backs up the controller's `HOME:/TGS/TG_Cell.sys` to
+   `vc_probes/TG_Cell_backup_<stamp>.sys`. It refuses if it cannot read it.
+2. Swaps in the repo's `TG_Cell.sys` and loads `TG_Touch.sys`.
+3. Asks for a build. On errors it restores the backup and unloads `TG_Touch`.
+
+**How the probe uses the rig:**
+- It points TG_Cell's welder names at the rig: contact `diTG_SimTouched`, sense-on
+  `doTG_SimSensorOn`, active `diTG_SimSensorActive`, with a cross connection between the
+  last two. TG_Cell's own names are saved first and put back by `TG_TspRestore`, which the
+  runner calls in any case.
+- The "part" is the World Zone box, and it follows the PERS `nTspZoneWant` through a 0.1 s
+  timer TRAP. So the runner can place the part, or clear it, while `TG_TouchSearch` is
+  paused.
+
+**Expected** (event-log lines abridged):
+
+```
+=== TG_TspHit (6 s): step "S1 done"
+  TG_TspMissRetry paused, reason 3 - operator: TG_TsProbe.nTspZoneWant := 1, then Start
+  elog [40574] Search Warning ... Number of hits during search was 0 ...
+  elog [80002] TG: touch search found nothing | No contact within 150 mm; the robot is back at the start.
+  TG_TspNotLive paused, reason 2 - operator: TG_Cell.stTG_TouchActiveDI := "diTG_SimSensorActive", then Start
+  elog [80002] TG: touch sensing not live | The welder did not confirm touch sensing within 2.0 s.
+  TG_TspNoSignal paused, reason 1 - operator: TG_Cell.stTG_TouchDI := "diTG_SimTouched", then Start
+  elog [80002] TG: touch signal not configured | ...
+  TG_TspAtStart paused, reason 4 - operator: TG_TsProbe.nTspZoneWant := 1, then Start
+  elog [40661] Search Error ... already set ... at the start of searching ...
+  elog [80002] TG: wire touching at search start | ...
+```
+
+**Pass criterion:** all 36 rows `PASS`, exit code 0. Per scenario:
+- It ran to completion, with `bTG_TouchHitOK` set.
+- `oframe × rtTG_TouchHit` lands at the face, within the P0 timing window.
+- The hit is on the start → contact line (≤ 0.1 mm).
+- **No return (D12):** the robot is ≤ 5 mm from the hit and ≥ 40 mm from the start.
+- The sense output is off afterwards (D5).
+- The pause count and reason are exactly as expected.
+- After the run, TG_Cell's welder names read back unchanged.
+
+Result 2026-09-26: **36/36 PASS.** Every scenario hit the face at the same point:
+- 0.096 mm above it, the World Zone trigger lead measured in P0;
+- 0.0001 mm off the search line;
+- the robot left 0.94 mm past the hit and 50.85 mm from the start.
+
+Raw data: `touch_search_20260926_093100.json`.
+
+## 22. Touch-sense P3: `TD05Touch.mod`, real searches through the real TG cycle (touch-sense plan §6)
+
+What is being checked ([abb_touch_sense_port_v1.md](abb_touch_sense_port_v1.md) §6 P3): the
+whole auto touch-up, end to end.
+- `TG_Main`'s cycle (handshake, file transfer, `Load \Dynamic`, late-bound call) runs
+  `TGS/TD05Touch.mod`.
+- The program searches a real "part", the World Zone block of `vc_probes/TG_TrRig.mod`,
+  with the production `TG_TouchSearch`.
+- The prototype HMI (`touch-real` mode) computes the offset.
+- The controller ends up welding in the corrected frame.
+
+The part is moved between cycles by a known amount, and the offset must follow it.
+
+**Offline first:** `python -m unittest discover -s hmi_prototype`, all OK. In particular the
+P3 contract tests: `TD05Touch.mod`, `TG_TrRig.mod` and `abb_server.TOUCH_REAL_DEMO` describe
+one part. Also `python tools/rapid_check.py --all`: 0 findings; it now also catches F-6.
+
+**Prerequisites:**
+- §19's rig signals, the P1 `TG_Comms.sys`, the P2 `TG_Cell.sys` + `TG_Touch.sys`
+  (`touch_search_vc.py` deploys the last two).
+- PM idle, one station in position, and the bench `tgs_main`.
+
+### 22.1 Run
+
+```
+cd hmi_prototype/vc_probes
+python touch_real_vc.py
+```
+
+**What it does:**
+1. Loads `TG_TrRig.mod`, then runs three cycles, 10 s apart:
+   - **baseline**: the block where the nominals put it;
+   - **shifted**: the block moved +3 / -2 mm in part X / Z;
+   - **aligned**: +3.24 / -2.16, which is 9 and 6 quanta of the rig's resolution (below).
+2. Per cycle:
+   - writes the world shift (`nTrShiftY/Z`; part X is world +Y here);
+   - PP to `TG_TrRig/TG_TrRun`, start, wait 3.5 s (the §20 stale-listener rule);
+   - one `serve_cycle` of the prototype HMI, sending `TD05Touch.mod` over RWS;
+   - stop, then read `wobjTG_Weld` and `nTG_TouchPauses`.
+3. Finally runs `TG_TrRestore` + `TG_TrHome`, unloads the rig and restarts PM.
+
+**Expected**, per cycle:
+
+```
+=== baseline (0.0, 0.0, 0.0): request log ['10', '5', '4', '16', '18', '18', '19', '4', '100'], pauses 0, zone builds 1
+      hmi |   touch point 1: ['-0.220', '0.000', '-20.000']
+      hmi |   touch point 2: ['50.000', '20.000', '0.120']
+      hmi |   auto touch-up offset (base, mm): ['0.000', '-0.220', '0.120']
+```
+
+**Pass criterion:** all 19 rows `PASS`, exit code 0. Per cycle:
+- the full block ran with no pause;
+- each touch sits within the rig's window of its (moved) face;
+- the HMI's δ_cad equals the shift within one quantum (0.39 mm);
+- the controller's `oframe` equals the frame the HMI served (0.006 mm).
+
+Across cycles:
+- aligned - baseline must equal the aligned shift within **0.03 mm**, because the
+  quantization cancels there;
+- shifted - baseline must equal (3, 0, -2) within one quantum;
+- TG_Cell's welder names must be restored.
+
+Result 2026-09-26: **19/19 PASS.**
+- The HMI measured δ_cad = (-0.22, 0, 0.12) / (2.68, 0, -1.70) / (3.04, 0, -2.06).
+- The controller's `oframe` ended `[1600.000, -0.220, 1450.120]` / `[1600.000, 2.680,
+  1448.300]` / `[1600.000, 3.040, 1447.940]`, identical to the HMI's frames.
+- aligned - baseline = (3.26, 0, -2.18): **0.02 mm** from the shift.
+- Raw data: `touch_real_20260926_095252.json`.
+
+**The rig's resolution (X7).** `touch_probe.py`'s probe gained `TG_TpX7`: twelve searches
+with the face 0.03 mm further each time.
+- Measured: face - hit = -0.096, -0.126 … -0.336, then -0.004, -0.034, -0.063. The hit is
+  seen only every **24 ms**, which is **0.36 mm at 15 mm/s**, up to one period early.
+- Re-run it with `python touch_probe.py x7`. It needs no deploy: the probe is standalone.
+- Any VC touch figure finer than 0.36 mm is therefore the phase of this sawtooth, not a
+  measurement.
+
+**If `TD05Touch.mod` does not run** (request log `['10']` only, with 40322 in the event log):
+it failed to load. F-6 is the first suspect; `tools/rapid_check.py` catches it.
+
+### 22.2 Demo: one cycle to watch in the station
+
+```
+cd hmi_prototype/vc_probes
+python touch_demo_vc.py --speed 30
+```
+
+The §22.1 cycle, once, with the block moved +8 / -5 mm in part X / Z (`--shift DX DZ`). It
+takes about 60 s. `--speed 30` sets a 30 % speed override for the cycle so the 775 mm/s moves
+can be followed, and puts the override back afterwards. The block is a World Zone and does not
+show in the station.
+
+In the station view, times from launch:
+- **0-11 s:** no motion (rig load, handshake, file transfer).
+- **to about 22 s:** touch 1. The torch creeps sideways onto the block's -X face at world
+  Y ≈ 7.9, pauses 0.5 s, and the program's own MoveL backs it off 30 mm (D12).
+- **to about 31 s:** touch 2, straight down onto the top face at world Z ≈ 1445.
+- **about 32-42 s:** the dry pass at world Y ≈ 57.9, Z ≈ 1450: the nominal Y = 50, Z = 1455
+  moved with the block.
+- **about 46 s:** home. The script restores the rig and restarts PM.
+
+**Pass criterion:** all 6 rows `PASS`, exit code 0; the §22 per-cycle rows plus the restored
+welder names. A second RWS session samples the TCP every few ms. The trace JSON
+(`touch_demo_<time>.json`) holds it with the time-stamped HMI log, for a picture of the path.
+Result 2026-09-26: 6/6 PASS at 100 % and at 30 %. The touches measured 7.76 / -4.97 and 7.93 /
+-4.95, and the controller's `oframe` matched the HMI's frame both times.
+
+## 23. Touch-sense P5: the Weld Planner's own export, through the real TG cycle (touch-sense plan §6)
+
+What is being checked ([abb_touch_sense_port_v1.md](abb_touch_sense_port_v1.md) §6 P5): the
+§22 cycle again, with the hand-written `TD05Touch.mod` replaced by what the **Weld Planner**
+(curobo_suite) emits for the same part.
+- The touch programs come from the planner's real `WeldTouchGenerationService` builders.
+- The weld and the package main are framed by the ABB program blocks, and everything is compiled
+  by the planner's `ProgramCompiler` + `AbbTranslator` under the ABB HMI Mode profile. The
+  MONARC station is modelled as the app authors it (STN1, tilt → `eax_b`, rotate → `eax_c`).
+- The prototype HMI reads the weld's touch points from the planner's `.tgs`, the way the real HMI
+  does (`abb_server.load_tgs_touch_points`; the R_W_F token selects the weld).
+
+**The planner side** is curobo_suite branch `ft-abb-offset-touch-sensing` (off `develop`
+0dd3b44). A snapshot of it is [cross_repo/curobo_suite_touch_sense_p5.patch](cross_repo/curobo_suite_touch_sense_p5.patch),
+which applies to a clean `develop` with
+`git apply --cached curobo_suite_touch_sense_p5.patch && git checkout -- .`. The export
+imports curobo_suite from its sibling folder, or from `CUROBO_SUITE` if set, and writes nothing
+into it: no bytecode, no caches.
+
+**Offline first:**
+- `python -m unittest discover -s hmi_prototype`: all OK (173). The P5 additions are
+  `test_phase8_touchsense.TestTgsTouchPoints`.
+- In curobo_suite, `pytest tests/test_abb_touchsense.py`: 28 passed. The ABB, touch and
+  generation-message suites pass with the change (809 passed).
+
+**Prerequisites:** §22's (rig signals, P1-P3 RAPID, PM idle, one station in position).
+
+### 23.1 Run
+
+```
+cd hmi_prototype/vc_probes
+python planner_touch_vc.py all        # = survey, export, run
+```
+
+1. **survey** (~20 s): `TG_P5Survey.mod` drives the robot to every TD05Touch pose, in
+   TD05Touch's order, and records `CJointT()` into `planner_out/survey.json`. These are the
+   joint solutions the planner's IK would have supplied. The station's axes come out of it too;
+   on this VC they are `eax_b` 0, `eax_c` 45.
+2. **export**: `planner_touch_export.py` writes `planner_out/TsPlan05.mod` (the flattened HMI
+   module), `TsPlan05.tgs` (the touch points as the planner persists them) and
+   `TsPlan05_export.json`.
+3. **run** (~4 min), six real TG cycles 10 s apart against the §22 rig:
+
+| Cycle | What it does | Expected request log |
+|---|---|---|
+| baseline | the block where the nominals put it | `10 5 4 16 18 18 19 4 14 100` |
+| shifted | block +3 / -2 mm in part X / Z | same |
+| aligned | +3.24 / -2.16 (9 and 6 rig quanta, §22) | same |
+| touch-off | id 16 answered 0, block still moved 3 / -2 | `10 5 4 16 4 14 100` |
+| corrupt-tsp | the TSP R_W_F frame malformed | `10 5 4 100` |
+| miss-retry | the touch DI is pointed at a signal that never rises; after the pause it is put back and Start pressed | the full log, one pause |
+
+**Pass criterion:** all 44 rows `PASS`, exit code 0.
+
+Static (E1):
+- the module lints clean with the resident modules;
+- its touch block has TD05Touch's statement shape;
+- it contains no FANUC syntax.
+
+Per touched cycle:
+- each touch is at its (moved) face;
+- δ = the shift within one rig quantum;
+- `oframe` = the HMI's frame to 0.006 mm;
+- the arc runs on the corrected seam within **0.05 mm**, at the HMI's travel speed within 2 %.
+
+Across cycles:
+- aligned − baseline = the shift within **0.03 mm**;
+- miss-retry = baseline;
+- baseline and aligned equal the P3 numbers of `TD05Touch.mod` within 0.03 mm.
+
+Result 2026-09-26: **44/44 PASS** (raw data `planner_out/planner_run_20260926_121106.json`):
+
+| Cycle | Touches measured (part mm) | Controller `oframe` | Weld pass |
+|---|---|---|---|
+| baseline | x -0.220, z 0.120 | [1600.000, -0.220, 1450.120] | on the corrected seam to 0.001 mm, 7.51 mm/s |
+| shifted | x 2.680, z -1.700 | [1600.000, 2.680, 1448.300] | 0.001 mm, 7.40 mm/s |
+| aligned | x 3.040, z -2.060 | [1600.000, 3.040, 1447.940] | 0.001 mm, 7.41 mm/s |
+| touch-off | (none) | [1600.000, 0.000, 1450.000] | on the NOMINAL seam, 0.001 mm |
+| corrupt-tsp | (none) | untouched | the robot never left home |
+| miss-retry | x -0.220, z 0.120 after one 150 mm miss (reason 3, 0 reports) | = baseline | 0.001 mm |
+
+- aligned − baseline = (3.26, 0, -2.18), 0.02 mm from the shift.
+- The planner's module measured **exactly** what `TD05Touch.mod` measured in P3: 0.0000 mm apart
+  at baseline and aligned.
+- The HMI's travel speed is 17.5 IPM (7.41 mm/s).
+
+**Measured along the searches** (TCP trace, a second RWS session sampling every few ms):
+- every search ran at 14.5-15.1 mm/s;
+- each took 2.1-2.3 s for its 30-33 mm;
+- each stopped **0.94 mm** past its hit (0.939-0.947 mm, all six touches), the same stop
+  distance P2 measured.
+
+**If every touched cycle goes `16 -> 100`**, the planner tree lacks the curobo E58 fix. That is
+what the first run did: the chain-entry guard read the TCP mid-blend, 201.7 mm from the first
+approach, and aborted. The export must come from the P5 branch.
+
+## 24. Touch-sense P4: the HMI's own C++ touch path, through the real TG cycle (touch-sense plan §6)
+
+What is being checked ([abb_touch_sense_port_v1.md](abb_touch_sense_port_v1.md) §6 P4): the §23
+cycle again, with the Weld Planner's module unchanged, but served by the **real HMI code**
+instead of the Python prototype.
+
+`AbbTouchHarness.exe` (TGuideWeldingHMI `tests/abb_touch_harness/`) serves each cycle with:
+- the real `ABBRobot` class, including its new overrides for ids 16, 18 and 19;
+- the real socket-start handshake client (`SocketStartHandshakeClient`);
+- the RWS upload at id 10 (`RWSManager`);
+- the pure cores that RobotCell's cases call:
+  - `TouchSenseGate` (id 16, and the TSP request's decision to clear the touch-up);
+  - `AutoTouchupOffsetCore` (the offset, and the id-19 frame via `CorrectedWeldFrame`);
+  - `StationRebase::Decide` / `ToWire` (the H7 rebase, now on id 19 too).
+
+What the harness does not run is `RobotCell` itself: the Qt application with its cameras and
+project store. The harness mirrors RobotCell's per-request logic around the cores, and the
+header of `abb_touch_harness_main.cpp` lists what it mirrors.
+
+The driver is `vc_probes/p4_cpp_touch_vc.py`. It reuses §23's cycle, pause handling, TCP trace
+and judges unchanged (`planner_touch_vc.planner_cycle(..., hmi_base=CppHmi)`), and adds the P4
+checks.
+
+**Offline first** (TGuideWeldingHMI):
+- the unit tests: 320/320, run post-build by `tests/unit/UnitTests.vcxproj`;
+- the full application build, Release x64;
+- `python tests/robot_brand_gate_smoke.py`.
+
+**Build the harness:** MSBuild `tests/abb_touch_harness/AbbTouchHarness.vcxproj`
+`-p:Configuration=Release -p:Platform=x64`. It links Qt6Core like the application; the driver
+puts `C:\Qt\6.4.1\msvc2019_64\bin` on its PATH (override with `TG_QT_BIN`). Without it, the exe
+exits `0xC0000135` with no output.
+
+**Prerequisites:** §23's (`planner_out/` from `planner_touch_vc.py survey` + `export`,
+`TG_Touch` loaded, PM idle, one station in position).
+
+### 24.1 Run
+
+```
+cd hmi_prototype/vc_probes
+python p4_cpp_touch_vc.py run                              # all ten cycles, ~6 min
+python p4_cpp_touch_vc.py run switch-false,unchecked       # a subset, by label
+```
+
+| Cycle | What it does | Expected request log |
+|---|---|---|
+| baseline / shifted / aligned | as §23 | `10 5 4 16 18 18 19 4 14 100` |
+| rebase | the shifted block; the project's station frame is the reported one moved by (10, -5, 3 mm, 1°, -0.5°, 1.5°), so the harness adopts an H7 rebase | same |
+| touch-off | the operator's auto touch-up mode off | `10 5 4 16 4 14 100` |
+| switch-absent | `HMI_ABB_TOUCH_SENSE_ENABLED` missing from config.json | same |
+| switch-false | the key `false` | same |
+| switch-keeps-touchup | the key `false`; the weld carries a stored touch-up (1.27, -0.762, 0.508 mm) | same |
+| unchecked | the weld is not checked to weld: every weld-frame reply is status 0 with Identity | `10 5 4 16 4 100` |
+| miss-retry | as §23: the first search misses and pauses, then Start | the full log, one pause |
+
+**Pass criterion:** every row `PASS`, exit code 0.
+
+In addition to §23's checks, per cycle:
+- **Touched cycles:**
+  - the C++ id-19 frame equals the prototype's math on the same reports, to 1e-6 mm;
+  - the offset is a pure translation;
+  - `TouchSenseGate` said "run";
+  - the TSP request cleared the touch-up.
+- **rebase:**
+  - `StationRebase` adopted the perturbed frame;
+  - the id-19 frame on the wire equals the shifted run's;
+  - the frame the id-19 reply would have sent without the rebase is reported, to show what the
+    fix changes.
+- **Switch-off cycles:**
+  - `TouchSenseGate`'s reason is "switched off";
+  - the TSP request kept the stored touch-up;
+  - the weld runs on the nominal frame plus the stored touch-up;
+  - the pendant's `posTG_Touchup` holds it in inches.
+- **unchecked:**
+  - id 16 answered 0 with the reason "no weld frame served";
+  - the robot never left home.
+
+Across cycles:
+- aligned − baseline = the shift;
+- baseline, shifted, aligned and miss-retry equal P5's prototype numbers to 0.03 mm.
+
+### 24.2 Result 2026-09-27
+
+**100/100 PASS** with the final code (raw data `planner_out/p4/p4_run_20260927_195526.json`).
+Re-run 2026-09-28 after D15 (FANUC on ABB's rule, the brand capability removed): 100/100 again,
+the same numbers (raw data not committed).
+
+Earlier runs:
+- Before the review fixes, the first eight cycles passed 83/83 (raw data not committed).
+- One intermediate full run failed 2 rows, the arc speed of switch-false (6.12 mm/s) and of
+  switch-keeps-touchup (7.23 mm/s), while the PC was busy building.
+  - The trace showed why: the speed per 10 mm of seam dipped irregularly, to 4.9-7.2 mm/s,
+    instead of the flat 7.46-7.50 of the other passes. The VC's clock was lagging wall-clock time.
+  - Those two cycles alone then passed 15/15.
+  - **Keep the PC otherwise idle during a run.** The speed row measures the VC against
+    wall-clock time.
+
+| Cycle | Touches measured (part mm) | Controller `oframe` | Weld pass |
+|---|---|---|---|
+| baseline | x -0.220, z 0.120 | [1600.000, -0.220, 1450.120] | corrected seam to 0.001 mm, 7.50 mm/s |
+| shifted | x 2.680, z -1.700 | [1600.000, 2.680, 1448.300] | 0.001 mm, 7.48 mm/s |
+| aligned | x 3.040, z -2.060 | [1600.000, 3.040, 1447.940] | 0.001 mm, 7.47 mm/s |
+| rebase | x 2.680, z -1.700 | [1600.000, 2.680, 1448.300] = shifted | 0.001 mm, 7.48 mm/s |
+| touch-off / switch-absent / switch-false | (none) | [1600.000, 0.000, 1450.000] | the NOMINAL seam, 0.001 mm, 7.49 mm/s |
+| switch-keeps-touchup | (none) | [1601.270, -0.760, 1450.510] = nominal + stored touch-up | 0.003 mm, 7.50 mm/s; `posTG_Touchup` [0.05, -0.03, 0.02] in |
+| unchecked | (none) | [0, 0, 0]: TG_ReqWeldFrame writes the oframe whatever the status | no weld; the robot never left home |
+| miss-retry | x -0.220, z 0.120 after one miss (reason 3, 0 reports) | = baseline | 0.001 mm |
+
+- **The C++ HMI measured exactly what the prototype measured in P5**: 0.0000 mm apart at
+  baseline, shifted, aligned and miss-retry. Its id-19 frames equal the prototype's math to
+  within 1e-15 mm.
+- **rebase:**
+  - The station was reported at `[[1370.36,800.88,409.27],[0.317033,0.318918,-0.629733,0.633417]]`
+    with STNAXES 0 / 45. The adoption is 11.58 mm / 1.87° from the project's frame.
+  - The harness waives the load-position check: the rig starts each cycle wherever the last
+    cycle left the positioner.
+  - The robot saw exactly the shifted run's frames.
+  - Without the P4 fix, the id-19 reply would have sent [1586.03, 7.68, 1467.97 | -1.50, 0.22,
+    91.10]: 19.7 mm and 1.9° off.
+- **The C++ read survived the D3 pause**; the wire stayed in lockstep.
+- **Searches:** as in §23, 14.9-15.1 mm/s, stopping 0.939-0.947 mm past the hit.
+
+**What P4 on the VC does not cover:**
+- `RobotCell` itself (see above).
+- The id-18 and id-19 refusals. The RAPID cannot produce an unparseable, extra or missing
+  report, so they are pinned by the unit tests only.
+- FANUC. Its path is covered by the unit tests. Since D15 (2026-09-28) it follows ABB's TSP
+  rule: a normal run is unchanged, while a skipped or unlocalized weld is no longer touched and
+  the touch-up is cleared only at the TSP request. A FANUC dry run is the check for that.
