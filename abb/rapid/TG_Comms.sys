@@ -461,10 +461,7 @@ MODULE TG_Comms(SYSMODULE)
     ! the same way before acting on it; the constant-Y result says nothing
     ! about it either way.
 
-    ! Tools (FANUC UT[2] camera / UT[8] torch).
-    ! TODO: DUMMY VALUES - replace with the calibrated tooldata of the real cell.
-    PERS tooldata tTG_Cam:=[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]];
-    PERS tooldata tTG_Weld:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+    ! tTG_Cam / tTG_Weld (FANUC UT[2] / UT[8]) are declared in TG_CellCal.sys (cell calibration).
 
     ! DEPRECATED (plan 7.6, decided 2026-08-28) - FANUC modal
     ! UTOOL_NUM/UFRAME_NUM emulation: the .tgs program selects the active

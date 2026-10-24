@@ -22,10 +22,24 @@ For an existing VC: Controller tab → *Change Options* → add 616-1, restart.
 
 Controller tab → **RAPID** → expand `T_ROB1`:
 
-1. Right-click `T_ROB1` → **Load Module…** → `abb/rapid/TG_Comms.sys`.
-2. Right-click `T_ROB1` → **Load Module…** → `abb/rapid/TG_Main.mod`.
-3. **Apply** (Ctrl+Shift+S) — the RAPID editor now compiles both. Fix-ups, if
+1. Right-click `T_ROB1` → **Load Module…** → `abb/rapid/TG_CellCal.sys`.
+2. Right-click `T_ROB1` → **Load Module…** → `abb/rapid/TG_Comms.sys`.
+3. Right-click `T_ROB1` → **Load Module…** → `abb/rapid/TG_Main.mod`.
+4. **Apply** (Ctrl+Shift+S) — the RAPID editor now compiles them. Fix-ups, if
    any, will show in the Output window. Expect zero errors.
+
+**`TG_CellCal.sys` holds the cell's tool calibration (`tTG_Cam`, `tTG_Weld`) and is
+loaded ONCE per cell.** Never reload or redeploy it: loading a module re-initialises
+its `PERS` from the file, so a reload replaces the calibrated TCPs with the file's
+dummies (VC-measured 2026-10-24). Enter the calibration on the controller (Program
+Data → tooldata). `TG_Comms.sys` can then be reloaded freely without touching it.
+
+**Existing cell, `TG_Comms.sys` from before 2026-10-24** (it still declares the
+tools): load `TG_CellCal.sys` first, then reload the new `TG_Comms.sys`. Between the
+two loads the tools are declared twice and the task shows 40160 — expected; it
+clears with the second load, and the live tool values are kept (not the file's).
+Loading the new `TG_Comms.sys` WITHOUT `TG_CellCal.sys` leaves the tools undeclared
+(40160, program does not run).
 
 Notes:
 - `TG_Comms` is a SYSMODULE: it stays loaded across "PP to Main" and is hidden
