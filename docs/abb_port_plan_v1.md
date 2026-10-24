@@ -270,6 +270,8 @@ SystemModule  TG_Cell.sys       ← cell-hardware macros: FANUC's tiny .ls utili
                                   WELD_PREP/CAM_PREP/DRY_RUN_* added 2026-08-28
                                   as empty placeholder PROCs). Separate from
                                   TG_Comms on purpose: protocol vs hardware.
+SystemModule  TG_CellCal.sys    ← cell calibration: tTG_Cam / tTG_Weld. Installed
+                                  once per cell, never redeployed (decision 7).
 NormalModule  TG_Main.mod       ← TGMAINKL equivalent (resident; owns main())
 NormalModule  <TgsName>.mod     ← one per .tgs program (dynamically loaded from HOME:/TGS/)
 ```
@@ -343,8 +345,7 @@ PERS pos    posTG_Touchup    := [0,0,0]; ! R[180..182] — HMI's stored per-weld
 
 PERS wobjdata wobjTG_Cam  := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]]; ! PR[5]/UFRAME[5]
 PERS wobjdata wobjTG_Weld := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]]; ! PR[6]/UFRAME[6]
-PERS tooldata tTG_Cam  := ...;  ! UT[2]  — DUMMY VALUES, replace with calibrated camera tool
-PERS tooldata tTG_Weld := ...;  ! UT[8]  — DUMMY VALUES, replace with calibrated torch TCP
+! tTG_Cam (UT[2]) / tTG_Weld (UT[8]) moved to TG_CellCal.sys 2026-10-24 (decision 7).
 
 ! DEPRECATED fallback (decision 7.6) — FANUC modal UFRAME_NUM/UTOOL_NUM
 ! emulation: the .tgs program selects the active tool/frame BY NUMBER;
@@ -813,3 +814,14 @@ with non-zero defaults (`abb_server.py`), fake-robot specs and tests updated
    point of use, or by `PERS` parameter. The ABB counterpart of FANUC's
    `UFRAME[n]=PR[n]` re-emit is *nothing*, not a translation of it
    ([rapid_validation_findings_v1.md](rapid_validation_findings_v1.md) F-2).
+7. **Tool calibration lives in its own module, `TG_CellCal.sys` -- DECIDED 2026-10-24.**
+   `tTG_Cam` / `tTG_Weld` moved out of `TG_Comms.sys`, because reloading a module re-initialises
+   its `PERS` from the file text: a routine `TG_Comms.sys` update put the dummy TCPs back over the
+   cell's calibration. `TG_CellCal.sys` is installed once per cell and never redeployed
+   (install order: [robotstudio_setup.md](robotstudio_setup.md) section 2). Needed now that the
+   planner can leave the TCPs to the controller (curobo_suite
+   `docs/abb_tool_frame_write_switches_plan_v1.md`). **Measured on the VC:** a fresh
+   `TG_Comms.sys` reload reset `tTG_Cam` to `[0,0,100]`; a module saved from the controller keeps
+   the live value; the declarations commented out with nothing else declaring them = the tools
+   vanish (40160); the same global `PERS` in two loaded modules = 40160 and PP to Main refused;
+   declared only in a second module = links clean and the value survives `TG_Comms` reloads.

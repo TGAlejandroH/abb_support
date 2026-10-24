@@ -8,6 +8,7 @@ from rws_session import RwsSession
 
 RAPID = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "abb", "rapid")
 # TG_Touch.sys (touch-sense P2) after TG_Cell: it calls TG_Cell's touch macros.
+# TG_CellCal.sys is deliberately absent: installed once per cell, a reload resets the tools.
 MODULES = ["TG_Comms.sys", "TG_Cell.sys", "TG_Touch.sys", "TG_Weld.sys", "TG_Main.mod", "TG_Parts.mod"]
 c = RwsSession("http://127.0.0.1:80")
 

@@ -5,6 +5,7 @@
 Why only the named ones: reloading a module from a file discards anything written into its
 in-memory copy - PM's pendant teaching writes partadv into TG_Parts (plan V-30). Never reload a
 module that did not change.
+Never pass TG_CellCal.sys: it holds the cell's tool calibration (robotstudio_setup.md section 2).
 
 Steps (TG_RoboCal L8 recipe; lessons V-2/V-25/V-27): stop, upload, unload + load with one RWS
 session (L9), then read the event log - the loadmod POST "succeeds" even on a syntax error -

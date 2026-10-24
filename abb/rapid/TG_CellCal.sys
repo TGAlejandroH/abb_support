@@ -1,0 +1,7 @@
+MODULE TG_CellCal(SYSMODULE)
+    ! Cell calibration. Installed once per cell; never replaced by abb_support updates.
+    ! Install: docs/robotstudio_setup.md section 2. The values below are used only on a
+    ! controller that has never had these tools; an existing cell keeps its live values.
+    PERS tooldata tTG_Cam:=[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]];
+    PERS tooldata tTG_Weld:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+ENDMODULE
