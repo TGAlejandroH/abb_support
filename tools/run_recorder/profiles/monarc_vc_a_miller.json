@@ -1,0 +1,31 @@
+{
+  "name": "MONARC VC A - RobotStudio MonarchRS, system 4600-803651 (cell 1, Miller)",
+  "rws_url": "http://127.0.0.1:80",
+  "task": "T_ROB1",
+  "tool": "tTG_Weld",
+  "idle_module": "gapMain",
+  "weld_on_signal": "EtherNetIP/ioMillerWld1/doWld1WeldOn",
+  "arc_detect_signal": "EtherNetIP/ioMillerWld1/diWld1ArcDetect",
+  "slow_signals": [
+    "EtherNetIP/ioMillerWld1/goWld1Wsch",
+    "EtherNetIP/ioMillerWld1/goWld1WireFeedSpeed",
+    "EtherNetIP/ioMillerWld1/goWld1VoltageArcLength",
+    "EtherNetIP/ioMillerWld1/doWld1GasOn",
+    "EtherNetIP/ioMillerWld1/goWld1TcpSpeed",
+    "soArcProcActive"
+  ],
+  "slow_symbols": [
+    ["TG_Weld", "sdTG_Weld"],
+    ["TG_Comms", "nTG_UdwpFlag"],
+    ["TG_Comms", "nTG_WelderType"],
+    ["TG_Comms", "nTG_WeldProc"]
+  ],
+  "welder_outputs": {
+    "EtherNetIP/ioMillerWld1/goWld1Wsch": {"from": "sched"},
+    "EtherNetIP/ioMillerWld1/goWld1WireFeedSpeed": {"from": "wirefeed_ipm"}
+  },
+  "positioner_axes": {
+    "STN1": {"eax_b": "rax_1", "eax_c": "rax_2"},
+    "STN2": {"eax_b": "rax_1", "eax_c": "rax_2"}
+  }
+}
