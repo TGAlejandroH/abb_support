@@ -49,8 +49,10 @@ FRONIUS_CORR = (-10.0, 10.0)      # TG_Weld.sys nTG_CorrMin / nTG_CorrMax
 MILLER = 1
 POSITIONER_TOL_DEG = 0.5          # a coordinated seam's positioner at its planned start / end angle
 # Served oframe vs expected. The HMI sends 2 decimals (0.005 mm), and in Simulation mode its
-# localization still returns corrections of up to ~0.02 mm (measured, VC campaign 2026-10-28).
-FRAME_TOL_MM = 0.05
+# localization still returns corrections: up to ~0.02 mm on the campaign fixtures, 0.052 mm on
+# part 461784's closed-loop weld (local registration rmse 0.3 mm), measured 2026-10-28. The frame
+# errors this check is for (station rebase, touch-up, wrong frame) are millimetres.
+FRAME_TOL_MM = 0.1
 BUSY_TICK_S = 0.085               # median RWS read on an idle PC: 0.05-0.07 s (VC A, 2026-10-28)
 SEAM_FIELDS = ("purge_time", "preflow_time", "postflow_time", "bback_time", "fill_time")
 
@@ -100,6 +102,8 @@ def check(recording, sent=None, expect=None):
     rows = []
     if (expect or {}).get("outcome") == "refused":
         return _check_refused(recording, sent)
+    if (expect or {}).get("outcome") == "aborted_before_arc":
+        return _check_aborted_before_arc(recording, sent)
     expected = (expect or {}).get("welds")
     served = (sent or {}).get("weld_params") or []
     if not served and expected and all("weld_params" in w for w in expected):
@@ -238,6 +242,28 @@ def _check_refused(recording, sent):
     other = [e for e in events if e["type"] in ("2", "3") and e not in refusal]
     rows.append(("A3", not other, "event log: %s" % ("no other errors or warnings" if not other else
                                                    "; ".join("%s %s" % (e["code"], e["title"]) for e in other))))
+    bench_stopped = (sent or {}).get("task_state") not in (None, "stopped")
+    rows.append(("A5", recording["ended_because"] != "time limit or interrupt" and not bench_stopped,
+                 "run ended because: %s" % recording["ended_because"]))
+    return rows
+
+
+def _check_aborted_before_arc(recording, sent):
+    """A part the robot must abort before its first arc-on (expect {"outcome":
+    "aborted_before_arc"}), e.g. the chain-entry guard: the weld module ran, no arc span was
+    reached, and the part ended on its own. The guard reports with TPWrite only, so the event
+    log carries no reason (readiness plan R5): listed, not failed."""
+    rows = []
+    ran = recording["module"].get("module")
+    rows.append(("A4", ran is not None, "outcome: %s" % ("the weld module %s ran" % ran if ran else
+                                                         "no weld module ran")))
+    spans = recording["analysis"]["spans"]
+    reached = [sp["n"] for sp in spans if sp["observed"]]
+    rows.append(("A4", not reached, "arc spans reached: %s of %d" % (reached or "none", len(spans))))
+    events = recording["events"]
+    bad = [e for e in events if e["type"] in ("2", "3")]
+    rows.append(("A3", None, "event log: %s" % ("no errors or warnings - the abort reason is not logged (R5)"
+                                                if not bad else "; ".join("%s %s" % (e["code"], e["title"]) for e in bad))))
     bench_stopped = (sent or {}).get("task_state") not in (None, "stopped")
     rows.append(("A5", recording["ended_because"] != "time limit or interrupt" and not bench_stopped,
                  "run ended because: %s" % recording["ended_because"]))
