@@ -184,6 +184,17 @@ class KnownBadRuns(unittest.TestCase):
         bad = failing(check(rec, rec["sent"], rec["expect"]))
         self.assertTrue(any(rid == "A1" and "positioner STN2 eax_c" in t for rid, t in bad))
 
+    def test_positioner_read_at_the_fine_stop_not_on_the_move(self):
+        """The seam start is fitted from the TCP, so the last reading before it can already be
+        moving (a fast-turning plate). The reading compared is the one at the fine stop."""
+        from analysis import _standstill
+        before = [253.757, 253.757, 253.757, 244.66]     # standing at ArcLStart, then turning
+        after = [-91.4, -91.457, -91.457]                # arriving at ArcLEnd, then standing
+        self.assertEqual(_standstill(before, last=True), 253.757)
+        self.assertEqual(_standstill(after, last=False), -91.457)
+        self.assertEqual(_standstill([1.0, 2.0, 3.0], last=True), 3.0)   # never still: nearest
+        self.assertIsNone(_standstill([], last=True))
+
     def test_a_weld_never_reached_is_caught(self):
         rec = load("vc_a_base_fixed")
         rec["samples"] = [s for s in rec["samples"]

@@ -45,6 +45,12 @@ CUROBO = r"C:\Users\AlejandroHernandez\PycharmProjects\curobo_suite"
 SITE = r"C:\abb_readiness\site_2026-10-22"
 ABB_ASSET = os.path.join(CUROBO, "tests", "projects", "abb.tgs")
 MIXED = r"C:\Users\AlejandroHernandez\Downloads\abb_test_coord.tgs"
+FIXTURES_DIR = r"C:\abb_readiness\vc_campaign\fixtures"
+# The headless planner's data root: Workflows\weld_planner\weld_libraries.db is a copy of the
+# planner's own library (curobo_suite ProgramData, 2026-10-23); its config is the default.
+PLANNER_DATA = r"C:\abb_readiness\planner_data"
+# MONARC part 461784 as planned for production (owner's sample, 2026-10-28), read-only copy.
+PART_461784 = r"C:\abb_readiness\sources\461784_Final.tgs"
 
 # VC A (MonarchRS 4600-803651) station 2, STNFRAME at axes 0, 2026-10-26 / 2026-10-28.
 VC_A_STN2 = {"quat_wxyz": [0.536457, 0.537943, -0.460038, 0.459561], "xyz_m": [1.37014, 0.79792, 0.41657]}
@@ -114,6 +120,36 @@ FIXTURES = {
                                                                          "stn1_tilt_joint": 90.0}}},
                            "prepare": [{"op": "clear_capture_links", "weld": "Weld3"}, {"op": "generate"},
                                        {"op": "auto_captures", "weld": "Weld3"}]},
+    # Part 461784: two indexed welds at plate 0, then two coordinated welds with the tilt held at
+    # +90 and -90, captures interleaved with the welds.
+    "M5_461784": {"source": PART_461784,
+                  "covers": "M5 part 461784: indexed, indexed, coordinated at tilt 90, coordinated at tilt -90; "
+                            "captures interleaved with the welds; preset A / preset B / custom / preset A",
+                  "welds": {"Weld11": ("preset", PRESET_1), "Weld13": ("preset", PRESET_3),
+                            "Weld4": ("custom", None), "Weld9": ("preset", PRESET_1)}},
+    # Teach-pendant touch-up round trip: M1, baked by today's planner (its export map is what the
+    # import compares against), run, touched up on the robot, imported into the planner.
+    "T1_pendant": {"source": MIXED,
+                   "covers": "T1 teach-pendant touch-up round trip on M1: run, edit points on the robot, import "
+                             "into the Weld Planner, regenerate, run again",
+                   "welds": {"Weld1": ("preset", PRESET_1), "Weld2": ("custom", None), "Weld3": ("preset", PRESET_3)}},
+    # The preset chosen in the Weld Planner itself (the weld editor's library combo, from the
+    # planner's own weld library), not written into the file: what the planner snapshots is
+    # what the HMI must send. Library row 1 = Pr:1/Sch:1 (travel 10, wire feed 520); row 3 has
+    # no travel speed, so Generate must refuse it.
+    "N1_planner_preset": {"source": os.path.join(SITE, "abb_monarch_test_tested.tgs"),
+                          "covers": "preset chosen in the Weld Planner (library row 1, Pr:1/Sch:1), generated, sent by the HMI",
+                          "welds": {}, "clear_touchups": True,
+                          "prepare": [{"op": "bind_preset", "weld": "Weld1", "library_id": 1}]},
+    "N2_planner_custom": {"source": os.path.join(SITE, "abb_monarch_test_tested.tgs"),
+                          "covers": "preset row 1 with 'Set manually' in the Weld Planner, travel 18 IPM",
+                          "welds": {}, "clear_touchups": True,
+                          "prepare": [{"op": "bind_preset", "weld": "Weld1", "library_id": 1, "custom": True,
+                                       "manual": {"user_defined_travel_speed": 18.0}}]},
+    "N3_planner_no_travel": {"source": os.path.join(SITE, "abb_monarch_test_tested.tgs"),
+                             "covers": "preset with no travel speed (library row 3) chosen in the Weld Planner: Generate must refuse",
+                             "welds": {}, "clear_touchups": True,
+                             "prepare": [{"op": "bind_preset", "weld": "Weld1", "library_id": 3}]},
     "M4_zone1": {"source": os.path.join(SITE, "abb_monarch_test_tested.tgs"),
                  "covers": "work zone 1 (station 1 only): runs on station 1, refused on station 2",
                  "welds": {"Weld1": ("custom", None)}, "clear_touchups": True, "work_zone": 1,
@@ -124,6 +160,13 @@ FIXTURES = {
                                   "covers": "F8 refusal: the project's station frame is cell 2's real calibration, "
                                             "89 deg / 94 mm from VC A's station 2 (H7 limits 100 mm / 20 deg)",
                                   "welds": {}, "keep_station": True, "regenerate": False, "outcome": "refused"},
+    # The robot's chain-entry guard (the torch more than 100 mm from the weld's entry point in the
+    # served frame): F1 regenerated, with a 150 mm touch-up the HMI serves as part of the frame.
+    "F8_guard_trip": {"source": os.path.join(FIXTURES_DIR, "F1_P2_custom.tgs"),
+                      "covers": "F8 chain-entry guard: a 150 mm touch-up moves the served frame 150 mm, the robot "
+                                "must abort before the arc",
+                      "welds": {}, "touch_mm": (150.0, 0.0, 0.0), "regenerate": False,
+                      "outcome": "aborted_before_arc"},
     "F8_zone_mismatch": {"source": os.path.join(SITE, "abb_monarch_test_tested.tgs"),
                          "covers": "F8 refusal: work zone 1 (station 1 only) while station 2 is presented",
                          "welds": {}, "work_zone": 1, "regenerate": False, "outcome": "refused"},
@@ -145,9 +188,10 @@ def edit_project(path, spec):
         p.setdefault("metadata", {})["work_zone"] = spec.get("work_zone", 0)
         con.execute("update weld_projects set payload_json=? where rowid=?", (json.dumps(p), rowid))
     con.execute("update project_meta set value=? where key='work_zone'", (str(spec.get("work_zone", 0)),))
-    if spec.get("clear_touchups"):
+    if spec.get("clear_touchups") or spec.get("touch_mm"):
+        dx, dy, dz = spec.get("touch_mm", (0.0, 0.0, 0.0))
         con.execute("update weld_item_runtime_state set touch_offset_matrix_json=?",
-                    (json.dumps([[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]]),))
+                    (json.dumps([[1.0, 0, 0, dx], [0, 1.0, 0, dy], [0, 0, 1.0, dz], [0, 0, 0, 1.0]]),))
     for weld_id, name, payload in con.execute("select weld_id, name, payload_json from weld_items").fetchall():
         if name not in spec["welds"]:
             continue
@@ -315,7 +359,10 @@ def main(argv):
         os.chmod(dst, 0o644)
         edit_project(dst, spec)
         result = os.path.join(args.out, name + "_generate.json")
-        env = dict(os.environ, TG_E2E_NAME_AFTER_PASSWORD="1", TG_E2E_PREPARE=json.dumps(spec.get("prepare", [])))
+        # The planner's data root (config, weld library). A source run puts it next to the main
+        # script, i.e. here; PLANNER_DATA holds a copy of the planner's weld library instead.
+        env = dict(os.environ, TG_E2E_NAME_AFTER_PASSWORD="1", TG_E2E_PREPARE=json.dumps(spec.get("prepare", [])),
+                   TGUIDE_DATA_DIR=PLANNER_DATA)
         subprocess.run([PYTHON, os.path.join(HERE, "planner_generate.py"), CUROBO, dst, result],
                        cwd=CUROBO, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800)
         with open(result) as fh:

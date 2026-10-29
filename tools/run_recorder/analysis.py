@@ -203,15 +203,30 @@ def _positioner(samples, key, info, span, axis_map, t_on, t_off):
         row = {"rax": rax, "planned": [first.get(eax), last.get(eax)], "observed": [None, None],
                "range_during": None}
         if rax:
-            if before and rax in before[-1]:
-                row["observed"][0] = float(before[-1][rax])
-            if after and rax in after[0]:
-                row["observed"][1] = float(after[0][rax])
+            row["observed"][0] = _standstill([float(v[rax]) for v in before if rax in v], last=True)
+            row["observed"][1] = _standstill([float(v[rax]) for v in after if rax in v], last=False)
             vals = [float(v[rax]) for v in during if rax in v]
             if vals:
                 row["range_during"] = [min(vals), max(vals)]
         out["axes"][eax] = row
     return out
+
+
+def _standstill(values, last, tol_deg=0.01):
+    """The axis value at the fine stop next to the seam: of the readings before the seam
+    (``last``) the last one that repeats its neighbour, of those after it the first. The seam's
+    start and end times are fitted from the TCP, so the reading nearest them can already be on
+    the move: a plate turning 64 deg/s moves 9 deg in the fit's 0.14 s (part 461784, weld 3).
+    Falls back to the nearest reading when the axis never stood still in the window."""
+    if not values:
+        return None
+    pairs = list(zip(values, values[1:]))
+    if last:
+        pairs.reverse()
+    for a, b in pairs:
+        if abs(a - b) <= tol_deg:
+            return b if not last else a
+    return values[-1] if last else values[0]
 
 
 def oframe_of(wobjdata):

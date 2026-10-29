@@ -15,6 +15,7 @@ param(
     [string]$Hmi = "C:\Users\AlejandroHernandez\source\repos\TGAlejandroH\hmi-endstatus-wt\TGuideWeldingHMI\x64\Release",
     [string]$Python = "C:\Users\AlejandroHernandez\anaconda3\envs\pyocc_release\python.exe",
     [int]$MaxSeconds = 600,
+    [string]$DisarmOnLog,
     [switch]$KeepOpen
 )
 $ErrorActionPreference = "Continue"
@@ -117,9 +118,29 @@ for ($try = 0; $try -lt 4 -and -not $armed; $try++) {
 if (-not $armed) { Fail-Case "not armed" }
 Say "armed"
 
-& $Python "$here\hmi_case.py" --label $Label --expect $Expect --part $Part --out-dir $OutDir --max-seconds $MaxSeconds 2>&1 |
-    ForEach-Object { Say "case: $_" }
-$caseExit = $LASTEXITCODE
+if (-not $DisarmOnLog) {
+    & $Python "$here\hmi_case.py" --label $Label --expect $Expect --part $Part --out-dir $OutDir --max-seconds $MaxSeconds 2>&1 |
+        ForEach-Object { Say "case: $_" }
+    $caseExit = $LASTEXITCODE
+} else {
+    # The operator disarms during the run (readiness plan F8 / H12): Disconnect is clicked as
+    # soon as the HMI log matches $DisarmOnLog, while the run goes on.
+    $caseOut = "$OutDir\$Label.case_out.txt"
+    $case = Start-Process -FilePath $Python -NoNewWindow -PassThru -RedirectStandardOutput $caseOut -RedirectStandardError "$caseOut.err" `
+        -ArgumentList @("`"$here\hmi_case.py`"", "--label", $Label, "--expect", "`"$Expect`"", "--part", $Part,
+                        "--out-dir", "`"$OutDir`"", "--max-seconds", $MaxSeconds)
+    $disarmed = $false
+    while (-not $case.HasExited) {
+        if (-not $disarmed -and (Read-RunText) -match $DisarmOnLog) {
+            $btn = Find-Desc $main "Disconnect" "QPushButton"
+            if ($btn) { Post-Click $btn; $disarmed = $true; Say "operator disarm: Disconnect clicked (log matched '$DisarmOnLog')" }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    $case.WaitForExit(); $caseExit = $case.ExitCode
+    Get-Content $caseOut, "$caseOut.err" -ErrorAction SilentlyContinue | ForEach-Object { Say "case: $_" }
+    if (-not $disarmed) { Say "operator disarm: the log never matched '$DisarmOnLog'" }
+}
 Dismiss-Boxes
 [void](Wait-RunLog "Socket start: run ended|Socket start: refused|disarmed" 30)
 Start-Sleep -Seconds 2

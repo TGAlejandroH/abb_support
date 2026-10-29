@@ -90,6 +90,23 @@ def main():
         pkg.weld_planner_config_value = _value
         note("config", "main program named after the project password")
 
+    # A project the HMI retrieved robot edits into opens with the planner's forced review
+    # (ProjectSessionManager._show_teach_pendant_touchup_report). Answered "Use" for every weld
+    # the scan lists as touched, through the planner's own adopt lane; the lines are printed.
+    from tguide_lib import ProjectSessionManager as psm
+
+    def _review_on_open(self, scan):
+        for w in scan.welds:
+            note("open-review", w.summary_line())
+            for d in w.deltas:
+                note("open-review", "  %s %s %.2f mm %.2f deg" % (d.target_id, d.classification, d.delta_mm, d.delta_deg))
+        controller = getattr(self.main_window, "weld_workflow_controller", None)
+        choices = {str(w.weld_id): {"adopt": True, "remove_touch_points": False} for w in scan.touched_welds}
+        _project, adopted, failures = controller.adopt_teach_pendant_touchups(scan.artifact_path, choices)
+        note("open-review", "adopted %s, failures %s" % (adopted, failures))
+        return True
+    psm.ProjectSessionManager._show_teach_pendant_touchup_report = _review_on_open
+
     def _report(self, report):
         note("report", f"{report.title} | {report.summary} | " + " || ".join(str(l) for l in report.lines))
     svc._show_report = _report
@@ -104,6 +121,30 @@ def main():
         with open(RESULT, "w", encoding="utf-8") as fh:
             json.dump(result, fh, indent=1)
         app.quit()
+
+    def import_robot_program(controller, path):
+        """Tools > Import Robot-Edited Program... on ``path``, the planner's own flow
+        (WeldWorkflowController.import_robot_edited_program) with its dialogs answered as an
+        operator would: go ahead, this file, the first main, compare anyway, and in the review
+        "Use" every weld the scan lists as touched, keeping touch points. The scan's per-weld
+        lines are printed as the review shows them."""
+        from tguide_lib.workflows import weld_touchup_review_dialog as dlg
+        ui = dlg.TeachPendantImportUi
+        ui.confirm_heads_up = lambda self: True
+        ui.confirm_program_name_mismatch = lambda self, text: (note("question", "program name: %s" % text), True)[1]
+        ui.confirm_older_version = lambda self: (note("question", "older version suspected"), True)[1]
+        ui.choose_file = lambda self: path
+        ui.choose_main = lambda self, candidates: (note("question", "mains: %s" % candidates), candidates[0])[1]
+        ui.show_message = lambda self, title, text, **kw: note("message", "%s | %s" % (title, text))
+
+        def review(self, scan, file_name, name_note, has_touch_points, turn_fixes):
+            for w in scan.welds:
+                note("review", w.summary_line())
+                for d in w.deltas:
+                    note("review", "  %s %s %.2f mm %.2f deg" % (d.target_id, d.classification, d.delta_mm, d.delta_deg))
+            return {str(w.weld_id): {"adopt": True, "remove_touch_points": False} for w in scan.touched_welds}
+        ui.review = review
+        return controller.import_robot_edited_program()
 
     def prepare():
         """TG_E2E_PREPARE = JSON list of edits made in the planner before Generate, as a user
@@ -139,6 +180,25 @@ def main():
                 after = len([p for s in project.global_capture_sets for p in s.capture_poses])
                 note("prepare", "auto captures for %s: %d -> %d capture pose(s), %d set(s)"
                      % (weld.name, before, after, len(project.global_capture_sets)))
+            elif step.get("op") == "bind_preset" and weld is not None:
+                # The weld editor's library combo (_commit_library_selection): a snapshot of the
+                # planner's own weld-library row, "Set manually" for custom values.
+                from tguide_lib.workflows.weld_library_qtsql import (
+                    weld_library_db_path, weld_library_row_by_id, weld_library_rows, weld_library_snapshot_from_row)
+                note("prepare", "weld library %s: %d row(s)" % (weld_library_db_path(window), len(weld_library_rows(window))))
+                row = weld_library_row_by_id(window, step["library_id"])
+                snapshot = weld_library_snapshot_from_row(row)
+                current = dict((getattr(weld, "payload", {}) or {}).get("weld_library", {}) or {})
+                manual = dict(current.get("manual_parameters", {}) or {})
+                manual.update(step.get("manual", {}))
+                binding = {"binding_mode": "manual" if step.get("custom") else "snapshot",
+                           "library_id": int(step["library_id"]),
+                           "display_name": str(snapshot.get("name", "") or ""),
+                           "parameters": snapshot, "manual_parameters": manual}
+                controller.update_weld_library_binding(weld.weld_id, binding)
+                note("prepare", "preset for %s: library row %s -> %s" % (weld.name, step["library_id"], snapshot))
+            elif step.get("op") == "import_robot_program":
+                note("prepare", "import robot-edited program: %s" % import_robot_program(controller, step["file"]))
             else:
                 note("prepare", "step not applied: %s" % step)
         result["prepared"] = steps
