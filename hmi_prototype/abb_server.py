@@ -488,7 +488,7 @@ class AbbTgsHmi:
         self.host = host
         self.port = port
         # Socket-start handshake port (socket plan S14, 2026-09-24): every cycle begins
-        # with a short connection here (START, STNFRAME, STNAXES, verdict) before the
+        # with a short connection here (START, STNFRAME0, STNAXES, verdict) before the
         # robot listens on `port` for the run.
         self.handshake_port = handshake_port
         self.last_start = None
@@ -652,7 +652,7 @@ class AbbTgsHmi:
         return 1
 
     def handshake(self):
-        """One handshake connection: START, STNFRAME + pose, STNAXES, then the verdict on
+        """One handshake connection: START, STNFRAME0 + pose, STNAXES, then the verdict on
         the robot's prompt, then wait for the robot to close (listener first, then the
         client - plan S14) before anything reconnects. Returns the StartEvent dict."""
         self.handshake_connect()
@@ -666,8 +666,10 @@ class AbbTgsHmi:
             event["part"] = toks[2] if len(toks) > 2 else "0"
             event["station"] = int(toks[3]) if len(toks) > 3 and toks[3].lstrip("-").isdigit() else 0
             header = self.do_receive().strip()
-            if header != "STNFRAME":
-                raise RuntimeError(f"handshake: expected STNFRAME, got {header!r}")
+            # STNFRAME0: the station frame at axes 0, wherever the positioner stands. The
+            # older live-angle "STNFRAME" is refused like any other line out of place.
+            if header != "STNFRAME0":
+                raise RuntimeError(f"handshake: expected STNFRAME0, got {header!r}")
             event["station_frame"] = self.do_receive().strip()
             event["station_frame_xyzwpr"] = pose_literal_to_xyzwpr(event["station_frame"])
             axes = self.do_receive().split()

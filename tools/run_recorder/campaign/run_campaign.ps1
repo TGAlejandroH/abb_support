@@ -58,8 +58,8 @@ try {
             & $Python "$here\..\bench_cycle.py" --mod "$here\vc_modules\TGHomeStn.mod" --part $part --timeout 120 *> $null
         }
         Write-Host ("{0,-44} exit {1} (run {2})" -f "$n$tag", $code, $try)
-        # A run that ends at abort_end leaves the positioner where it was, and the HMI then refuses
-        # every part ("station not at load position"). Home it before the next case.
+        # A run that ends at abort_end leaves the positioner where it was. Every case starts from
+        # the load position, so home it before the next case.
         & $Python "$here\..\bench_cycle.py" --mod "$here\vc_modules\TGHomeStn.mod" --part $part --timeout 120 *> $null
     }
 } finally {

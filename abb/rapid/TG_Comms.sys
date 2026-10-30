@@ -35,7 +35,7 @@ MODULE TG_Comms(SYSMODULE)
 
     ! Handshake port (socket_start_trigger_hmi_plan_v1.md S14, 2026-09-24).
     ! Every cycle begins with a short HANDSHAKE connection on this port:
-    ! START, STNFRAME, STNAXES, then the HMI's verdict - closed before the
+    ! START, STNFRAME0, STNAXES, then the HMI's verdict - closed before the
     ! run connection is accepted on nTG_Port. Two ports so that nTG_Port is
     ! not listening until the handshake succeeded: an early reconnect is
     ! refused cleanly, and an HMI that skips the handshake cannot connect at
@@ -661,46 +661,54 @@ MODULE TG_Comms(SYSMODULE)
 
     PROC TG_SendStnFrame()
         ! Handshake messages 2 and 3 (plan S16): the ACTIVE station's frame
-        ! in the robot base, as the controller itself resolves it, so the HMI
-        ! can run one .tgs on either station of a calibrated cell without a
-        ! frame file of its own. Computed exactly as the 2026-09-23 T2 probe
-        ! did (vc_probes/TG_UfmecProbe.mod + probe_math.py):
-        !     T_base_station = T_base_tcp * inv(T_station_tcp)
-        ! from two CRobT reads of the same tool at the same pose - one in
-        ! wobj0, one in a probe work object bound to the SAME unit as
-        ! wobjTG_WeldActStn, which TG_ActMechUnit must have bound to the
-        ! station at the robot BEFORE this is called. The probe object, not
-        ! wobjTG_WeldActStn itself: the served weld pose lives in that one's
-        ! oframe and persists across cycles (VC finding V-40, 2026-09-24).
-        ! The tool cancels out; tool0 keeps the reads independent of TG tool
-        ! data.
+        ! in the robot base AT THE LOAD POSITION (station axes 0), as the
+        ! controller itself resolves it, so the HMI can run one .tgs on
+        ! either station of a calibrated cell without a frame file of its
+        ! own, wherever the positioner happens to stand:
+        !     T_base_station0 = T_base_tcp * inv(T_station0_tcp)
+        ! from two CalcRobT evaluations of the CURRENT jointtarget with the
+        ! station axes set to 0 - one in wobj0, one in a probe work object
+        ! bound to the SAME unit as wobjTG_WeldActStn, which TG_ActMechUnit
+        ! must have bound to the station at the robot BEFORE this is called.
+        ! CalcRobT only computes: nothing moves (measured on the VC
+        ! 2026-10-30, 200 rounds at 30/45 deg: every axis still to 1e-4 deg;
+        ! the result equals the frame read with CRobT at a real 0/0 to
+        ! 0.000 mm / 0.000 deg on both stations, tilt -25..35, chuck
+        ! -120..170). The probe object, not wobjTG_WeldActStn itself: the
+        ! served weld pose lives in that one's oframe and persists across
+        ! cycles (VC finding V-40). The tool and the robot pose cancel out.
         !
-        ! The station frame follows the positioner axes, so the third line
-        ! carries the external axis readings (tilt eax_b, chuck eax_c) the
-        ! frame was taken at; the HMI backs them out against the .tgs nominal
-        ! (plan H7). A deactivated unit reads 9E9 here (TG_RoboCal L12).
+        ! The station's tilt / rotate are eax_b / eax_c on this cell family,
+        ! as in every TG program. An axis that reads 9E9 is not in use and
+        ! is left as it is.
         !
-        ! Wire shape: a header line, then the pose as a pose literal like
-        ! every other pose (plan 4.5) - two lines because a RAPID string is
-        ! at most 80 characters; then "STNAXES <tilt> <chuck>" on one line.
-        ! Every line goes through the ack lockstep.
+        ! Wire shape: the header "STNFRAME0" (frame at axes 0), then the pose
+        ! as a pose literal like every other pose (plan 4.5) - two lines
+        ! because a RAPID string is at most 80 characters; then
+        ! "STNAXES <tilt> <chuck>", the live axes, for the HMI's log. Every
+        ! line goes through the ack lockstep. An HMI that does not know
+        ! STNFRAME0 closes the handshake and the cycle ends.
+        VAR jointtarget jtNow;
+        VAR jointtarget jtZero;
         VAR robtarget rtBase;
         VAR robtarget rtStn;
         VAR pose pBase;
         VAR pose pStn;
         VAR pose pFrame;
-        VAR jointtarget jtNow;
         wobjTG_StnProbe.ufmec:=wobjTG_WeldActStn.ufmec;
-        rtBase:=CRobT(\Tool:=tool0 \WObj:=wobj0);
-        rtStn:=CRobT(\Tool:=tool0 \WObj:=wobjTG_StnProbe);
+        jtNow:=CJointT();
+        jtZero:=jtNow;
+        IF jtZero.extax.eax_b<9E8 jtZero.extax.eax_b:=0;
+        IF jtZero.extax.eax_c<9E8 jtZero.extax.eax_c:=0;
+        rtBase:=CalcRobT(jtZero,tool0\WObj:=wobj0);
+        rtStn:=CalcRobT(jtZero,tool0\WObj:=wobjTG_StnProbe);
         pBase.trans:=rtBase.trans;
         pBase.rot:=rtBase.rot;
         pStn.trans:=rtStn.trans;
         pStn.rot:=rtStn.rot;
         pFrame:=PoseMult(pBase,PoseInv(pStn));
-        tgSendAck "STNFRAME";
+        tgSendAck "STNFRAME0";
         tgSendAck tgPoseToStr(pFrame);
-        jtNow:=CJointT();
         tgSendAck "STNAXES "+NumToStr(jtNow.extax.eax_b,3)+" "+NumToStr(jtNow.extax.eax_c,3);
         TPWrite "TG: station frame sent, ufmec "+wobjTG_WeldActStn.ufmec;
     ENDPROC
@@ -985,7 +993,7 @@ MODULE TG_Comms(SYSMODULE)
 
     FUNC num TG_ReqVerdict()
         ! Handshake message 4 (plan S15): the HMI's verdict for this part,
-        ! asked only after START, STNFRAME and STNAXES were acknowledged.
+        ! asked only after START, STNFRAME0 and STNAXES were acknowledged.
         !   1 = run: the caller closes the handshake, accepts the run
         !       connection on nTG_Port and serves the cycle exactly as it
         !       did before the handshake existed.

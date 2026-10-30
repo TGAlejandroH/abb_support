@@ -26,7 +26,7 @@ class FakeHandshake:
 
     TG_HandshakeCom     accept on the handshake port
     TG_SendStart        "START <seq> <part> <station>"                   (tgSendAck)
-    TG_SendStnFrame     "STNFRAME", the pose literal, "STNAXES <b> <c>"  (tgSendAck each)
+    TG_SendStnFrame     "STNFRAME0", the pose literal, "STNAXES <b> <c>" (tgSendAck each)
     TG_ReqVerdict       prompt "Give me the verdict" -> the HMI's verdict
     TG_HandshakeDisc    close the connection
 
@@ -59,7 +59,7 @@ class FakeHandshake:
         with conn:
             self.seq += 1
             self._send_ack(conn, "START %d %d %d" % (self.seq, self.part, self.station))
-            self._send_ack(conn, "STNFRAME")
+            self._send_ack(conn, "STNFRAME0")
             self._send_ack(conn, self.station_frame)
             self._send_ack(conn, "STNAXES %s %s" % self.axes)
             conn.sendall(b"Give me the verdict")
