@@ -27,7 +27,8 @@ $console = "$OutDir\$Label.console.txt"
 Remove-Item $console -ErrorAction SilentlyContinue
 function Say($m) { $s = "[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m; Write-Host $s; Add-Content $console $s }
 
-if (Get-Process TGuideWeldingHMI -ErrorAction SilentlyContinue) { Say "FAIL: an HMI is already running"; exit 2 }
+# Only an HMI from this build counts: another session may run another build's HMI on the same PC.
+if (Get-Process TGuideWeldingHMI -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Hmi*" }) { Say "FAIL: an HMI from $Hmi is already running"; exit 2 }
 
 $map = @{ version = "1.0"; entries = @(@{ id = $Part; kind = "project"; path = $Fixture }) } | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText("$cfg\work_selection_map.json", $map)
