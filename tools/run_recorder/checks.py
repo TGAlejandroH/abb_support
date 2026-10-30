@@ -30,7 +30,12 @@ Assertions (the plan's numbering):
       consulted (Q3 deferred)
   A6  the work object's oframe in effect during the weld (what TG_ReqWeldFrame wrote from the
       HMI's answer) equals the expected frame: the module's own seed / nominal for a run with
-      no correction, or the fixture's ``frame`` ([x, y, z, q1, q2, q3, q4]) when one is given
+      no correction, or the fixture's ``frame`` ([x, y, z, q1, q2, q3, q4]) when one is given.
+      In the camera test mode (``planted_part_offset`` in expect.json: the HMI's
+      HMI_SIMULATION_PART_OFFSET) a base weld's frame times the planted offset, and a
+      coordinated weld's seed moved by the part's planted move in the station frame
+      (``planted_part_in_station``), within PLANTED_TOL_MM / PLANTED_TOL_DEG: registration has
+      to find the offset
   A5  no hang: the program pointer left every weld span within 2 x its expected weld time + 10 s
       (measured on VC A: weld_speed 0 leaves the robot standing on the seam with no event-log
       entry at all), and the run ended on its own - not by the recorder's time limit, and not
@@ -39,6 +44,7 @@ Assertions (the plan's numbering):
 
 import argparse
 import json
+import math
 import re
 import sys
 
@@ -53,6 +59,11 @@ POSITIONER_TOL_DEG = 0.5          # a coordinated seam's positioner at its plann
 # part 461784's closed-loop weld (local registration rmse 0.3 mm), measured 2026-10-28. The frame
 # errors this check is for (station rebase, touch-up, wrong frame) are millimetres.
 FRAME_TOL_MM = 0.1
+# Camera test mode (readiness plan F6): the HMI plants the simulated part at a known offset in
+# the part frame and registration has to find it. Pass criterion for the served frame against
+# expected x offset: the frame origin within 0.5 mm, its orientation within 0.1 deg.
+PLANTED_TOL_MM = 0.5
+PLANTED_TOL_DEG = 0.1
 BUSY_TICK_S = 0.085               # median RWS read on an idle PC: 0.05-0.07 s (VC A, 2026-10-28)
 SEAM_FIELDS = ("purge_time", "preflow_time", "postflow_time", "bback_time", "fill_time")
 
@@ -80,6 +91,92 @@ def _frame_close(a, b):
     if max(abs(x - y) for x, y in zip(a[:3], b[:3])) > FRAME_TOL_MM:
         return False
     return min(max(abs(x - s * y) for x, y in zip(a[3:], b[3:])) for s in (1, -1)) <= 1e-4
+
+
+def _quat_rot(q):
+    w, x, y, z = q
+    n = math.sqrt(w * w + x * x + y * y + z * z)
+    w, x, y, z = w / n, x / n, y / n, z / n
+    return [[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]]
+
+
+def _rot_quat(r):
+    t = r[0][0] + r[1][1] + r[2][2]
+    if t > 0:
+        s = math.sqrt(t + 1.0) * 2
+        q = [0.25 * s, (r[2][1] - r[1][2]) / s, (r[0][2] - r[2][0]) / s, (r[1][0] - r[0][1]) / s]
+    elif r[0][0] > r[1][1] and r[0][0] > r[2][2]:
+        s = math.sqrt(1.0 + r[0][0] - r[1][1] - r[2][2]) * 2
+        q = [(r[2][1] - r[1][2]) / s, 0.25 * s, (r[0][1] + r[1][0]) / s, (r[0][2] + r[2][0]) / s]
+    elif r[1][1] > r[2][2]:
+        s = math.sqrt(1.0 + r[1][1] - r[0][0] - r[2][2]) * 2
+        q = [(r[0][2] - r[2][0]) / s, (r[0][1] + r[1][0]) / s, 0.25 * s, (r[1][2] + r[2][1]) / s]
+    else:
+        s = math.sqrt(1.0 + r[2][2] - r[0][0] - r[1][1]) * 2
+        q = [(r[1][0] - r[0][1]) / s, (r[0][2] + r[2][0]) / s, (r[1][2] + r[2][1]) / s, 0.25 * s]
+    return q if q[0] >= 0 else [-v for v in q]
+
+
+def _matmul(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+
+def _axis_rot(axis, deg):
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return {"x": [[1, 0, 0], [0, c, -s], [0, s, c]],
+            "y": [[c, 0, s], [0, 1, 0], [-s, 0, c]],
+            "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[axis]
+
+
+def planted_frame(frame, offset):
+    """``frame`` ([x, y, z, q1..q4]) times the planted part offset ([x, y, z] mm, then about Z,
+    Y, X in deg, applied Rz * Ry * Rx, in the part frame) - the HMI's SimulationPartOffset.h."""
+    r = _quat_rot(frame[3:7])
+    ro = _matmul(_matmul(_axis_rot("z", offset[3]), _axis_rot("y", offset[4])), _axis_rot("x", offset[5]))
+    t = [frame[i] + sum(r[i][k] * offset[k] for k in range(3)) for i in range(3)]
+    return t + _rot_quat(_matmul(r, ro))
+
+
+def pose_matrix(frame):
+    """[x, y, z, q1..q4] -> 4x4."""
+    r = _quat_rot(frame[3:7])
+    return [r[0] + [frame[0]], r[1] + [frame[1]], r[2] + [frame[2]], [0.0, 0.0, 0.0, 1.0]]
+
+
+def matrix_pose(m):
+    """4x4 -> [x, y, z, q1..q4]."""
+    return [m[0][3], m[1][3], m[2][3]] + _rot_quat([row[:3] for row in m[:3]])
+
+
+def mul4(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
+
+
+def inv4(m):
+    r = [[m[j][i] for j in range(3)] for i in range(3)]
+    t = [-sum(r[i][k] * m[k][3] for k in range(3)) for i in range(3)]
+    return [r[0] + [t[0]], r[1] + [t[1]], r[2] + [t[2]], [0.0, 0.0, 0.0, 1.0]]
+
+
+def planted_station_frame(seed, offset, part_in_station):
+    """A coordinated weld's frame in the camera test mode. Its seed is not the part frame (the
+    module states its points in the world at axes 0), so the part's planted move is carried in
+    the station frame: P x offset x inv(P) x seed, with P ([x, y, z, q1..q4]) the planned part
+    pose in the station frame (hmi_case.py reads it from the fixture)."""
+    p = pose_matrix(part_in_station)
+    move = mul4(mul4(p, pose_matrix(planted_frame([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], offset))), inv4(p))
+    return matrix_pose(mul4(move, pose_matrix(seed)))
+
+
+def frame_error(a, b):
+    """(origin distance in mm, rotation between the two orientations in deg)."""
+    mm = math.sqrt(sum((x - y) ** 2 for x, y in zip(a[:3], b[:3])))
+    qa, qb = a[3:7], b[3:7]
+    na, nb = math.sqrt(sum(v * v for v in qa)), math.sqrt(sum(v * v for v in qb))
+    dot = min(1.0, abs(sum(x * y for x, y in zip(qa, qb))) / (na * nb))
+    return mm, math.degrees(2 * math.acos(dot))
 
 
 def _frame_text(frames):
@@ -197,9 +294,28 @@ def check(recording, sent=None, expect=None):
         want, source = sp.get("frame_module"), "the module's own oframe (zero correction)"
         if expected is not None and idx < len(expected) and expected[idx].get("frame"):
             want, source = expected[idx]["frame"], "the expected frame"
+        planted = (expect or {}).get("planted_part_offset")
+        part_in_station = (expect or {}).get("planted_part_in_station")
+        coordinated = bool(sp.get("positioner"))
+        if planted and want is not None and not coordinated:
+            want, source = planted_frame(want, planted), source + " x the planted offset %s" % planted
+        elif planted and want is not None and part_in_station:
+            want = planted_station_frame(want, planted, part_in_station)
+            source += " moved by the part's planted offset %s in the station frame" % planted
+        elif planted:
+            want = None
         seen = sp.get("frames_seen") or []
-        if not seen or want is None:
+        if planted and coordinated and not part_in_station:
+            rows.append(("A6", None, "%s: the part's pose in the station frame is not known (hmi_case.py "
+                                     "--fixture), the planted frame cannot be checked" % tag))
+        elif not seen or want is None:
             rows.append(("A6", None, "%s: frame in %s not read during the weld" % (tag, sp["wobj"])))
+        elif planted:
+            mm, deg = frame_error(seen[-1], want)
+            ok = len(seen) == 1 and mm <= PLANTED_TOL_MM and deg <= PLANTED_TOL_DEG
+            rows.append(("A6", ok, "%s: %s oframe in effect %s, %s %s: off by %.3f mm, %.3f deg (tolerance %s mm, %s deg)"
+                         % (tag, sp["wobj"], _frame_text(seen), source, _frame_text([want]), mm, deg,
+                            PLANTED_TOL_MM, PLANTED_TOL_DEG)))
         else:
             ok = len(seen) == 1 and _frame_close(seen[0], want)
             rows.append(("A6", ok, "%s: %s oframe in effect %s, %s %s"

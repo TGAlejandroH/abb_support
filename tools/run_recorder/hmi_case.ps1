@@ -3,6 +3,9 @@
 #   2. the HMI starts, Simulation mode on, Connect = armed for socket start,
 #   3. hmi_case.py records the run while it starts the robot's TG_Part$Part over RWS,
 #   4. the HMI log of the run is kept next to the recording, and the HMI is closed.
+# -PlantedOffset "x,y,z,rz,ry,rx" runs the case in the camera test mode (readiness plan F6): the
+# HMI's HMI_SIMULATION_PART_OFFSET is set for this case only (config.json restored after), and the
+# checks expect every served frame moved by it.
 # The GUI is driven with posted messages and UI Automation, never the real mouse (gui_lib.ps1).
 #
 #   .\hmi_case.ps1 -Fixture C:\...\F4.tgs -Expect C:\...\F4_expect.json -Label F4 -OutDir C:\...\results
@@ -16,6 +19,7 @@ param(
     [string]$Python = "C:\Users\AlejandroHernandez\anaconda3\envs\pyocc_release\python.exe",
     [int]$MaxSeconds = 600,
     [string]$DisarmOnLog,
+    [string]$PlantedOffset,
     [switch]$KeepOpen
 )
 $ErrorActionPreference = "Continue"
@@ -30,9 +34,22 @@ function Say($m) { $s = "[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m; Write-Ho
 # Only an HMI from this build counts: another session may run another build's HMI on the same PC.
 if (Get-Process TGuideWeldingHMI -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Hmi*" }) { Say "FAIL: an HMI from $Hmi is already running"; exit 2 }
 
+$configFile = "$cfg\config.json"
+$configText = $null
+if ($PlantedOffset) {
+    $configText = [System.IO.File]::ReadAllText($configFile)
+    $value = '"HMI_SIMULATION_PART_OFFSET": [' + (($PlantedOffset -split ",") -join ", ") + ']'
+    $pattern = '"HMI_SIMULATION_PART_OFFSET"\s*:\s*\[[^\]]*\]'
+    if ($configText -match $pattern) { $edited = [regex]::Replace($configText, $pattern, $value) }
+    else { $edited = $configText -replace '(\r?\n)(\s*)"CONFIG_FILE_HEALTH"', ('$1$2' + $value + ',$1$2"CONFIG_FILE_HEALTH"') }
+    [System.IO.File]::WriteAllText($configFile, $edited)
+}
+function Restore-Config { if ($configText) { [System.IO.File]::WriteAllText($configFile, $configText) } }
+
 $map = @{ version = "1.0"; entries = @(@{ id = $Part; kind = "project"; path = $Fixture }) } | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText("$cfg\work_selection_map.json", $map)
 Say "case $Label : part $Part -> $Fixture"
+if ($PlantedOffset) { Say "camera test mode: simulated part planted at [$PlantedOffset]" }
 
 $before = @{}
 Get-ChildItem "$Hmi\logs\*.log" -ErrorAction SilentlyContinue | ForEach-Object { $before[$_.FullName] = Log-Size $_.FullName }
@@ -74,7 +91,7 @@ function Close-Hmi {
     else { Say "HMI closed, exit $($proc.ExitCode)" }
 }
 # A case that fails before the run still closes its HMI: a leftover one blocks every later case.
-function Fail-Case([string]$why) { Say "FAIL: $why"; Set-Content "$OutDir\$Label.hmi.log" (Read-RunText); Close-Hmi; exit 1 }
+function Fail-Case([string]$why) { Say "FAIL: $why"; Set-Content "$OutDir\$Label.hmi.log" (Read-RunText); Close-Hmi; Restore-Config; exit 1 }
 
 $main = $null
 for ($i = 0; $i -lt 240 -and $main -eq $null; $i++) { Start-Sleep -Milliseconds 500; $main = Find-Top $proc.Id "GUIMainWindow" }
@@ -119,8 +136,10 @@ for ($try = 0; $try -lt 4 -and -not $armed; $try++) {
 if (-not $armed) { Fail-Case "not armed" }
 Say "armed"
 
+# The fixture gives the checks the part's pose in the station frame (coordinated welds).
+$plantedArgs = if ($PlantedOffset) { @("--planted", $PlantedOffset, "--fixture", $Fixture) } else { @() }
 if (-not $DisarmOnLog) {
-    & $Python "$here\hmi_case.py" --label $Label --expect $Expect --part $Part --out-dir $OutDir --max-seconds $MaxSeconds 2>&1 |
+    & $Python "$here\hmi_case.py" --label $Label --expect $Expect --part $Part --out-dir $OutDir --max-seconds $MaxSeconds @plantedArgs 2>&1 |
         ForEach-Object { Say "case: $_" }
     $caseExit = $LASTEXITCODE
 } else {
@@ -129,7 +148,8 @@ if (-not $DisarmOnLog) {
     $caseOut = "$OutDir\$Label.case_out.txt"
     $case = Start-Process -FilePath $Python -NoNewWindow -PassThru -RedirectStandardOutput $caseOut -RedirectStandardError "$caseOut.err" `
         -ArgumentList @("`"$here\hmi_case.py`"", "--label", $Label, "--expect", "`"$Expect`"", "--part", $Part,
-                        "--out-dir", "`"$OutDir`"", "--max-seconds", $MaxSeconds)
+                        "--out-dir", "`"$OutDir`"", "--max-seconds", $MaxSeconds) +
+                        $(if ($PlantedOffset) { @("--planted", $PlantedOffset, "--fixture", "`"$Fixture`"") } else { @() })
     $disarmed = $false
     while (-not $case.HasExited) {
         if (-not $disarmed -and (Read-RunText) -match $DisarmOnLog) {
@@ -149,5 +169,6 @@ Set-Content "$OutDir\$Label.hmi.log" (Read-RunText)
 Say "HMI log saved to $OutDir\$Label.hmi.log"
 
 if (-not $KeepOpen) { Close-Hmi }
+Restore-Config
 Say "case exit $caseExit"
 exit $caseExit

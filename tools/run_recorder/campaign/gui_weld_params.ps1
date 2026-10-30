@@ -1,15 +1,23 @@
 # The operator's weld-parameter edit on a running HMI, between runs (readiness plan P3/P4/P7):
 # Tools > Manual touch up mode, select the weld, "Modify weld parameters", tick or untick
-# "Use Custom Parameters", type a travel speed on the keypad, Save, leave Manual touch up mode.
+# "Use Custom Parameters", type values on the keypad, Save, leave Manual touch up mode.
 # Driven with posted messages and UI Automation, never the real mouse (..\gui_lib.ps1).
+# -Set types any field the panel lets the operator change, by its caption: "Travel Speed (IPM)",
+# "Wire Speed (IPM)", "Arc Length"; "Proc #=+1" presses the procedure's up arrow once (it has no
+# keypad). Job mode greys all but the travel speed.
 #
 #   .\gui_weld_params.ps1 -Weld Weld1 -Custom on -Travel 15
+#   .\gui_weld_params.ps1 -Weld Weld1 -Index 0 -Custom on -Set "Travel Speed (IPM)=13.75","Arc Length=21.45"
+# -KeepManual leaves Manual touch up mode on (several welds in a row; the Tools menu does not
+# always open on the first click).
 param(
     [Parameter(Mandatory)][string]$Weld,
     [ValidateSet("on", "off", "keep")][string]$Custom = "keep",
     [string]$Travel,
+    [string[]]$Set = @(),
     [int]$Index = 0,
     [switch]$NoSave,
+    [switch]$KeepManual,
     [string]$Hmi = "C:\Users\AlejandroHernandez\source\repos\TGAlejandroH\hmi-endstatus-wt\TGuideWeldingHMI\x64\Release"
 )
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -26,7 +34,10 @@ function Boxes {
     foreach ($e in Tops) {
         if ($e.Current.ClassName -eq "QMessageBox") {
             $txt = @(); foreach ($d in $e.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) { if ($d.Current.Name) { $txt += $d.Current.Name } }
-            "message box: " + ($txt -join " | "); Post-Click (Find-Desc $e "OK" "QPushButton"); Start-Sleep 1
+            $r = $e.Current.BoundingRectangle
+            "message box ({0}x{1} at {2},{3}): " -f [int]$r.Width, [int]$r.Height, [int]$r.X, [int]$r.Y
+            ($txt -join " | ")
+            Post-Click (Find-Desc $e "OK" "QPushButton"); Start-Sleep 1
         }
     }
 }
@@ -38,8 +49,11 @@ function Panel {
     foreach ($e in All) {
         if ($e.Current.IsOffscreen) { continue }
         $n = $e.Current.Name
-        if ($e.Current.ClassName -eq "QLabel" -and $n -match "^(Proc #|Wire Speed \(IPM\)|Travel Speed \(IPM\)|Arc Length):$") { $caption = $n }
-        elseif ($caption -and $e.Current.ClassName -eq "QLabel" -and $n -match "^-?[0-9.]+$") { $rows += "$caption $n"; $caption = $null }
+        # Job mode greys the caption with its value (the value labels themselves read as disabled).
+        if ($e.Current.ClassName -eq "QLabel" -and $n -match "^(Proc #|Sched #|Wire Speed \(IPM\)|Travel Speed \(IPM\)|Arc Length):$") { $caption = $n; $grey = -not $e.Current.IsEnabled }
+        elseif ($caption -and $e.Current.ClassName -eq "QLabel" -and $n -match "^-?[0-9.]+$") {
+            $rows += "$caption $n" + $(if ($grey) { " (greyed)" } else { "" }); $caption = $null
+        }
     }
     "custom=$st " + ($rows -join ", ")
 }
@@ -79,27 +93,45 @@ if (($Custom -eq "on" -and $st -ne "On") -or ($Custom -eq "off" -and $st -eq "On
     Post-Click $cb; Start-Sleep 1.5
 }
 
-if ($Travel) {
-    # The travel speed value opens the keypad (only while its buttons are enabled, i.e. custom on).
+if ($Travel) { $Set = @("Travel Speed (IPM)=$Travel") + $Set }
+foreach ($pair in $Set) {
+    # A value opens the keypad when clicked (only while its buttons are enabled: custom on, and
+    # not greyed by Job mode).
+    $caption, $typed = $pair -split "=", 2
+    if ($typed -match "^\+(\d+)$") {
+        # "+n": press the field's up arrow n times (the procedure has no keypad).
+        $presses = [int]$Matches[1]
+        $up = $null; $after = $false
+        foreach ($e in All) {
+            if ($e.Current.Name -eq "${caption}:") { $after = $true; continue }
+            if ($after -and $e.Current.ClassName -eq "QPushButton" -and $e.Current.Name -match [char]0x2191) { $up = $e; break }
+        }
+        if (-not $up) { "FAIL: no up arrow for $caption"; exit 1 }
+        for ($k = 0; $k -lt $presses; $k++) { Post-Click $up; Start-Sleep 0.5 }
+        "pressed $caption up $presses time(s)"
+        continue
+    }
     $v = $null; $after = $false
     foreach ($e in All) {
-        if ($e.Current.Name -eq "Travel Speed (IPM):") { $after = $true; continue }
+        if ($e.Current.Name -eq "${caption}:") { $after = $true; continue }
         if ($after -and $e.Current.ClassName -eq "QLabel" -and $e.Current.Name -match "^-?[0-9.]+$") { $v = $e; break }
     }
+    if (-not $v) { "FAIL: no value shown for $caption"; exit 1 }
     Post-Click $v; Start-Sleep 1.5
     $keypad = $null; foreach ($e in Tops) { if ($e.Current.ClassName -eq "NumericKeypadWidget") { $keypad = $e; break } }
-    if (-not $keypad) { "FAIL: the keypad did not open"; exit 1 }
-    foreach ($ch in $Travel.ToCharArray()) { Post-Click (Find-Desc $keypad ([string]$ch) "QPushButton"); Start-Sleep 0.3 }
+    if (-not $keypad) { "FAIL: the keypad did not open for $caption"; exit 1 }
+    foreach ($ch in $typed.ToCharArray()) { Post-Click (Find-Desc $keypad ([string]$ch) "QPushButton"); Start-Sleep 0.3 }
     Post-Click (Find-Desc $keypad "Accept" "QPushButton"); Start-Sleep 1.5
+    "typed $caption = $typed"
 }
 "after:  " + (Panel)
 if ($NoSave) {
     # Look only: what the operator sees after the tick, then Cancel.
     Post-Click (Find-Desc $main " Cancel " "QPushButton"); Start-Sleep 1.5
     Boxes
-    Toggle-ManualMode; "manual touch up mode off (not saved)"
+    if (-not $KeepManual) { Toggle-ManualMode; "manual touch up mode off (not saved)" }
     return
 }
 Post-Click (Find-Desc $main " Save " "QPushButton"); Start-Sleep 2
 Boxes
-Toggle-ManualMode; "manual touch up mode off"
+if (-not $KeepManual) { Toggle-ManualMode; "manual touch up mode off" }
