@@ -6,7 +6,7 @@ wire-loss recovery with NO program run. This one runs the program the HMI would 
 also proves:
 
   * the two-port handshake (S14-S17, 2026-09-24): the connect loop targets the HANDSHAKE port;
-    the robot sends START, STNFRAME + pose, STNAXES and prompts for a verdict; both sides close;
+    the robot sends START, STNFRAME0 + pose, STNAXES and prompts for a verdict; both sides close;
     only then does the robot listen on the protocol port and the run proceeds exactly as before
     the handshake existed (abb_server.AbbTgsHmi.handshake / serve_cycle);
   * the verdict (S15): part id -> project through the map, the S9 sequence rule, the station
@@ -22,7 +22,7 @@ Answers are the no-localization answers, so the robot runs the PLANNED path (wel
 program's own nominal wobj oframe; cam frame = identity; touch-ups = 0; dry run = 1, which is a
 NO-OP on ABB today - finding V-18).
 
-Every handshake's STNFRAME / STNAXES is written to tgs_run/stnframe_seq<N>_stn<S>.json for the
+Every handshake's STNFRAME0 / STNAXES is written to tgs_run/stnframe_seq<N>_stn<S>.json for the
 V-45 comparison against vc_probes/stn<S>_T2.json (probe_math.py).
 
 Usage:

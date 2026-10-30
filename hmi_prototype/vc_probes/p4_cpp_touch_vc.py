@@ -107,7 +107,6 @@ class CppHmi:
             scenario["stored_touchup_mm"] = list(self.stored_touchup_mm)
         if self.perturbation is not None:
             scenario["project_station_frame_perturbation"] = list(self.perturbation)
-            scenario["rebase_waive_load_position"] = True     # the rig's positioner is wherever the last cycle left it
         paths = {k: os.path.join(OUT, "cycle_%s.json" % k) for k in ("config", "scenario", "result")}
         for key, body in (("config", config), ("scenario", scenario)):
             with open(paths[key], "w") as fh:
