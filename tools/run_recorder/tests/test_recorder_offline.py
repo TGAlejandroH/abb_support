@@ -22,13 +22,17 @@ Run: python -m unittest discover -s tools/run_recorder/tests
 """
 import json
 import os
+import sqlite3
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from analysis import analyse, parse_welddata  # noqa: E402
-from checks import check, expected_welddata  # noqa: E402
+from checks import (check, expected_welddata, frame_error, inv4, matrix_pose, mul4,  # noqa: E402
+                    planted_frame, planted_station_frame, pose_matrix)
+from hmi_case import part_in_station  # noqa: E402
 from rapid_module import ModuleInfo  # noqa: E402
 from sampler import _unit_inactive, channel_key  # noqa: E402
 
@@ -248,6 +252,68 @@ class HmiInTheLoop(unittest.TestCase):
         expect = json.loads(json.dumps(rec["expect"]))
         expect["welds"][0]["weave"] = None                       # the weld does not weave
         self.assertTrue(any("weave in effect" in t for _, t in failing(check(rec, rec["sent"], expect))))
+
+
+class CameraTestMode(unittest.TestCase):
+    """HMI_SIMULATION_PART_OFFSET: the served frames must move with the planted part (A6)."""
+
+    OFFSET = [5.0, -3.0, 2.0, 2.0, -1.0, 0.5]
+    # VC A's station 2 frame and F4's module seed (wobjTG_WeldActStn.oframe), mm.
+    STATION = [1370.14, 797.92, 416.57, 0.536457, 0.537943, -0.460038, 0.459561]
+    SEED = [-621.543, 1290.355, 797.596, 0.536457, -0.537943, 0.460038, -0.459561]
+
+    def test_a_seed_that_is_the_part_frame_moves_as_a_base_frame(self):
+        mm, deg = frame_error(planted_station_frame(self.SEED, self.OFFSET, self.SEED),
+                              planted_frame(self.SEED, self.OFFSET))
+        self.assertLess(mm, 1e-6)
+        self.assertLess(deg, 1e-4)
+
+    def test_f4_on_vc_a_the_served_frame_is_the_part_moved_in_the_station_frame(self):
+        """PA_F4_stn2, 2026-10-30: the frame the robot ran with, against the expectation."""
+        part = [-4.139, -0.083, -86.814, 0.003692, -0.000820, 0.000556, -0.999993]   # part_in_station(F4)
+        served = [-656.300, 1279.220, 798.800, 0.537991, -0.552279, 0.453050, -0.447548]
+        mm, deg = frame_error(served, planted_station_frame(self.SEED, self.OFFSET, part))
+        self.assertLess(mm, 0.05)
+        self.assertLess(deg, 0.01)
+        mm, _ = frame_error(served, planted_frame(self.SEED, self.OFFSET))   # the seed is not the part
+        self.assertGreater(mm, 30.0)
+
+    def test_part_pose_in_the_station_frame_is_read_from_the_project(self):
+        part_world_at_capture = [1369.5, 884.7, 412.6, 0.462235, 0.461325, 0.536162, -0.534835]
+        index = pose_matrix([10.0, -20.0, 5.0, 0.991445, 0.0, 0.0, 0.130526])   # 15 deg about Z
+        local = [[0.0, 0.0, 0.0], [120.0, 5.0, -3.0], [10.0, 80.0, 2.0], [-40.0, 30.0, 60.0]]
+        f = pose_matrix(part_world_at_capture)
+        world = [[(sum(f[i][k] * p[k] for k in range(3)) + f[i][3]) / 1000.0 for i in range(3)] for p in local]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "p.tgs")
+            con = sqlite3.connect(path)
+            con.execute("create table external_axis_groups (metadata_json text)")
+            con.execute("create table weld_global_capture_sets (capture_set_id text, order_index int, payload_json text)")
+            con.execute("create table weld_global_capture_poses (capture_set_id text, order_index int, "
+                        "geometry_payload_json text)")
+            pose = {"xyz_m": [v / 1000.0 for v in self.STATION[:3]], "quat_wxyz": self.STATION[3:]}
+            con.execute("insert into external_axis_groups values (?)", (json.dumps(
+                {"export_v1": {"motion_role": "extended_axis", "brands": {"abb": {"station_frame_pose": pose}}}}),))
+            index_m = [[v / 1000.0 if j == 3 and i < 3 else v for j, v in enumerate(r)] for i, r in enumerate(index)]
+            con.execute("insert into weld_global_capture_sets values ('s1', 0, ?)",
+                        (json.dumps({"positioner_part_transform_base": index_m}),))
+            con.execute("insert into weld_global_capture_poses values ('s1', 0, ?)", (json.dumps(
+                {"point_cloud_cad_local_mm": local, "point_cloud_world_m": world}),))
+            con.commit()
+            con.close()
+            got = part_in_station(path)
+        want = matrix_pose(mul4(inv4(pose_matrix(self.STATION)), mul4(inv4(index), f)))
+        mm, deg = frame_error(got, want)
+        self.assertLess(mm, 1e-6)
+        self.assertLess(deg, 1e-4)
+
+    def test_a_coordinated_weld_is_not_passed_without_the_part_pose(self):
+        rec = load("vc_a_coord_turning")
+        expect = json.loads(json.dumps(rec["expect"]))
+        expect["planted_part_offset"] = self.OFFSET
+        a6 = [(ok, t) for rid, ok, t in check(rec, rec["sent"], expect) if rid == "A6"]
+        self.assertEqual([ok for ok, _ in a6], [None])
+        self.assertIn("cannot be checked", a6[0][1])
 
 
 if __name__ == "__main__":
