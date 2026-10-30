@@ -9,6 +9,7 @@ param(
     [ValidateSet("on", "off", "keep")][string]$Custom = "keep",
     [string]$Travel,
     [int]$Index = 0,
+    [switch]$NoSave,
     [string]$Hmi = "C:\Users\AlejandroHernandez\source\repos\TGAlejandroH\hmi-endstatus-wt\TGuideWeldingHMI\x64\Release"
 )
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -92,6 +93,13 @@ if ($Travel) {
     Post-Click (Find-Desc $keypad "Accept" "QPushButton"); Start-Sleep 1.5
 }
 "after:  " + (Panel)
+if ($NoSave) {
+    # Look only: what the operator sees after the tick, then Cancel.
+    Post-Click (Find-Desc $main " Cancel " "QPushButton"); Start-Sleep 1.5
+    Boxes
+    Toggle-ManualMode; "manual touch up mode off (not saved)"
+    return
+}
 Post-Click (Find-Desc $main " Save " "QPushButton"); Start-Sleep 2
 Boxes
 Toggle-ManualMode; "manual touch up mode off"
