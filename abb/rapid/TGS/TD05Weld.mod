@@ -130,7 +130,7 @@ MODULE TD05Weld_Mod
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
 
         TG_ReqPassCheck \Tool:=tTG_Weld \WObj:=wobj0;
-        IF nTG_PassOK=0 THEN
+        IF nTG_PassOK<>1 THEN
             ! FANUC 'END' - terminate immediately, NO end request.
             RETURN;
         ENDIF
@@ -212,6 +212,7 @@ MODULE TD05Weld_Mod
         ! --- return home (FANUC lines 397-411) ---
         TG_CamClose;
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
+        bTG_RunDone:=TRUE;             ! normal end only (abort hold plan): TG_Main holds an authorized run without it
 
 abort_end:
         ! FANUC LBL[101]: both the normal exit and the abort target.

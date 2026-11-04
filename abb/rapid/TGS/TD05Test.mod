@@ -83,7 +83,7 @@ MODULE TD05Test_Mod
         ! --- password / dry-run check (FANUC lines 9-16) ---
         ! Torch tool, home frame -> base for the demo (FANUC UT[8]/UFRAME[9])
         TG_ReqPassCheck \Tool:=tTG_Weld \WObj:=wobj0;
-        IF nTG_PassOK=0 THEN
+        IF nTG_PassOK<>1 THEN
             ! FANUC: 'END' - terminate immediately, NO end request (R_E).
             RETURN;
         ENDIF
@@ -196,6 +196,7 @@ MODULE TD05Test_Mod
         ! --- return home (FANUC lines 397-411) ---
         TG_CamClose;                   ! FANUC CALL CAM_CLOSE
         MoveAbsJ jtHome,v100,fine,tTG_Weld;
+        bTG_RunDone:=TRUE;             ! normal end only (abort hold plan): TG_Main holds an authorized run without it
 
 abort_end:
         ! FANUC LBL[101]: both the normal exit and the abort target.

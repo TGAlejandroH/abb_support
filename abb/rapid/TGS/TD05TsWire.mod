@@ -40,7 +40,7 @@ MODULE TD05TsWire_Mod
         wobjTG_Weld.oframe:=[[0,0,0],[1,0,0,0]];
 
         TG_ReqPassCheck \Tool:=tTG_Weld \WObj:=wobj0;
-        IF nTG_PassOK=0 THEN
+        IF nTG_PassOK<>1 THEN
             ! FANUC 'END' - terminate immediately, NO end request.
             RETURN;
         ENDIF
@@ -75,6 +75,7 @@ MODULE TD05TsWire_Mod
         TG_CamClose;
         IF nTG_WeldStatus=2 GOTO abort_end;
         TPWrite "TD05TsWire: weld frame "\Pos:=wobjTG_Weld.oframe.trans;
+        bTG_RunDone:=TRUE;             ! normal end only (abort hold plan): TG_Main holds an authorized run without it
 
 abort_end:
         ! FANUC LBL[101]: both the normal exit and the abort target.
