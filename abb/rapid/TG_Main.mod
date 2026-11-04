@@ -25,12 +25,10 @@ MODULE TG_Main
 
     PROC main()
         TPWrite "TG: main started";
-        ! FIX 2026-08-28 (F-F): main is also the ExitCycle recovery target
-        ! (tgCycleAbort in TG_Comms). VC-observed: ExitCycle does NOT drop
-        ! \Dynamic modules, so a stale module may still be loaded here; the
-        ! flag still resets - the ERR_LOADED reload path (tgRunTgsProgram)
-        ! handles the leftover on the next Load, VC-validated 2026-08-28.
-        tg_module_loaded:=FALSE;
+        ! main is also the ExitCycle recovery target (TG_AbortCycle in
+        ! TG_Comms), and ExitCycle does NOT drop \Dynamic modules: a module
+        ! left by an aborted cycle is unloaded here, its edits parked.
+        tgUnloadLeftover;
         ! Always start from a clean socket state (TGMAINKL line: SOCKET_DISC)
         TG_SocketDisc;
         WHILE TRUE DO
@@ -54,7 +52,7 @@ MODULE TG_Main
         ! main, so this module's standalone main cannot be loaded as-is there
         ! (the ProjectMonarch VC bench renames it tgs_main locally).
         TPWrite "TG: vision cycle started, part "\Num:=nTG_PartNo;
-        tg_module_loaded:=FALSE;
+        tgUnloadLeftover;
         ! No TG_SocketDisc here since 2026-09-25 (socket start latency item
         ! 1): its 2 s wait sat between the operator's START and the first
         ! motion on every part. The clean-socket precondition still holds -
@@ -127,16 +125,34 @@ MODULE TG_Main
         ! if a module is somehow still loaded when a cycle dies, unload it
         ! so it cannot shadow the next cycle's freshly transferred file.
         ! (tgRunTgsProgram's own handler is the primary cleanup.)
-        IF tg_module_loaded tgTryUnload "HOME:/TGS/"+stTG_ProgName+".mod";
+        IF tg_module_loaded tgUnloadKeepEdits "HOME:/TGS/"+stTG_ProgName+".mod";
         TG_SocketDisc;
         RETURN;
     ENDPROC
 
+    LOCAL PROC tgUnloadLeftover()
+        ! Start of every cycle (main, TG_VisionOnce). A cycle that ended with
+        ! ExitCycle inside a run (TG_AbortCycle) leaves its module loaded,
+        ! pendant edits included; tg_module_loaded and stTG_ProgName still
+        ! name it here (VAR and PERS keep their values across ExitCycle; a
+        ! program-pointer move resets the flag, and has already dropped the
+        ! module). Unload it now, parking its edits, whatever program the
+        ! next cycle runs (abort hold plan, change 2). The ERR_LOADED reload
+        ! in tgRunTgsProgram stays as the net for anything else.
+        bTG_InRun:=FALSE;
+        IF tg_module_loaded THEN
+            TPWrite "TG: unloading the module an aborted cycle left";
+            tgUnloadKeepEdits "HOME:/TGS/"+stTG_ProgName+".mod";
+        ENDIF
+        tg_module_loaded:=FALSE;
+    ENDPROC
+
     LOCAL PROC tgTryUnload(string sPath)
         ! FIX 2026-08-28 (error-recovery matrix F-B/I2+I3): best-effort
-        ! unload for recovery paths, where a failed UnLoad must not kill
-        ! the cycle. Swallows any unload error (module not loaded, or
-        ! loaded from RobotStudio rather than by Load) with a warning.
+        ! plain unload, where a failed UnLoad must not kill the cycle.
+        ! Swallows any unload error (module not loaded, or loaded from
+        ! RobotStudio rather than by Load) with a warning. Discards edits:
+        ! called only by tgUnloadKeepEdits, after it parked them.
         UnLoad sPath;
         tg_module_loaded:=FALSE;
     ERROR
@@ -148,16 +164,18 @@ MODULE TG_Main
     ENDPROC
 
     LOCAL PROC tgUnloadKeepEdits(string sPath)
-        ! Phase 5 (touch-up/retrieval doc sections 3-4): normal end-of-run
-        ! unload that does not silently discard operator edits. UnLoad
+        ! Phase 5 (touch-up/retrieval doc sections 3-4): every unload of a
+        ! run's module, without silently discarding operator edits. UnLoad
         ! \ErrIfChanged refuses with ERR_NOTSAVED when the module changed
         ! since Load (e.g. a FlexPendant Modify Position); the handler then
         ! parks a copy in HOME:/TGS/edited/ for the HMI's "Retrieve robot
         ! program from controller" and unloads for real.
-        ! NOTE: recovery-path unloads (tgTryUnload callers) stay PLAIN on
-        ! purpose - an aborted cycle still discards edits, only the normal
-        ! cycle end preserves them (doc section 4). Do not call this from
-        ! an ERROR handler: it re-raises ERR_UNLOAD.
+        ! Also the recovery paths' unload (abort hold plan, change 2): a
+        ! cycle that ended with ExitCycle (TG_AbortCycle) leaves its module
+        ! in the task, edits included, and the next cycle's Load meets it
+        ! (ERR_LOADED) - its edits are parked here before the reload
+        ! (VC-measured 2026-11-03). Best effort: any other unload error is
+        ! warned and skipped, so this is safe from an ERROR handler.
         UnLoad \ErrIfChanged,sPath;
         tg_module_loaded:=FALSE;
     ERROR
@@ -171,9 +189,10 @@ MODULE TG_Main
             tgTryUnload sPath;
             RETURN;
         ENDIF
-        ! Anything else (ERR_UNLOAD etc.): propagate to the caller so
-        ! tgRunTgsProgram's handler keeps its established containment.
-        RAISE;
+        ! Anything else (ERR_UNLOAD: not loaded, or loaded from RobotStudio
+        ! rather than by Load): warn, skip the UnLoad; the flag still clears.
+        TPWrite "TG WARN: could not unload "+sPath;
+        TRYNEXT;
     ENDPROC
 
     LOCAL PROC tgSaveEditedModule()
@@ -216,13 +235,21 @@ MODULE TG_Main
         Load \Dynamic,sPath;
         tg_module_loaded:=TRUE;
         TPWrite "TG: calling program "+stTG_ProgName;
+        ! Abort hold (docs/abb_abort_hold_plan_v1.md in TGuideWeldingHMI):
+        ! the program's footer sets bTG_RunDone just before abort_end:, its
+        ! pass check sets nTG_PassOK. A run that was authorized and did not
+        ! reach its end aborted somewhere along the way: the robot stops
+        ! there (TG_AbortCycle), after the unload has parked any edits.
+        bTG_RunDone:=FALSE;
+        nTG_PassOK:=0;
+        bTG_InRun:=TRUE;
         %stTG_ProgName%;
         TPWrite "TG: program "+stTG_ProgName+" finished";
         ! Phase 5: the end-of-run unload preserves operator ModPos edits
-        ! (touch-up/retrieval doc section 3-4). Errors it cannot handle
-        ! (ERR_UNLOAD) are re-raised and land in THIS handler, keeping the
-        ! pre-Phase-5 TRYNEXT containment below.
+        ! (touch-up/retrieval doc section 3-4).
         tgUnloadKeepEdits sPath;
+        IF (NOT bTG_RunDone) AND nTG_PassOK=1 TG_AbortCycle "The run stopped before its end. See the HMI or Production Window.";
+        bTG_InRun:=FALSE;
     ERROR
         IF ERRNO=ERR_LOADED THEN
             IF bRetriedLoad THEN
@@ -242,26 +269,22 @@ MODULE TG_Main
                 ! file sits in HOME:/TGS/ - the HMI's FTP compare keeps
                 ! the FILE fresh but cannot unload the MODULE. Unload and
                 ! re-Load so the file just transferred is what runs.
+                ! A leftover keeps its operator edits (abort hold plan,
+                ! change 2): tgUnloadKeepEdits parks them before the reload.
                 bRetriedLoad:=TRUE;
                 TPWrite "TG WARN: module already loaded - reloading from file";
-                tgTryUnload sPath;
+                tgUnloadKeepEdits sPath;
                 RETRY;
             ENDIF
-        ELSEIF ERRNO=ERR_UNLOAD THEN
-            ! The end-of-run unload failed (module was the manually loaded
-            ! one): keep going. Phase 5 moved the unload into
-            ! tgUnloadKeepEdits, so clear the flag here explicitly - before,
-            ! TRYNEXT fell onto the tg_module_loaded:=FALSE line itself.
-            TPWrite "TG WARN: could not unload "+sPath;
-            tg_module_loaded:=FALSE;
-            TRYNEXT;
         ELSEIF ERRNO=ERR_REFUNKPRC THEN
             ! Module loaded but no PROC of that name / name wrong: report
             ! and end the cycle cleanly so the HMI is not left waiting.
+            ! Nothing ran, so nothing moved: no hold.
+            bTG_InRun:=FALSE;
             TPWrite "TG ERROR: no PROC named "+stTG_ProgName;
             ! FIX 2026-08-28 (F-B/I3): the module IS loaded here - unload
             ! before leaving, or it shadows the next cycle's file.
-            tgTryUnload sPath;
+            tgUnloadKeepEdits sPath;
             stTG_SubName:="none";
             TG_ReqEnd \Tool:=tTG_Weld \WObj:=wobj0;
             RETURN;
@@ -282,8 +305,9 @@ MODULE TG_Main
         ! late-bound .tgs run never reach this handler - unhandled errors
         ! do not propagate through the %% call; the program would stop at
         ! the failing instruction. Those are recovered at the source by
-        ! tgCycleAbort in TG_Comms (ExitCycle to main).
-        tgTryUnload sPath;
+        ! tgCycleAbort in TG_Comms (TG_AbortCycle).
+        bTG_InRun:=FALSE;
+        tgUnloadKeepEdits sPath;
         RAISE;
     ENDPROC
 

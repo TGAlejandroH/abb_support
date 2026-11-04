@@ -194,6 +194,16 @@ MODULE TG_Comms(SYSMODULE)
     ! retrieval (RWS symbol write) - the robot never clears it.
     PERS num nTG_ProgEdited:=0;
 
+    ! Abort hold (TGuideWeldingHMI docs/abb_abort_hold_plan_v1.md). A run
+    ! that aborts after it started stops the robot where it is
+    ! (TG_AbortCycle). bTG_InRun: TRUE while TG_Main runs a .tgs program,
+    ! so the robot may stand anywhere. bTG_RunDone: set by the program's
+    ! own footer just before abort_end:, so it is TRUE only after a run
+    ! that reached its normal end. A program exported before the footer
+    ! set it never does, and holds after every run - the safe side.
+    VAR bool bTG_InRun:=FALSE;
+    VAR bool bTG_RunDone:=FALSE;
+
     ! Frames received from the HMI (FANUC PR[5]/UFRAME[5], PR[6]/UFRAME[6]).
     ! Request PROCs write .oframe; the .tgs program references these wobjs in
     ! its move instructions - no separate "activate" step exists or is needed
@@ -718,6 +728,41 @@ MODULE TG_Comms(SYSMODULE)
     ! Wire-protocol helpers (plan 4.4)
     !===================================================================
 
+    PROC TG_AbortCycle(string stReason)
+        ! The one exit of an aborted cycle (abort hold plan, design S). Drop
+        ! the sockets; when a .tgs run was in progress, so the robot may
+        ! stand at the part, stop it right here and tell the operator; then
+        ! end the cycle with ExitCycle. Under Production Manager that
+        ! restarts PM, whose start check asks before the robot goes home.
+        ! Stop\NoRegain, never a plain Stop: after a jog, a plain Stop makes
+        ! Start ask "regain the path?", and Yes drives the robot back to the
+        ! part (VC-measured 2026-11-02). Stop lets the move in progress
+        ! finish, so the robot stops at its last programmed target, never
+        ! mid-path (VC 2026-11-04). Works from an ERROR handler and from any
+        ! call depth, like the ExitCycle it ends with (VC 2026-11-03).
+        ! ExitCycle keeps a \Dynamic module loaded, edits included; the next
+        ! cycle's Load finds it and tgUnloadKeepEdits (TG_Main) parks the
+        ! edits for retrieval. ExitCycle returns to the cycle's entry
+        ! routine, not necessarily main (TG_RoboCal L7).
+        ! Holds on the same rule as TG_Main: a run that was authorized (pass
+        ! check) and had not reached its normal end. A wire loss before the
+        ! pass check (no motion yet) or after the footer (robot at its end
+        ! pose) ends the cycle without a hold.
+        VAR bool bHold;
+        bHold:=bTG_InRun AND nTG_PassOK=1 AND (NOT bTG_RunDone);
+        bTG_InRun:=FALSE;
+        SocketClose tg_server_socket;
+        SocketClose tg_client_socket;
+        TPWrite "TG: "+stReason;
+        IF bHold THEN
+            ErrWrite "TG: run aborted, robot stopped",stReason\RL2:="Jog it clear of the part in MANUAL, then Start in AUTO."\RL3:="The robot does not go back to the part.";
+            TPWrite "TG: robot held - jog it clear, then Start";
+            Stop\NoRegain;
+        ENDIF
+        TPWrite "TG: cycle ended";
+        ExitCycle;
+    ENDPROC
+
     LOCAL PROC tgCycleAbort()
         ! FIX 2026-08-28 (error-recovery matrix F-F): bottom-level recovery
         ! for wire errors. VC evidence (kill test, RW 6.15): an unhandled
@@ -725,24 +770,13 @@ MODULE TG_Comms(SYSMODULE)
         ! (%stTG_ProgName%) - the program STOPPED at the failing
         ! SocketReceive (events 41595/40228), so the tgRunTgsProgram /
         ! tgMainCycle handlers can never see a wire error raised inside a
-        ! .tgs run. Recover where the error is born instead: log, drop the
-        ! sockets, ExitCycle. PP moves to the start of main, which begins
-        ! with TG_SocketDisc and loops back to accept - no propagation
-        ! involved, works from any call depth (VC-validated 2026-08-28).
-        ! VC-observed: ExitCycle's PP move does NOT drop \Dynamic modules
-        ! (unlike a FlexPendant/RobotStudio PP-to-main) - the leftover is
-        ! handled next cycle by the ERR_LOADED reload path (matrix I2),
-        ! also VC-validated in exactly this scenario.
+        ! .tgs run. Recover where the error is born instead: TG_AbortCycle
+        ! (hold if a run was in progress, then ExitCycle). PP moves to the
+        ! start of the entry routine, which serves the next cycle - no
+        ! propagation involved, works from any call depth.
         ! Called ONLY from the wire helpers' ERROR handlers below.
-        ! To stop instead of recovering, replace ExitCycle below with:
-        !   EXIT             - terminates execution (FANUC abort)
-        !   Stop             - halts, resumable with Start (FANUC pause)
-        !   Stop; ExitCycle; - halt for the operator, clean restart on Start
         TPWrite "TG: cycle error, ERRNO = "\Num:=ERRNO;
-        TPWrite "TG: wire lost - restarting cycle";
-        SocketClose tg_server_socket;
-        SocketClose tg_client_socket;
-        ExitCycle;
+        TG_AbortCycle "The connection to the vision PC was lost.";
     ENDPROC
 
     LOCAL PROC tgSendAck(string data)
@@ -1365,12 +1399,10 @@ MODULE TG_Comms(SYSMODULE)
         ! Abandon the cycle rather than let the HMI compute an offset from a
         ! missing, stale or unreadable exchange - there is no graceful wire
         ! path back to the program at these points (plan 3.6). Same exit as a
-        ! wire error (tgCycleAbort): drop the sockets, ExitCycle.
+        ! wire error (tgCycleAbort): TG_AbortCycle.
         ErrWrite "TG: touch sensing aborted",reason\RL2:="The cycle was abandoned; no touch-up offset was applied.";
         TPWrite "TG ERROR: "+reason;
-        SocketClose tg_server_socket;
-        SocketClose tg_client_socket;
-        ExitCycle;
+        TG_AbortCycle "Touch sensing was abandoned.";
     ENDPROC
 
     PROC TG_ReqTouchSenseDo()

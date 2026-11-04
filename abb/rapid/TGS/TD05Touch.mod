@@ -72,7 +72,7 @@ MODULE TD05Touch_Mod
         MoveAbsJ jtHome,v200,fine,tTG_Weld;
 
         TG_ReqPassCheck \Tool:=tTG_Weld \WObj:=wobj0;
-        IF nTG_PassOK=0 THEN
+        IF nTG_PassOK<>1 THEN
             RETURN;
         ENDIF
 
@@ -124,6 +124,7 @@ MODULE TD05Touch_Mod
         jtHome:=CJointT();
         jtHome.robax:=[0,0,0,0,30,0];
         MoveAbsJ jtHome,v200,fine,tTG_Weld;
+        bTG_RunDone:=TRUE;             ! normal end only (abort hold plan): TG_Main holds an authorized run without it
 
 abort_end:
         ConfJ\On;

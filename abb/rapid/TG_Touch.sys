@@ -72,8 +72,10 @@ MODULE TG_Touch(SYSMODULE)
         nLen:=VectMagn(dir);
         IF nLen<1 THEN
             ! An exported program with no search direction: nothing to retry.
+            ! End the cycle like any other abort (TG_AbortCycle: the robot
+            ! held where it is, the HMI's connection closed, edits kept).
             ErrWrite "TG: touch search has no direction","StartPoint and ContactPoint are less than 1 mm apart."\RL2:="Fix the exported program. Nothing was searched.";
-            EXIT;
+            TG_AbortCycle "The touch search has no direction.";
         ENDIF
         rtTo:=StartPoint;
         rtTo.trans:=StartPoint.trans+(nTG_TouchStroke/nLen)*dir;

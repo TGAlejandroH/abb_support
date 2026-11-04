@@ -601,8 +601,11 @@ in [abb_program_touchup_and_retrieval_v1.md](abb_program_touchup_and_retrieval_v
 *Status 2026-08-31: implemented — `TG_Main` end-of-run unload is now
 `UnLoad \ErrIfChanged` (`tgUnloadKeepEdits`): a modified module is staged in
 `HOME:/TGS/edited/` (`tgSaveEditedModule`, `Save` of `<prog>_Mod`) and flagged
-via new PERS `nTG_ProgEdited` before the real unload; recovery-path unloads
-stay plain on purpose (aborted cycles still discard edits). Python:
+via new PERS `nTG_ProgEdited` before the real unload. Every unload of a run's
+module goes through it, the recovery paths' included: a cycle ended by
+`TG_AbortCycle`'s `ExitCycle` leaves its module loaded, and the next cycle's
+start (`tgUnloadLeftover`) parks its edits and unloads it (TGuideWeldingHMI
+`docs/abb_abort_hold_plan_v1.md`). Python:
 `rws_client.py` (stdlib urllib + digest — GET/PUT/DELETE `/fileservice`,
 module `action=save` with mastership, symbol get/set), `tg_retrieve.py`
 (fetch staged → validate the `MODULE <prog>_Mod` / `PROC <prog>` naming

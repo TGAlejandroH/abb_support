@@ -153,7 +153,9 @@ operator jogs + Modify Position on the pendant   (manual mode, program stopped)
         │
         │  edits live in PROGRAM MEMORY only
         ▼
-end of cycle: TG_Main  UnLoad \ErrIfChanged  ──► ERR_NOTSAVED
+end of cycle (or, after an aborted cycle that ended with ExitCycle,
+the start of the next cycle):
+              TG_Main  UnLoad \ErrIfChanged  ──► ERR_NOTSAVED
         │
         ├─ Save "<name>_Mod" \FilePath:="HOME:/TGS/edited/<name>.mod"
         ├─ set PERS nTG_ProgEdited := 1        (HMI-visible)
