@@ -298,7 +298,14 @@ What to watch during a run:
 - Operator Window: `TG: camera flap open` inside each capture branch,
   `TG: camera flap closed` after global-captures-done, after the weld frame
   request, and before rest home — the same call sites as FANUC lines 38/50,
-  62, 201 and 409 of `TD05tRJYQd.ls`.
+  62, 201 and 409 of `TD05tRJYQd.ls`. Modules exported from 2026-11-12 also
+  close it once after the pass check and once after `abort_end:`, so an aborted
+  run (capture or registration failure) ends with the flap closed.
+- `TG_AbortCycle` (`TG_Comms.sys`, 2026-11-12) closes the flap on every
+  aborted cycle before it holds the robot. That covers a wire loss, which ends
+  the cycle with `ExitCycle` and never reaches the module's footer, and modules
+  exported before 2026-11-12. `TG_Comms.sys` now calls `TG_CamClose`, so it needs
+  `TG_Cell.sys` loaded too (both are resident on every TG controller).
 - I/O window (Controller tab → Inputs/Outputs, filter `doTG_Camera`): the
   signal toggles 1/0 live during the cycle.
 

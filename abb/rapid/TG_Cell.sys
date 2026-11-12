@@ -75,7 +75,9 @@ MODULE TG_Cell(SYSMODULE)
         ! FANUC: CAM_CLOSE (.ls utility) - close the camera flap.
         ! The FANUC .tgs programs call this defensively in several places
         ! (after capture sets, after R_W_F, before rest home); calling it
-        ! with the output already low is expected and harmless.
+        ! with the output already low is expected and harmless. The ABB
+        ! .tgs module also calls it at run start and after abort_end:, and
+        ! TG_AbortCycle (TG_Comms) calls it on every aborted cycle.
         SetDO doTG_Camera,0;
         TPWrite "TG: camera flap closed";
     ENDPROC

@@ -748,12 +748,21 @@ MODULE TG_Comms(SYSMODULE)
         ! check) and had not reached its normal end. A wire loss before the
         ! pass check (no motion yet) or after the footer (robot at its end
         ! pose) ends the cycle without a hold.
+        ! The camera flap is closed on every abort, before any hold: the
+        ! cycle is over, so nothing can still be capturing, and a held
+        ! robot must not wait at the part with the lens exposed. The .tgs
+        ! footer closes it after abort_end:, but a wire loss comes here from
+        ! the wire helpers (tgCycleAbort) and ends with the ExitCycle below,
+        ! so that module's footer never runs; nor does any footer of a
+        ! module exported before 2026-11-12. TG_CamClose (TG_Cell) is
+        ! idempotent.
         VAR bool bHold;
         bHold:=bTG_InRun AND nTG_PassOK=1 AND (NOT bTG_RunDone);
         bTG_InRun:=FALSE;
         SocketClose tg_server_socket;
         SocketClose tg_client_socket;
         TPWrite "TG: "+stReason;
+        TG_CamClose;
         IF bHold THEN
             ErrWrite "TG: run aborted, robot stopped",stReason\RL2:="Jog it clear of the part in MANUAL, then Start in AUTO."\RL3:="The robot does not go back to the part.";
             TPWrite "TG: robot held - jog it clear, then Start";
