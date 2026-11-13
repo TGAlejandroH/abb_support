@@ -92,6 +92,9 @@ MODULE TD05Test_Mod
         ! TG_Cell.sys - empty until the real cell's weld-enable I/O exists.
         TG_DryRunOff;
         IF nTG_DryRun=1 TG_DryRunOn;
+        ! Not in FANUC: every authorized run starts with the camera flap
+        ! closed, whatever an earlier run left (curobo exporter, 2026-11-12).
+        TG_CamClose;
         ! FANUC line 18 has CAM_PREP commented out ("!-- CALL CAM_PREP");
         ! TG_CamPrep exists as a placeholder if a cell ever needs it.
         TG_WeldPrep;                   ! FANUC line 19
@@ -205,6 +208,11 @@ abort_end:
         ! reported whatever was last selected). Safe: the HMI ignores every
         ! R_E pose (plan 1.4.1). Matches the modal version on the normal
         ! path, so transcripts stay comparable.
+        ! Camera flap closed on BOTH paths: a capture abort jumps here with
+        ! it open, and TG_Main then holds the robot at the part (curobo
+        ! exporter, 2026-11-12). The FANUC sample closes it on the normal
+        ! path only.
+        TG_CamClose;
         ConfJ\On;                      ! undo the demo's relaxed config control
         ConfL\On;
         stTG_SubName:="none";
