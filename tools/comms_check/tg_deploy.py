@@ -7,8 +7,11 @@ only; reuses comms_probe.py (same folder) for the RWS session and the log.
 Runbook: README.md in this folder, section "Replacing the TG modules".
 
 THE SET (load order): TG_CellCal.sys, TG_Comms.sys, TG_Cell.sys, TG_Touch.sys,
-TG_Weld.sys, TG_Main.mod, TG_Parts.mod. Leftover from the 2026-09-24 comms test:
-TG_SocketProbe_Mod / TG_SocketProbe.mod (unloaded and deleted with the set).
+TG_Weld.sys, TG_Main.mod, TG_Parts.mod from abb/rapid, then TG_Python.mod, the
+TG_RoboCal calibration server, from the TG_RoboCal checkout beside this repo
+(--robocal). TG_Python lives in HOME:/, the others in HOME:/TGS. Leftover from the
+2026-09-24 comms test: TG_SocketProbe_Mod / TG_SocketProbe.mod (unloaded and
+deleted with the set).
 
 COMMANDS, in the order they are used on site (all need --ip)
 
@@ -17,8 +20,9 @@ COMMANDS, in the order they are used on site (all need --ip)
            the latest stage; live PERS values compared with the stage files;
            global-name clashes between the new files and non-TG modules.
            Saves a PERS snapshot (JSON) every time.
-  backup   Read-only on the controller. Downloads every file in HOME:/TGS to
-           logs/deploy_<stamp>/backup/ and saves a PERS snapshot beside it.
+  backup   Read-only on the controller. Downloads every file in HOME:/TGS, and
+           HOME:/TG_Python.mod, to logs/deploy_<stamp>/backup/ and saves a
+           PERS snapshot beside it.
            Run it BEFORE unloading anything: unloading a module drops its
            live PERS values (tool calibration, taught part data).
   stage    Local only. Copies the set from abb/rapid into logs/deploy_<stamp>/
@@ -27,8 +31,8 @@ COMMANDS, in the order they are used on site (all need --ip)
            names, PM part data, ...), checks the site edits (server IP,
            tgs_main, camera SetDO off), runs rapid_check (per file + F-5
            duplicate globals across the set), writes manifest.json. The
-           server IP and the touch I/O names (cell data, in TG_CellCal after
-           v1.0.0) always keep the controller's value.
+           server IP, the touch I/O names (cell data, in TG_CellCal after
+           v1.0.0) and TG_Python's server IP always keep the controller's value.
   unload   RWS, needs AUTO + RAPID stopped (MANUAL: do it on the pendant).
            unloadmod the TG modules present, reverse load order.
   delete   Deletes the old TG files from HOME:/TGS - only those that the
@@ -62,10 +66,30 @@ import comms_probe as cp  # noqa: E402
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 SRC_DIR = os.path.join(REPO, "abb", "rapid")
 CTRL_DIR = "$home/TGS"
+# The TG_RoboCal checkout (--robocal) and the files of the set that come from it.
+ROBOCAL_DIR = os.path.normpath(os.path.join(REPO, "..", "TG_RoboCal"))
+ROBOCAL_FILES = {"TG_Python.mod": os.path.join("robot_side", "abb", "TG_Python.mod")}
+# Files of the set kept outside HOME:/TGS on the controller: TG_Python sits in HOME:/, where
+# TG_RoboCal's README installs it and where the MONARC cell has it.
+CTRL_DIRS = {"TG_Python.mod": "$home"}
 
 SET = ["TG_CellCal.sys", "TG_Comms.sys", "TG_Cell.sys", "TG_Touch.sys",
-       "TG_Weld.sys", "TG_Main.mod", "TG_Parts.mod"]
+       "TG_Weld.sys", "TG_Main.mod", "TG_Parts.mod", "TG_Python.mod"]
 LEFTOVER = {"TG_SocketProbe.mod": "TG_SocketProbe_Mod"}
+
+
+def src_path(fname):
+    if fname in ROBOCAL_FILES:
+        return os.path.join(ROBOCAL_DIR, ROBOCAL_FILES[fname])
+    return os.path.join(SRC_DIR, fname)
+
+
+def ctrl_path(fname):
+    return CTRL_DIRS.get(fname, CTRL_DIR) + "/" + fname
+
+
+def shown(fname):
+    return ctrl_path(fname).replace("$home", "HOME:")
 
 
 def mod_name(fname):
@@ -86,12 +110,14 @@ CONFIG_PERS = [
     "stTG_TeachModeDO", "bTG_TouchLive",
     "nTG_TouchSpeed", "nTG_TouchStroke", "nTG_TouchClearWait",
     "pdTG_9011", "padvTG_9011", "pdTG_9022", "padvTG_9022",   # PM part data
+    "stTG_PyServerIP", "nTG_PyPort", "nTG_PySettleTime",       # TG_Python
 ]
-# Cell data in TG_CellCal.sys that only the controller knows: the address the HMI connects to and
-# the welder's touch-sense I/O names. The repo holds VC defaults for them, so 'stage' always keeps
-# the controller's value (no three-way merge); only --prefer-file NAME puts the file's value up.
+# Cell data that only the controller knows: the address the HMI connects to and the welder's
+# touch-sense I/O names (TG_CellCal.sys), and the address TG_Python binds. The repo holds VC
+# defaults for them, so 'stage' always keeps the controller's value (no three-way merge); only
+# --prefer-file NAME puts the file's value up.
 CELL_DATA_PERS = ["stTG_ServerIP", "stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI",
-                  "stTG_TeachModeDO"]
+                  "stTG_TeachModeDO", "stTG_PyServerIP"]
 # The generic TG_CellCal.sys values. A cell must never run on these.
 PLACEHOLDER_TOOLS = {
     "tTG_Weld": "[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]]",
@@ -193,20 +219,29 @@ def latest_snapshot_with_values(log_dir):
 
 
 def stage_files(stage_dir):
-    """{file name: bytes} of a stage folder, or of abb/rapid when there is no stage."""
-    base = stage_dir or SRC_DIR
-    return {f: read_bytes(os.path.join(base, f)) for f in SET if os.path.isfile(os.path.join(base, f))}
+    """{file name: bytes} of a stage folder, or of the sources when there is no stage."""
+    paths = {f: os.path.join(stage_dir, f) if stage_dir else src_path(f) for f in SET}
+    return {f: read_bytes(p) for f, p in paths.items() if os.path.isfile(p)}
 
 
 # ============================================================ controller reads
 
 def ctrl_listing(rws):
+    """{file name: entry}: every file in HOME:/TGS, plus the files of the set kept elsewhere
+    (CTRL_DIRS). None when there is neither."""
     try:
-        return {e.get("_title"): e for e in rws.list_dir(CTRL_DIR) if e.get("_type") == "fs-file"}
+        listing = {e.get("_title"): e for e in rws.list_dir(CTRL_DIR) if e.get("_type") == "fs-file"}
     except cp.RwsError as exc:
-        if exc.kind == "NOTFOUND":
-            return None
-        raise
+        if exc.kind != "NOTFOUND":
+            raise
+        listing = None
+    for d in sorted(set(CTRL_DIRS.values())):
+        names = [f for f, where in CTRL_DIRS.items() if where == d]
+        found = {e.get("_title"): e for e in rws.list_dir(d)
+                 if e.get("_type") == "fs-file" and e.get("_title") in names}
+        if found:
+            listing = dict(listing or {}, **found)
+    return listing
 
 
 def read_pers(rws, task, module, name):
@@ -337,7 +372,7 @@ def cmd_status(args, rws, log):
 
     stage = latest(args.log_dir, "stage")
     files = stage_files(stage)
-    log.info("reference", "comparing with %s" % (stage or SRC_DIR + " (no stage yet)"))
+    log.info("reference", "comparing with %s" % (stage or SRC_DIR + " + " + ROBOCAL_DIR + " (no stage yet)"))
 
     listing = ctrl_listing(rws)
     if listing is None:
@@ -348,12 +383,12 @@ def cmd_status(args, rws, log):
             if f not in listing:
                 log.detail("%-20s absent" % f)
                 continue
-            data = rws.get_file(CTRL_DIR + "/" + f)
+            data = rws.get_file(ctrl_path(f))
             ref = files.get(f)
             verdict = ("identical to reference" if ref == data else
                        "DIFFERS from reference" if ref is not None else "not in the new set")
-            log.say("  HOME:/TGS/%-20s %6d bytes  sha %s  %s  (mdate %s)"
-                    % (f, len(data), sha(data), verdict, listing[f].get("fs-mdate", "?")))
+            log.say("  %-30s %6d bytes  sha %s  %s  (mdate %s)"
+                    % (shown(f), len(data), sha(data), verdict, listing[f].get("fs-mdate", "?")))
         log.info("tgs", "other files in HOME:/TGS (left alone): %s" % (", ".join(others) or "none"))
 
     decls, home = new_set_decls(files)
@@ -361,7 +396,7 @@ def cmd_status(args, rws, log):
     path = save_snapshot(os.path.join(new_run_dir(args.log_dir), "pers_snapshot.json"),
                          rws, args.task, loaded, snap, ident)
     report_pers(log, snap, decls)
-    moved = sorted(n for n in CELL_DATA_PERS if snap.get(n, {}).get("module") == OLD_HOMES[n])
+    moved = sorted(n for n in CELL_DATA_PERS if n in OLD_HOMES and snap.get(n, {}).get("module") == OLD_HOMES[n])
     if moved:
         log.info("pers", "still in their v1.0.0 modules on the controller (the new set declares them in "
                          "TG_CellCal; 'stage' carries them across): %s" % ", ".join(moved))
@@ -415,11 +450,13 @@ def cmd_backup(args, rws, log):
         log.info("backup", "HOME:/TGS does not exist - nothing to download")
         listing = {}
     for name in sorted(listing):
-        data = rws.get_file(CTRL_DIR + "/" + name)
+        data = rws.get_file(ctrl_path(name))
         with open(os.path.join(bdir, name), "wb") as fh:
             fh.write(data)
         log.detail("saved %-24s %7d bytes sha %s" % (name, len(data), sha(data)))
-    log.passed("backup", "%d file(s) from HOME:/TGS saved to %s" % (len(listing), bdir))
+    away = [shown(n) for n in sorted(listing) if n in CTRL_DIRS]
+    log.passed("backup", "%d file(s) from HOME:/TGS%s saved to %s"
+               % (len(listing), (" and " + ", ".join(away)) if away else "", bdir))
 
     loaded = cp.module_names(rws, args.task)
     decls, home = new_set_decls(stage_files(None))
@@ -493,8 +530,13 @@ def cmd_stage(args, log):
     carried = []
     texts = []
     conflicts = []
+    missing = [src_path(f) for f in SET if not os.path.isfile(src_path(f))]
+    if missing:
+        log.failed("stage", "source file(s) not found: %s (TG_Python.mod comes from the TG_RoboCal "
+                            "checkout: --robocal)" % ", ".join(missing))
+        return False
     for f in SET:
-        raw = read_bytes(os.path.join(SRC_DIR, f))
+        raw = read_bytes(src_path(f))
         text = raw.decode("latin-1")        # byte-exact; rapid_check below rejects non-ASCII
         for name, (typ, value, single, local) in pers_decls(text).items():
             if local or name not in CONFIG_PERS or name not in snap:
@@ -555,10 +597,11 @@ def cmd_stage(args, log):
         log.failed("rapid_check", "%d finding(s) - see the log; fix before uploading" % len(findings))
         ok = False
     else:
-        log.passed("rapid_check", "7 files clean, no duplicate globals across the set")
+        log.passed("rapid_check", "%d files clean, no duplicate globals across the set" % len(SET))
 
     manifest = {"built": _dt.datetime.now().isoformat(timespec="seconds"), "source": SRC_DIR,
-                "git_head": git_head(), "snapshot": snap_path if snap else None, "carried": carried,
+                "git_head": git_head(), "robocal": ROBOCAL_DIR, "robocal_head": git_head(ROBOCAL_DIR),
+                "snapshot": snap_path if snap else None, "carried": carried,
                 "files": [{"name": f, "bytes": len(read_bytes(os.path.join(sdir, f))),
                            "sha256_16": sha(read_bytes(os.path.join(sdir, f)))} for f in SET]}
     with open(os.path.join(sdir, "manifest.json"), "w", encoding="utf-8") as fh:
@@ -573,12 +616,12 @@ def cmd_stage(args, log):
     return True
 
 
-def git_head():
+def git_head(repo=REPO):
     try:
-        with open(os.path.join(REPO, ".git", "HEAD")) as fh:
+        with open(os.path.join(repo, ".git", "HEAD")) as fh:
             ref = fh.read().strip()
         if ref.startswith("ref: "):
-            with open(os.path.join(REPO, ".git", *ref[5:].split("/"))) as fh:
+            with open(os.path.join(repo, ".git", *ref[5:].split("/"))) as fh:
                 return ref[5:] + " @ " + fh.read().strip()[:10]
         return ref[:10]
     except OSError:
@@ -587,13 +630,14 @@ def git_head():
 
 def site_checks(args, texts, log):
     ok = True
-    ip = re.search(r'PERS string stTG_ServerIP:="([^"]*)"', texts["TG_CellCal.sys"])
-    ip = ip.group(1) if ip else "?"
-    if ip != args.server_ip:
-        log.failed("site", "TG_CellCal.sys stTG_ServerIP is %s, expected %s (--server-ip)" % (ip, args.server_ip))
-        ok = False
-    else:
-        log.passed("site", "stTG_ServerIP = %s" % ip)
+    for f, name in (("TG_CellCal.sys", "stTG_ServerIP"), ("TG_Python.mod", "stTG_PyServerIP")):
+        ip = re.search(r'PERS string %s:="([^"]*)"' % name, texts[f])
+        ip = ip.group(1) if ip else "?"
+        if ip != args.server_ip:
+            log.failed("site", "%s %s is %s, expected %s (--server-ip)" % (f, name, ip, args.server_ip))
+            ok = False
+        else:
+            log.passed("site", "%s = %s" % (name, ip))
     main_text = texts["TG_Main.mod"]
     if re.search(r"^\s*PROC\s+main\s*\(", main_text, re.M | re.I):
         log.failed("site", "TG_Main.mod still declares PROC main() - Production Manager owns main; "
@@ -683,20 +727,20 @@ def cmd_delete(args, rws, log):
     for f in ALL_FILES:
         if f not in listing:
             continue
-        data = rws.get_file(CTRL_DIR + "/" + f)
+        data = rws.get_file(ctrl_path(f))
         local = os.path.join(bdir, f)
         if not os.path.isfile(local) or read_bytes(local) != data:
             kept.append(f)
-            log.warn("delete", "%s not deleted: the backup in %s does not hold this exact file" % (f, bdir))
+            log.warn("delete", "%s not deleted: the backup in %s does not hold this exact file" % (shown(f), bdir))
             continue
-        rws.delete_file(CTRL_DIR + "/" + f)
-        deleted.append(f)
-    left = [f for f in ALL_FILES if f in (ctrl_listing(rws) or {})]
+        rws.delete_file(ctrl_path(f))
+        deleted.append(shown(f))
+    left = [shown(f) for f in ALL_FILES if f in (ctrl_listing(rws) or {})]
     gone_wrong = [f for f in deleted if f in left]
     if gone_wrong:
         log.failed("delete", "still present after DELETE: %s" % ", ".join(gone_wrong))
         return False
-    log.passed("delete", "deleted from HOME:/TGS: %s%s (backup %s)"
+    log.passed("delete", "deleted: %s%s (backup %s)"
                % (", ".join(deleted) or "nothing (no old TG file there)",
                   ("; kept: " + ", ".join(kept)) if kept else "", bdir))
     return not kept
@@ -718,11 +762,11 @@ def cmd_upload(args, rws, log):
         if sha(data) != e["sha256_16"]:
             log.failed("upload", "%s changed after staging - re-run 'stage'" % e["name"])
             return False
-        rws.put_file(CTRL_DIR + "/" + e["name"], data)
-        back = rws.get_file(CTRL_DIR + "/" + e["name"])
+        rws.put_file(ctrl_path(e["name"]), data)
+        back = rws.get_file(ctrl_path(e["name"]))
         same = back == data
-        log.say("  PUT HOME:/TGS/%-16s %6d bytes  read-back %s" % (e["name"], len(data),
-                                                                    "identical" if same else "DIFFERS"))
+        log.say("  PUT %-26s %6d bytes  read-back %s" % (shown(e["name"]), len(data),
+                                                         "identical" if same else "DIFFERS"))
         if not same:
             bad.append(e["name"])
     if bad:
@@ -742,9 +786,9 @@ def cmd_load(args, rws, log):
                            "builds)" % ", ".join(present))
         return False
     listing = ctrl_listing(rws) or {}
-    missing = [f for f in SET if f not in listing]
+    missing = [shown(f) for f in SET if f not in listing]
     if missing:
-        log.failed("load", "not in HOME:/TGS: %s - run 'upload' first" % ", ".join(missing))
+        log.failed("load", "not on the controller: %s - run 'upload' first" % ", ".join(missing))
         return False
     mark = cp.elog_mark(rws)
     errors = []
@@ -752,7 +796,7 @@ def cmd_load(args, rws, log):
     def go():
         for f in SET:
             try:
-                rws.post_form("/rw/rapid/tasks/" + args.task, {"modulepath": CTRL_DIR + "/" + f},
+                rws.post_form("/rw/rapid/tasks/" + args.task, {"modulepath": ctrl_path(f)},
                               {"action": "loadmod"})
                 log.detail("loadmod %s accepted (not a verdict)" % f)
             except cp.RwsError as exc:
@@ -774,8 +818,8 @@ def cmd_load(args, rws, log):
         log.failed("load", "; ".join(["[%s] %s %s" % (e[1], e[2], e[3][:120]) for e in fatal]
                                      + ["not loaded: " + ", ".join(absent)] * bool(absent) + errors))
         return False
-    log.passed("load", "7 modules loaded in %s, no fatal event (%d 40160 while loading; "
-                       "the build check below is the verdict)" % (args.task, len(links)))
+    log.passed("load", "%d modules loaded in %s, no fatal event (%d 40160 while loading; "
+                       "the build check below is the verdict)" % (len(SET), args.task, len(links)))
     return report_build(rws, args.task, log, "program") is not False
 
 
@@ -792,14 +836,17 @@ def build_parser():
     p.add_argument("--task", default="T_ROB1")
     p.add_argument("--timeout", type=float, default=15.0)
     p.add_argument("--log-dir", default=os.path.join(HERE, "logs"))
+    p.add_argument("--robocal", default=ROBOCAL_DIR,
+                   help="the TG_RoboCal checkout TG_Python.mod comes from (default: beside this repo)")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
     s = sub.add_parser("status", help="read-only: what is on the controller vs the stage")
     s.add_argument("--expect-system", default="4600-804589",
                    help="warn when the controller's system name differs (default MONARC real cell)")
-    sub.add_parser("backup", help="download HOME:/TGS + PERS snapshot")
+    sub.add_parser("backup", help="download HOME:/TGS + HOME:/TG_Python.mod + PERS snapshot")
     s = sub.add_parser("stage", help="build the upload set locally (no controller)")
-    s.add_argument("--server-ip", default="10.8.8.56", help="stTG_ServerIP the set must carry")
+    s.add_argument("--server-ip", default="10.8.8.56",
+                   help="stTG_ServerIP and stTG_PyServerIP the set must carry")
     s.add_argument("--expect-system", default="4600-804589",
                    help="the latest snapshot must come from this controller (default MONARC real cell)")
     s.add_argument("--snapshot", help="PERS snapshot to carry from (default: the latest)")
@@ -812,15 +859,17 @@ def build_parser():
     s.add_argument("--camera-signal", action="store_true",
                    help="allow active SetDO doTG_Camera (only once the cell has that signal)")
     sub.add_parser("unload", help="unloadmod the TG modules (AUTO, RAPID stopped)")
-    sub.add_parser("delete", help="delete the old TG files from HOME:/TGS (backed-up ones only)")
-    s = sub.add_parser("upload", help="PUT the stage to HOME:/TGS with read-back")
+    sub.add_parser("delete", help="delete the old TG files from the controller (backed-up ones only)")
+    s = sub.add_parser("upload", help="PUT the stage to the controller with read-back")
     s.add_argument("--stage", help="stage folder (default: the latest)")
     sub.add_parser("load", help="loadmod the set in order (AUTO, RAPID stopped)")
     return p
 
 
 def main(argv=None):
+    global ROBOCAL_DIR
     args = build_parser().parse_args(argv)
+    ROBOCAL_DIR = os.path.normpath(args.robocal)
     log = cp.Log(args.log_dir, args.verbose)
     log.say("tg_deploy '%s' | controller %s | task %s | %s"
             % (args.cmd, args.ip or "-", args.task, _dt.datetime.now().isoformat(timespec="seconds")))

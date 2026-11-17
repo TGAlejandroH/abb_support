@@ -278,9 +278,17 @@ swap. It never starts RAPID.
 **The set, in load order:** `TG_CellCal.sys` (the cell data: `tTG_Cam`, `tTG_Weld`,
 `stTG_ServerIP`, and the touch-sense I/O names `stTG_TouchDI`, `stTG_TouchOnDO`,
 `stTG_TouchActiveDI`, `stTG_TeachModeDO`), `TG_Comms.sys`, `TG_Cell.sys`, `TG_Touch.sys`,
-`TG_Weld.sys`, `TG_Main.mod`, `TG_Parts.mod`. `TG_SocketProbe_Mod` (left from 2026-09-24) is
+`TG_Weld.sys`, `TG_Main.mod`, `TG_Parts.mod` from `abb/rapid` into `HOME:/TGS`, then
+`TG_Python.mod`, TG_RoboCal's calibration server, from the TG_RoboCal checkout beside this
+repo (`robot_side/abb/TG_Python.mod`; another checkout: `--robocal <dir>`) into `HOME:/`, where
+TG_RoboCal installs it and the cell has it. `TG_SocketProbe_Mod` (left from 2026-09-24) is
 removed with the old set. On a controller with an older build, the IP still lives in
 `TG_Comms` and the touch names in `TG_Cell` (`status` says so); `backup` reads them there.
+
+`TG_Python` is a normal module whose entry is `python_main`; nothing on the MONARC cell calls
+it (its 2026-10-22 backup checked). Its address `stTG_PyServerIP` is cell data like
+`stTG_ServerIP`. It listens on port 2000 like `TG_Comms`, but only while `python_main` runs
+for a calibration, never during production.
 
 **Why a snapshot comes first.** Unloading a module throws away its live `PERS` values.
 `backup` records them together with the old files. For each configuration value (list:
@@ -294,7 +302,7 @@ and the new file's.
 - Live differs and the repo changed it too: `stage` stops on a CONFLICT. `--prefer-file NAME`
   keeps the repo value, `--prefer-live NAME` the controller's (a VC keeping its own tools).
 
-The cell's address and touch-sense I/O names skip that comparison: the live value is always
+The cell's addresses (`stTG_ServerIP`, `stTG_PyServerIP`) and touch-sense I/O names skip that comparison: the live value is always
 carried. Only the controller knows them, and an old file can hold the cell's own value (the
 2026-10-21 build had `10.8.8.56` typed into its `TG_Comms.sys`), which would read as "nobody
 changed it" and let the repo's VC default replace it. `--prefer-file NAME` still puts the
@@ -310,12 +318,12 @@ Run-time counters and flags are not carried. A fresh load resets them, as intend
 | 0 | Pendant | Take a full system backup (Backup and Restore). | Backup folder written. |
 | 1 | PC | `python comms_probe.py --ip 10.8.8.56 ping` | Reply. If the IP changed, use the new one everywhere below and in step 3 (`--server-ip`). |
 | 2 | PC | `python tg_deploy.py --ip 10.8.8.56 backup` | `OVERALL: PASS`. `logs\deploy_<stamp>\backup\` holds the old files. |
-| 3 | PC | `python tg_deploy.py stage` | `OVERALL: PASS`. Read the `carry` lines: each is a value taken from the cell. |
-| 4 | Pendant | Stop the program. Program Editor -> Modules: unload `TG_Parts`, `TG_Main`, `TG_Weld`, `TG_Touch`, `TG_Cell`, `TG_Comms`, `TG_SocketProbe_Mod`. (In AUTO with RAPID stopped, `tg_deploy.py ... unload` does this.) | None of them listed. |
-| 5 | PC | `python tg_deploy.py --ip 10.8.8.56 delete` | Lists the deleted files. Other files in `HOME:/TGS` stay. |
-| 6 | PC | `python tg_deploy.py --ip 10.8.8.56 upload` | 7 x `read-back identical`. |
-| 7 | Pendant | Load Module from `HOME:/TGS/`, in the order above, `TG_CellCal.sys` first. (In AUTO with RAPID stopped, `tg_deploy.py ... load` does this.) | No error after the last load. A transient 40160 between loads is expected. |
-| 8 | PC | `python tg_deploy.py --ip 10.8.8.56 status` | `program` PASS (the controller links the program), 7 files `identical to reference`, configuration differing: `none`. |
+| 3 | PC | `python tg_deploy.py stage` | `OVERALL: PASS`. Read the `carry` lines: each is a value taken from the cell. A CONFLICT on `tTG_Weld` / `tTG_Cam` (expected on MONARC): `python tg_deploy.py stage --prefer-file tTG_Weld,tTG_Cam` puts the MONARC TCPs up. |
+| 4 | Pendant | Stop the program. Program Editor -> Modules: unload `TG_Python`, `TG_Parts`, `TG_Main`, `TG_Weld`, `TG_Touch`, `TG_Cell`, `TG_Comms`, `TG_CellCal` (when loaded), `TG_SocketProbe_Mod`. (In AUTO with RAPID stopped, `tg_deploy.py ... unload` does this.) | None of them listed. |
+| 5 | PC | `python tg_deploy.py --ip 10.8.8.56 delete` | Lists the deleted files. Other files in `HOME:/TGS` and `HOME:/` stay. |
+| 6 | PC | `python tg_deploy.py --ip 10.8.8.56 upload` | 8 x `read-back identical`. |
+| 7 | Pendant | Load Module, in the order above: `TG_CellCal.sys` ... `TG_Parts.mod` from `HOME:/TGS/`, then `TG_Python.mod` from `HOME:/`. (In AUTO with RAPID stopped, `tg_deploy.py ... load` does this.) | No error after the last load. A transient 40160 between loads is expected. |
+| 8 | PC | `python tg_deploy.py --ip 10.8.8.56 status` | `program` PASS (the controller links the program), 8 files `identical to reference`, configuration differing: `none`. |
 | 9 | Pendant | PP to Main, then run as usual. Then take a second backup. | Production Manager idle as before. |
 
 `status` is read-only and can be run at any time. Run it before step 2 as well. If it
@@ -323,17 +331,19 @@ reports `program FAIL` BEFORE anything was touched, the program already had erro
 step 8 cannot judge our files. Every command writes `logs\comms_check_<stamp>.log`.
 
 **Going back:** the old files are in `logs\deploy_<stamp>\backup\`. Unload the new set,
-put the old files in `HOME:/TGS`, and load them in their old order (`TG_CellCal` first when
-the old set has one; the 2026-10-21 set has none, so `TG_Comms` first).
+put the old files back (`TG_Python.mod` in `HOME:/`, the rest in `HOME:/TGS`), and load them
+in their old order (`TG_CellCal` first when the old set has one; the 2026-10-21 set has none,
+so `TG_Comms` first). The tag `v1.0.0` is the abb_support checkpoint before the cell-data move.
 
 **Checks `stage` makes:**
-- `stTG_ServerIP` in `TG_CellCal.sys` equals `--server-ip` (default `10.8.8.56`).
+- `stTG_ServerIP` in `TG_CellCal.sys` and `stTG_PyServerIP` in `TG_Python.mod` equal
+  `--server-ip` (default `10.8.8.56`).
 - `TG_Main.mod` declares `tgs_main()` and no `main()`, because Production Manager owns `main`.
 - The `SetDO doTG_Camera` lines are commented out: the cell has no such signal. Use `--camera-signal` once it does.
 - `rapid_check` passes on every file, and no global name is declared twice across the set.
 
-`status` also checks that no global name in the new set is already declared by a non-TG
-module (the cell's own `TG_Python`, for example).
+`status` also checks that no global name in the new set is already declared by a module
+outside the set (the cell's own programs).
 
 **Rehearsed 2026-11-16 on VC `4600-803651_Virtual`** (616-1, PM, the `TG_Python` module).
 The VC was first put in the cell's state: the 2026-10-21 site build loaded, plus
@@ -356,3 +366,16 @@ exactly: same modules, same files, all 72 PERS values.
 the four touch names from their old modules; after `load` they read the same from
 `TG_CellCal`, the program links, configuration differing: none. Set on the controller, all
 five then survived a reload of `TG_Comms`, `TG_Cell` and `TG_Touch`.
+
+**The full MONARC sequence with `TG_Python`, rehearsed 2026-11-16 on the same VC.** The VC
+was put in cell 2's state from its 2026-10-22 backup: the cell's files in `HOME:/TGS` and
+`HOME:/TG_Python.mod`, its modules loaded with their live values (IP `10.8.8.56` in
+`TG_Comms`, the tools the cell's programs had written, the pre-011 `TG_Python`), no
+`TG_CellCal`. Then status, backup, stage, unload, delete, upload, load and status ran from
+this tree, as on site:
+- `stage` stopped on a CONFLICT for `tTG_Weld` and `tTG_Cam`: the cell's live tools are not
+  the old file's dummies, and the repo has the MONARC TCPs. `stage --prefer-file
+  tTG_Weld,tTG_Cam` put the MONARC TCPs up (owner, load 1 kg); `stTG_PyServerIP` was carried.
+- 8 files read back identical, the program links, configuration differing: none.
+
+Expect the same CONFLICT on the cell.
