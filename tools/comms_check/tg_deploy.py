@@ -26,7 +26,9 @@ COMMANDS, in the order they are used on site (all need --ip)
            snapshot into the copies (tTG_Cam/tTG_Weld calibration, touch I/O
            names, PM part data, ...), checks the site edits (server IP,
            tgs_main, camera SetDO off), runs rapid_check (per file + F-5
-           duplicate globals across the set), writes manifest.json.
+           duplicate globals across the set), writes manifest.json. The
+           server IP and the touch I/O names (cell data, in TG_CellCal after
+           v1.0.0) always keep the controller's value.
   unload   RWS, needs AUTO + RAPID stopped (MANUAL: do it on the pendant).
            unloadmod the TG modules present, reverse load order.
   delete   Deletes the old TG files from HOME:/TGS - only those that the
@@ -85,13 +87,22 @@ CONFIG_PERS = [
     "nTG_TouchSpeed", "nTG_TouchStroke", "nTG_TouchClearWait",
     "pdTG_9011", "padvTG_9011", "pdTG_9022", "padvTG_9022",   # PM part data
 ]
+# Cell data in TG_CellCal.sys that only the controller knows: the address the HMI connects to and
+# the welder's touch-sense I/O names. The repo holds VC defaults for them, so 'stage' always keeps
+# the controller's value (no three-way merge); only --prefer-file NAME puts the file's value up.
+CELL_DATA_PERS = ["stTG_ServerIP", "stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI",
+                  "stTG_TeachModeDO"]
 # The generic TG_CellCal.sys values. A cell must never run on these.
 PLACEHOLDER_TOOLS = {
     "tTG_Weld": "[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]]",
     "tTG_Cam": "[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]]",
 }
-# Where the 2026-10-21 build declared a PERS that has since moved module.
-OLD_HOMES = {"tTG_Cam": "TG_Comms", "tTG_Weld": "TG_Comms"}
+# Where an older build declared a PERS that has since moved module: the tools until 2026-10-24
+# (the 2026-10-21 site build), the server IP and the touch-sense names until v1.0.0.
+OLD_HOMES = {"tTG_Cam": "TG_Comms", "tTG_Weld": "TG_Comms",
+             "stTG_ServerIP": "TG_Comms",
+             "stTG_TouchDI": "TG_Cell", "stTG_TouchOnDO": "TG_Cell",
+             "stTG_TouchActiveDI": "TG_Cell", "stTG_TeachModeDO": "TG_Cell"}
 
 FATAL_ELOG = ("40322", "40223")      # syntax error / module not loaded
 LINK_ELOG = "40160"                  # unresolved reference (transient between loads)
@@ -350,6 +361,10 @@ def cmd_status(args, rws, log):
     path = save_snapshot(os.path.join(new_run_dir(args.log_dir), "pers_snapshot.json"),
                          rws, args.task, loaded, snap, ident)
     report_pers(log, snap, decls)
+    moved = sorted(n for n in CELL_DATA_PERS if snap.get(n, {}).get("module") == OLD_HOMES[n])
+    if moved:
+        log.info("pers", "still in their v1.0.0 modules on the controller (the new set declares them in "
+                         "TG_CellCal; 'stage' carries them across): %s" % ", ".join(moved))
     log.info("snapshot", path)
 
     try:
@@ -452,6 +467,9 @@ def cmd_stage(args, log):
     # is how a TCP updated in the repo replaces a dummy still on the cell). live != base: it was
     # set on the controller, the live value is carried - unless the repo changed it too, which
     # is a conflict the operator settles with --prefer-file NAME (or by fixing the file).
+    # Cell data (CELL_DATA_PERS) skips the merge: the controller's value is always carried, because
+    # an old file that was edited by hand before upload (the 2026-10-21 IP) would read as "nobody
+    # changed it" and let the repo's VC default replace the cell's value.
     base = {}
     bdir = os.path.join(os.path.dirname(snap_path), "backup") if snap_path else None
     if snap and bdir and os.path.isdir(bdir):
@@ -463,6 +481,11 @@ def cmd_stage(args, log):
         log.warn("carry", "no backup beside the snapshot - every live value that differs from the "
                           "new files is carried (two-way); run 'backup' to get the three-way merge")
     prefer_file = {n.strip() for n in (args.prefer_file or "").split(",") if n.strip()}
+    prefer_live = {n.strip() for n in (args.prefer_live or "").split(",") if n.strip()}
+    if prefer_file & prefer_live:
+        log.failed("carry", "named in both --prefer-file and --prefer-live: %s"
+                   % ", ".join(sorted(prefer_file & prefer_live)))
+        return False
 
     run = new_run_dir(args.log_dir)
     sdir = os.path.join(run, "stage")
@@ -479,7 +502,10 @@ def cmd_stage(args, log):
             live = snap[name]["value"]
             if same_value(live, value):
                 continue
-            if name in base:
+            if name in CELL_DATA_PERS and name in prefer_file:
+                log.say("  new   %-20s -> %s : %s (--prefer-file; controller had %s)" % (name, f, value, live))
+                continue
+            if name in base and name not in CELL_DATA_PERS and name not in prefer_live:
                 old = base[name][1]
                 if same_value(live, old):
                     log.say("  new   %-20s -> %s : %s (controller still had the old file's %s)"
@@ -503,7 +529,9 @@ def cmd_stage(args, log):
                 log.failed("carry", "could not place %s in %s" % (name, f))
                 return False
             carried.append({"name": name, "file": f, "file_value": value, "live_value": live})
-            log.say("  carry %-20s -> %s : %s" % (name, f, live))
+            log.say("  carry %-20s -> %s : %s%s" % (name, f, live,
+                                                    " (cell data)" if name in CELL_DATA_PERS else
+                                                    " (--prefer-live)" if name in prefer_live else ""))
         data = text.encode("latin-1")
         with open(os.path.join(sdir, f), "wb") as fh:
             fh.write(data)
@@ -559,10 +587,10 @@ def git_head():
 
 def site_checks(args, texts, log):
     ok = True
-    ip = re.search(r'PERS string stTG_ServerIP:="([^"]*)"', texts["TG_Comms.sys"])
+    ip = re.search(r'PERS string stTG_ServerIP:="([^"]*)"', texts["TG_CellCal.sys"])
     ip = ip.group(1) if ip else "?"
     if ip != args.server_ip:
-        log.failed("site", "TG_Comms.sys stTG_ServerIP is %s, expected %s (--server-ip)" % (ip, args.server_ip))
+        log.failed("site", "TG_CellCal.sys stTG_ServerIP is %s, expected %s (--server-ip)" % (ip, args.server_ip))
         ok = False
     else:
         log.passed("site", "stTG_ServerIP = %s" % ip)
@@ -778,6 +806,9 @@ def build_parser():
     s.add_argument("--no-carry", action="store_true", help="carry no live value")
     s.add_argument("--prefer-file", metavar="NAMES",
                    help="comma list of PERS where the repo value wins a conflict with the controller")
+    s.add_argument("--prefer-live", metavar="NAMES",
+                   help="comma list of PERS where the controller's value is kept even when the repo "
+                        "changed it (e.g. a VC's own tools)")
     s.add_argument("--camera-signal", action="store_true",
                    help="allow active SetDO doTG_Camera (only once the cell has that signal)")
     sub.add_parser("unload", help="unloadmod the TG modules (AUTO, RAPID stopped)")

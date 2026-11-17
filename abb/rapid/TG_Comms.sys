@@ -29,8 +29,9 @@ MODULE TG_Comms(SYSMODULE)
 
     ! ------------------------------------------------------------------
     ! Connection config. Edit from FlexPendant/RobotStudio, no code change.
-    ! Virtual controller: keep "127.0.0.1". Real IRC5: the controller LAN IP.
-    PERS string stTG_ServerIP:="127.0.0.1";
+    ! stTG_ServerIP, the address both listeners bind, is cell data:
+    ! declared in TG_CellCal.sys. The ports are the HMI's (it has 2000 and
+    ! 2001 built in), not the cell's.
     PERS num nTG_Port:=2000;
 
     ! Handshake port (socket_start_trigger_hmi_plan_v1.md S14, 2026-09-24).

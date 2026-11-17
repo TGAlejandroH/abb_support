@@ -275,9 +275,12 @@ swap. It never starts RAPID.
     Anaconda Prompt:   python tg_deploy.py --ip 10.8.8.56 status
     Plain PowerShell:  .\tg_deploy.cmd     --ip 10.8.8.56 status
 
-**The set, in load order:** `TG_CellCal.sys` (new since 2026-10-24: `tTG_Cam`, `tTG_Weld`),
-`TG_Comms.sys`, `TG_Cell.sys`, `TG_Touch.sys`, `TG_Weld.sys`, `TG_Main.mod`, `TG_Parts.mod`.
-`TG_SocketProbe_Mod` (left from 2026-09-24) is removed with the old set.
+**The set, in load order:** `TG_CellCal.sys` (the cell data: `tTG_Cam`, `tTG_Weld`,
+`stTG_ServerIP`, and the touch-sense I/O names `stTG_TouchDI`, `stTG_TouchOnDO`,
+`stTG_TouchActiveDI`, `stTG_TeachModeDO`), `TG_Comms.sys`, `TG_Cell.sys`, `TG_Touch.sys`,
+`TG_Weld.sys`, `TG_Main.mod`, `TG_Parts.mod`. `TG_SocketProbe_Mod` (left from 2026-09-24) is
+removed with the old set. On a controller with an older build, the IP still lives in
+`TG_Comms` and the touch names in `TG_Cell` (`status` says so); `backup` reads them there.
 
 **Why a snapshot comes first.** Unloading a module throws away its live `PERS` values.
 `backup` records them together with the old files. For each configuration value (list:
@@ -289,7 +292,13 @@ and the new file's.
 - Live differs from the old file: it was set on the controller, so the live value is
   carried into the new copy.
 - Live differs and the repo changed it too: `stage` stops on a CONFLICT. `--prefer-file NAME`
-  keeps the repo value.
+  keeps the repo value, `--prefer-live NAME` the controller's (a VC keeping its own tools).
+
+The cell's address and touch-sense I/O names skip that comparison: the live value is always
+carried. Only the controller knows them, and an old file can hold the cell's own value (the
+2026-10-21 build had `10.8.8.56` typed into its `TG_Comms.sys`), which would read as "nobody
+changed it" and let the repo's VC default replace it. `--prefer-file NAME` still puts the
+file's value up.
 
 Run-time counters and flags are not carried. A fresh load resets them, as intended.
 `stage` also refuses to stage the generic placeholder for `tTG_Weld` or `tTG_Cam`.
@@ -314,11 +323,11 @@ reports `program FAIL` BEFORE anything was touched, the program already had erro
 step 8 cannot judge our files. Every command writes `logs\comms_check_<stamp>.log`.
 
 **Going back:** the old files are in `logs\deploy_<stamp>\backup\`. Unload the new set,
-put the old files in `HOME:/TGS`, and load them (`TG_Comms` first; there is no
-`TG_CellCal` in the old set).
+put the old files in `HOME:/TGS`, and load them in their old order (`TG_CellCal` first when
+the old set has one; the 2026-10-21 set has none, so `TG_Comms` first).
 
 **Checks `stage` makes:**
-- `stTG_ServerIP` equals `--server-ip` (default `10.8.8.56`).
+- `stTG_ServerIP` in `TG_CellCal.sys` equals `--server-ip` (default `10.8.8.56`).
 - `TG_Main.mod` declares `tgs_main()` and no `main()`, because Production Manager owns `main`.
 - The `SetDO doTG_Camera` lines are commented out: the cell has no such signal. Use `--camera-signal` once it does.
 - `rapid_check` passes on every file, and no global name is declared twice across the set.
@@ -339,3 +348,11 @@ unload, delete, upload, load and status then all passed:
 
 The CONFLICT path and `--prefer-file` were tested offline. The VC was then restored
 exactly: same modules, same files, all 72 PERS values.
+
+**The cell-data layout, deployed 2026-11-16 on the same VC** over the v1.0.0 set (IP in
+`TG_Comms`, touch names in `TG_Cell`), with
+`stage --server-ip 127.0.0.1 --expect-system 4600-803651_Virtual --prefer-live tTG_Weld,tTG_Cam`
+(the VC keeps its own tools, not the MONARC TCPs): every step passed. `backup` read the IP and
+the four touch names from their old modules; after `load` they read the same from
+`TG_CellCal`, the program links, configuration differing: none. Set on the controller, all
+five then survived a reload of `TG_Comms`, `TG_Cell` and `TG_Touch`.

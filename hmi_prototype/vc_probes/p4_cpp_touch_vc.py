@@ -343,8 +343,8 @@ def run(only=None):
             except Exception as exc:
                 tp.log("CLEAN-UP STEP FAILED: %s - finish by hand (TG_TrRestore, park, unload TG_TrRig, PP to main)"
                        % exc)
-        names = {k: sym("TG_Cell", k) for k in ("stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI")}
-        rows.append(("TG_Cell welder names restored", names == {"stTG_TouchDI": '"diWld1Touched"',
+        names = {k: sym("TG_CellCal", k) for k in ("stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI")}
+        rows.append(("TG_CellCal welder names restored", names == {"stTG_TouchDI": '"diWld1Touched"',
                      "stTG_TouchOnDO": '"doWld1TouchOn"', "stTG_TouchActiveDI": '"diWld1TouchActive"'}, "%s" % names))
     tp.log("")
     for label in ("baseline", "shifted", "aligned", "rebase"):

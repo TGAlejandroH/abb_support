@@ -13,7 +13,7 @@ end-to-end against a RobotStudio virtual controller (2026-08-28).
 | Path | What |
 |---|---|
 | `abb/rapid/TG_Comms.sys` | Request library: socket lifecycle, protocol helpers, all TG_Req* PROCs, shared PERS state (the FANUC register-map equivalent) |
-| `abb/rapid/TG_CellCal.sys` | Cell calibration: `tTG_Cam` / `tTG_Weld`. Installed once per cell, **never redeployed** — a reload would put the dummy TCPs back |
+| `abb/rapid/TG_CellCal.sys` | Cell data: the tools `tTG_Cam` / `tTG_Weld`, the controller address `stTG_ServerIP`, the welder's touch-sense I/O names (`stTG_TouchDI`, `stTG_TouchOnDO`, `stTG_TouchActiveDI`, `stTG_TeachModeDO`). Installed once per cell, **never redeployed** — a reload would put the file's values back |
 | `abb/rapid/TG_Cell.sys` | Cell-hardware macros (FANUC's utility .ls programs): `TG_CamOpen`/`TG_CamClose` drive the camera flap on a dummy DO `doTG_Camera` |
 | `abb/rapid/TG_Main.mod` | Main loop (TGMainKL equivalent): accept HMI → prog-sel → file transfer → `Load \Dynamic` + late-bound call of the .tgs program + edit-preserving `UnLoad` (operator touch-ups are staged in `HOME:/TGS/edited/` for retrieval) |
 | `abb/rapid/TGS/TD05Test.mod` | Sample .tgs program (mirrors the FANUC TD05tRJYQd call order) |

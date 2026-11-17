@@ -888,8 +888,9 @@ runs `TG_Main.tgs_main` against the prototype HMI.
 
 **`TG_Cell.sys`:**
 - `TG_TeachModeOn`, `TG_TouchSenseOn` and `TG_TouchSenseOff` drive the welder by NAME,
-  through `AliasIO` on the new cell data: `stTG_TouchDI`, `stTG_TouchOnDO`,
-  `stTG_TouchActiveDI` + `nTG_TouchActiveWait`, and `stTG_TeachModeDO`.
+  through `AliasIO` on the cell data `stTG_TouchDI`, `stTG_TouchOnDO`,
+  `stTG_TouchActiveDI` and `stTG_TeachModeDO` (declared in `TG_CellCal.sys`, so a
+  redeploy of `TG_Cell.sys` keeps the cell's values), and `nTG_TouchActiveWait`.
 - The defaults are the MONARC VC's Miller signals, the same ones SmarTac's `smtMiller1`
   uses. The real cell's Fronius values come at P6.
 - A new welder, or a test rig, therefore changes data, not code.

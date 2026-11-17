@@ -5,7 +5,10 @@
 Why only the named ones: reloading a module from a file discards anything written into its
 in-memory copy - PM's pendant teaching writes partadv into TG_Parts (plan V-30). Never reload a
 module that did not change.
-Never pass TG_CellCal.sys: it holds the cell's tool calibration (robotstudio_setup.md section 2).
+Never pass TG_CellCal.sys: it holds the cell's data - tool calibration, server IP, touch-sense
+I/O names (robotstudio_setup.md section 2). TG_Comms.sys / TG_Cell.sys are refused while the
+controller's TG_CellCal is from before those moved into it: they would not link. Move such a
+controller once with tools/comms_check/tg_deploy.py, which carries the live values.
 
 Steps (TG_RoboCal L8 recipe; lessons V-2/V-25/V-27): stop, upload, unload + load with one RWS
 session (L9), then read the event log - the loadmod POST "succeeds" even on a syntax error -
@@ -18,6 +21,7 @@ import sys
 import time
 import urllib.parse
 
+from rws_client import RwsError, RwsFileNotFoundError
 from rws_session import RwsSession
 
 RAPID = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "abb", "rapid")
@@ -25,10 +29,29 @@ URL = os.environ.get("TG_VC_RWS_URL", "http://127.0.0.1:80")   # the VC is not a
 H = {"Content-Type": "application/x-www-form-urlencoded"}
 
 
+def cellcal_holds_cell_data(get):
+    """True when the controller's TG_CellCal declares stTG_ServerIP (the layout after v1.0.0)."""
+    try:
+        get("/rw/rapid/symbol/data/RAPID/T_ROB1/TG_CellCal/stTG_ServerIP")
+        return True
+    except RwsFileNotFoundError:
+        return False
+    except RwsError as exc:
+        if "HTTP 400" in str(exc):
+            return False
+        raise
+
+
 def main(modules):
     c = RwsSession(URL)
     get = lambda p: c._request("GET", p, query={"json": "1", "lang": "en"}).decode("utf-8", "replace")
     post = lambda p, q, f: c._request("POST", p, data=urllib.parse.urlencode(f).encode(), query=q, headers=H)
+
+    if {"TG_Comms.sys", "TG_Cell.sys"} & set(modules) and not cellcal_holds_cell_data(get):
+        print("REFUSED: TG_CellCal on the controller does not declare stTG_ServerIP and the touch-sense\n"
+              "names yet, so TG_Comms.sys / TG_Cell.sys from abb/rapid would not link. Move the controller\n"
+              "once with tools/comms_check/tg_deploy.py (it carries the live values).")
+        return 1
 
     def elog_after(mark):
         b = get("/rw/elog/0")
