@@ -43,8 +43,8 @@ RESULTS = ("stTspStep", "nTspFaceZ", "nTspPauses", "nTspLastPause", "nTspSensorA
 SCENARIOS = (
     ("S1 hit", "TG_TspHit", 0, 0, None),
     ("S2 miss, part placed, retry", "TG_TspMissRetry", 1, 3, (PROBE, "nTspZoneWant", "1")),
-    ("S3 welder not live, fixed", "TG_TspNotLive", 1, 2, ("TG_Cell", "stTG_TouchActiveDI", '"diTG_SimSensorActive"')),
-    ("S4 signal not configured, fixed", "TG_TspNoSignal", 1, 1, ("TG_Cell", "stTG_TouchDI", '"diTG_SimTouched"')),
+    ("S3 welder not live, fixed", "TG_TspNotLive", 1, 2, ("TG_CellCal", "stTG_TouchActiveDI", '"diTG_SimSensorActive"')),
+    ("S4 signal not configured, fixed", "TG_TspNoSignal", 1, 1, ("TG_CellCal", "stTG_TouchDI", '"diTG_SimTouched"')),
     ("S5 touching at the start, cleared", "TG_TspAtStart", 1, 4, (PROBE, "nTspZoneWant", "1")),
 )
 
@@ -233,7 +233,7 @@ def main(argv):
         tp.back_to_pm()
         return 1
     record, verdicts = {}, []
-    before = {k: sym("TG_Cell", k) for k in ("stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI", "stTG_TeachModeDO")}
+    before = {k: sym("TG_CellCal", k) for k in ("stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI", "stTG_TeachModeDO")}
     try:
         for i, (label, routine, pauses, code, fix) in enumerate(SCENARIOS):
             if i:
@@ -255,8 +255,8 @@ def main(argv):
                 step()
             except Exception as exc:
                 log("CLEAN-UP STEP FAILED: %s - finish it by hand (TG_TspRestore, park, unload, PP to main)" % exc)
-        after = {k: sym("TG_Cell", k) for k in before}
-        verdicts.append(("TG_Cell welder names restored", after == before, "%s" % after))
+        after = {k: sym("TG_CellCal", k) for k in before}
+        verdicts.append(("TG_CellCal welder names restored", after == before, "%s" % after))
     log("")
     for name, ok, detail in verdicts:
         log("%s  %s -- %s" % ("PASS" if ok else "FAIL", name, detail))

@@ -18,8 +18,8 @@ MODULE TG_Cell(SYSMODULE)
     ! Touch sensing (touch-sense P2, 2026-09-26): TEACHMODE_ON ->
     ! TG_TeachModeOn, plus TG_TouchSenseOn/Off, which TG_Touch.sys calls
     ! around every search. They drive the welder's touch-sense I/O BY NAME
-    ! (the stTG_Touch* strings below), so a new welder or a test rig changes
-    ! data, not code. docs/abb_touch_sense_port_v1.md D5/D11.
+    ! (the stTG_Touch* strings in TG_CellCal.sys), so a new welder or a test
+    ! rig changes data, not code. docs/abb_touch_sense_port_v1.md D5/D11.
     !
     ! TG_ActMechUnit (added 2026-09-23) has no FANUC counterpart - a FANUC
     ! motion group is always active. Every HMI-mode .tgs module that drives
@@ -38,24 +38,11 @@ MODULE TG_Cell(SYSMODULE)
     !***********************************************************************
 
     ! ---- Touch sensing: the welder's touch-sense I/O, by name ------------
-    ! "" = the cell has no such signal. CELL DATA, not code: these values are
-    ! the MONARC VC's Miller EIP (the RobotWare Miller add-in's own names,
-    ! the same ones SmarTac's smtMiller1 profile uses). The real MONARC cell
-    ! is a Fronius TPS/i (smtFronius1: siFr1PartDetect / soFr1TouchSense /
-    ! soFr1SensorRef) and gets its values at commissioning (plan P6).
+    ! The names (stTG_TouchDI, stTG_TouchOnDO, stTG_TouchActiveDI,
+    ! stTG_TeachModeDO) are CELL DATA, declared in TG_CellCal.sys.
     !
-    ! stTG_TouchDI: the contact signal SearchL supervises (TG_TouchSearch).
-    PERS string stTG_TouchDI:="diWld1Touched";
-    ! stTG_TouchOnDO: puts the sense voltage on the wire (TG_TouchSenseOn).
-    PERS string stTG_TouchOnDO:="doWld1TouchOn";
-    ! stTG_TouchActiveDI: the welder confirms sensing is live; waited for up
-    ! to nTG_TouchActiveWait s. MONARC's own programs always wait for it.
-    PERS string stTG_TouchActiveDI:="diWld1TouchActive";
+    ! How long TG_TouchSenseOn waits for stTG_TouchActiveDI, s.
     PERS num nTG_TouchActiveWait:=2;
-    ! stTG_TeachModeDO: Fronius TPS/i Teach mode (FANUC TEACHMODE_ON, D5);
-    ! the Miller has none. On a TPS/i: "doFr1TeachMode" (RobotWare's
-    ! FroniusTPSi equipment template).
-    PERS string stTG_TeachModeDO:="";
     ! TRUE after TG_TouchSenseOn when the welder confirmed (or there is no
     ! active signal to wait for); TG_TouchSearch will not search otherwise.
     PERS bool bTG_TouchLive:=FALSE;

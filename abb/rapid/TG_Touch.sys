@@ -33,9 +33,9 @@ MODULE TG_Touch(SYSMODULE)
     ! stays in lockstep. Every error is handled HERE: an error raised inside
     ! a late-bound .tgs does not propagate to TG_Main (finding F-F).
     !
-    ! Cell I/O by name (TG_Cell.sys): stTG_TouchDI is the contact signal;
-    ! TG_TouchSenseOn/Off put the sense voltage on the wire around every
-    ! search, so it is live only while searching (D5).
+    ! Cell I/O by name (the names are in TG_CellCal.sys): stTG_TouchDI is the
+    ! contact signal; TG_TouchSenseOn/Off (TG_Cell.sys) put the sense voltage
+    ! on the wire around every search, so it is live only while searching (D5).
     !***********************************************************************
 
     ! D9: the FANUC touch schedule values. Cell data - tune from the pendant.
@@ -162,7 +162,7 @@ MODULE TG_Touch(SYSMODULE)
         nTG_TouchLastPause:=nWhy;
         TEST nWhy
         CASE TG_TOUCH_NOSIGNAL:
-            ErrWrite \W,"TG: touch signal not configured","TG_Cell names a touch signal this controller does not have."\RL2:="Fix stTG_TouchDI / stTG_TouchOnDO / stTG_TouchActiveDI, then Start.";
+            ErrWrite \W,"TG: touch signal not configured","TG_CellCal names a touch signal this controller does not have."\RL2:="Fix stTG_TouchDI / stTG_TouchOnDO / stTG_TouchActiveDI, then Start.";
         CASE TG_TOUCH_NOTLIVE:
             ErrWrite \W,"TG: touch sensing not live","The welder did not confirm touch sensing within "+NumToStr(nTG_TouchActiveWait,1)+" s."\RL2:="Check the welder and its touch mode, then Start to search again.";
         CASE TG_TOUCH_MISS:

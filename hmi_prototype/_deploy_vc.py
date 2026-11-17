@@ -3,12 +3,14 @@
 One RwsSession throughout (V-3). The event log is the verdict, not the POST
 (V-2: loadmod reports success even for a module that fails to compile).
 """
-import os, re, time, urllib.parse
+import os, re, sys, time, urllib.parse
+from _deploy_modules import cellcal_holds_cell_data
 from rws_session import RwsSession
 
 RAPID = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "abb", "rapid")
 # TG_Touch.sys (touch-sense P2) after TG_Cell: it calls TG_Cell's touch macros.
-# TG_CellCal.sys is deliberately absent: installed once per cell, a reload resets the tools.
+# TG_CellCal.sys is deliberately absent: installed once per cell, a reload resets the cell's data
+# (tools, server IP, touch-sense I/O names).
 MODULES = ["TG_Comms.sys", "TG_Cell.sys", "TG_Touch.sys", "TG_Weld.sys", "TG_Main.mod", "TG_Parts.mod"]
 c = RwsSession("http://127.0.0.1:80")
 
@@ -29,6 +31,12 @@ def elog_blocks():
         seg = m.group(2)
         g = lambda p: (re.search(p, seg).group(1) if re.search(p, seg) else "")
         yield int(m.group(1)), g(r'"code":"(\d+)"'), g(r'"title":"([^"]*)"'), g(r'"desc":"([^"]*)"')
+
+if not cellcal_holds_cell_data(get):
+    print("REFUSED: TG_CellCal on the controller does not declare stTG_ServerIP and the touch-sense\n"
+          "names yet, so TG_Comms.sys / TG_Cell.sys from abb/rapid would not link. Move the controller\n"
+          "once with tools/comms_check/tg_deploy.py (it carries the live values).")
+    sys.exit(1)
 
 mark = max(i for i, *_ in elog_blocks())
 print("elog mark", mark, "| exec before:", exec_state())

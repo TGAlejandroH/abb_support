@@ -28,26 +28,32 @@ Controller tab → **RAPID** → expand `T_ROB1`:
 4. **Apply** (Ctrl+Shift+S) — the RAPID editor now compiles them. Fix-ups, if
    any, will show in the Output window. Expect zero errors.
 
-**`TG_CellCal.sys` holds the cell's tool calibration (`tTG_Cam`, `tTG_Weld`) and is
-loaded ONCE per cell.** Never reload or redeploy it: loading a module re-initialises
-its `PERS` from the file, so a reload replaces the calibrated TCPs with the file's
-dummies (VC-measured 2026-10-24). Enter the calibration on the controller (Program
-Data → tooldata). `TG_Comms.sys` can then be reloaded freely without touching it.
+**`TG_CellCal.sys` holds the cell's data and is loaded ONCE per cell:** the tool
+calibration (`tTG_Cam`, `tTG_Weld`), the controller address the HMI connects to
+(`stTG_ServerIP`) and the welder's touch-sense I/O names (`stTG_TouchDI`,
+`stTG_TouchOnDO`, `stTG_TouchActiveDI`, `stTG_TeachModeDO`). Never reload or redeploy
+it: loading a module re-initialises its `PERS` from the file, so a reload replaces the
+cell's values with the file's (VC-measured 2026-10-24). Enter them on the controller
+(Program Data → tooldata / string). `TG_Comms.sys`, `TG_Cell.sys` and the other
+modules can then be reloaded freely: the cell data stays (VC-measured 2026-11-16).
 
-**Existing cell, `TG_Comms.sys` from before 2026-10-24** (it still declares the
-tools): load `TG_CellCal.sys` first, then reload the new `TG_Comms.sys`. Between the
-two loads the tools are declared twice and the task shows 40160 — expected; it
-clears with the second load, and the live tool values are kept (not the file's).
-Loading the new `TG_Comms.sys` WITHOUT `TG_CellCal.sys` leaves the tools undeclared
+**Existing cell with an older `TG_CellCal.sys`** (or none): its `TG_Comms.sys` still
+declares the server IP (and, before 2026-10-24, the tools) and its `TG_Cell.sys` the
+touch-sense names. Move it with `tools/comms_check/tg_deploy.py` (backup, stage,
+unload, delete, upload, load; README there, section 8): it reads the live values from
+their old modules and writes them into the new `TG_CellCal.sys` before the swap.
+`hmi_prototype/_deploy_modules.py` and `_deploy_vc.py` refuse `TG_Comms.sys` /
+`TG_Cell.sys` on such a controller: with the old `TG_CellCal.sys` they do not link
 (40160, program does not run).
 
 Notes:
 - `TG_Comms` is a SYSMODULE: it stays loaded across "PP to Main" and is hidden
   from the operator's program list — intended.
 - The VC binds `127.0.0.1` (default of `stTG_ServerIP`). On a **real IRC5**,
-  edit the PERS value to the controller's LAN IP (RAPID → TG_Comms →
+  edit the PERS value to the controller's LAN IP (RAPID → TG_CellCal →
   `stTG_ServerIP`), or change it from the FlexPendant (Program Data → string).
-  Port lives in `nTG_Port` (default 2000).
+  Port lives in `nTG_Port` (default 2000), in `TG_Comms`: the HMI has 2000 and 2001
+  built in, so the ports are not cell data.
 - Since 2026-09-24 every cycle begins with a short **handshake connection on
   `nTG_HandshakePort` (default 2001)** — `START`, the active station's frame, the
   HMI's verdict — and only then does the controller listen on 2000 for the run

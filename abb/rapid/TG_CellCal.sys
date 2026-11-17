@@ -1,7 +1,32 @@
 MODULE TG_CellCal(SYSMODULE)
-    ! Cell calibration. Installed once per cell; never replaced by abb_support updates.
+    ! Cell data: tool calibration, the controller's address, the welder's touch-sense I/O names.
+    ! Installed once per cell; never replaced by abb_support updates.
     ! Install: docs/robotstudio_setup.md section 2. The values below are used only on a
-    ! controller that has never had these tools; an existing cell keeps its live values.
-    PERS tooldata tTG_Cam:=[TRUE,[[0,0,100],[1,0,0,0]],[1,[0,0,50],[1,0,0,0],0,0,0]];
-    PERS tooldata tTG_Weld:=[TRUE,[[0,0,200],[1,0,0,0]],[1,[0,0,100],[1,0,0,0],0,0,0]];
+    ! controller that has never had these data; an existing cell keeps its live values.
+    ! MONARC 4600-804589 camera: .tgs / URDF tool0->tcp_camera (xyz -24.212,38.351,193.217 mm,
+    ! rpy 1.570796327,-0.857500880,3.141592654). Load = the torch's: one physical payload.
+    PERS tooldata tTG_Cam:=[TRUE,[[-24.212,38.351,193.217],[0.293968804,-0.293968804,-0.643103679,-0.643103679]],[1,[0,0,1],[1,0,0,0],0,0,0]];
+    ! MONARC 4600-804589 torch: the cell's tWeldgun (CalibData.mod), = .tgs tcp_torch (46 deg about Y).
+    PERS tooldata tTG_Weld:=[TRUE,[[-39.363,0,653.732],[0.920504853,0,0.390731128,0]],[1,[0,0,1],[1,0,0,0],0,0,0]];
+
+    ! The controller address both HMI listeners bind (TG_Comms: handshake and run ports).
+    ! Virtual controller: "127.0.0.1". Real IRC5: the controller LAN IP the HMI connects to.
+    PERS string stTG_ServerIP:="127.0.0.1";
+
+    ! Touch sensing: the welder's touch-sense I/O, by name (TG_Cell, TG_Touch).
+    ! "" = the cell has no such signal. These values are the MONARC VC's Miller EIP (the
+    ! RobotWare Miller add-in's own names, the same ones SmarTac's smtMiller1 profile uses).
+    ! The real MONARC cell is a Fronius TPS/i (smtFronius1: siFr1PartDetect / soFr1TouchSense /
+    ! soFr1SensorRef) and gets its values at commissioning (plan P6).
+    !
+    ! stTG_TouchDI: the contact signal SearchL supervises (TG_TouchSearch).
+    PERS string stTG_TouchDI:="diWld1Touched";
+    ! stTG_TouchOnDO: puts the sense voltage on the wire (TG_TouchSenseOn).
+    PERS string stTG_TouchOnDO:="doWld1TouchOn";
+    ! stTG_TouchActiveDI: the welder confirms sensing is live; waited for up to
+    ! nTG_TouchActiveWait s (TG_Cell). MONARC's own programs always wait for it.
+    PERS string stTG_TouchActiveDI:="diWld1TouchActive";
+    ! stTG_TeachModeDO: Fronius TPS/i Teach mode (FANUC TEACHMODE_ON, D5); the Miller has
+    ! none. On a TPS/i: "doFr1TeachMode" (RobotWare's FroniusTPSi equipment template).
+    PERS string stTG_TeachModeDO:="";
 ENDMODULE

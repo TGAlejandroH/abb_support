@@ -270,8 +270,9 @@ SystemModule  TG_Cell.sys       ← cell-hardware macros: FANUC's tiny .ls utili
                                   WELD_PREP/CAM_PREP/DRY_RUN_* added 2026-08-28
                                   as empty placeholder PROCs). Separate from
                                   TG_Comms on purpose: protocol vs hardware.
-SystemModule  TG_CellCal.sys    ← cell calibration: tTG_Cam / tTG_Weld. Installed
-                                  once per cell, never redeployed (decision 7).
+SystemModule  TG_CellCal.sys    ← cell data: tTG_Cam / tTG_Weld, stTG_ServerIP, the
+                                  touch-sense I/O names. Installed once per cell,
+                                  never redeployed (decision 7).
 NormalModule  TG_Main.mod       ← TGMAINKL equivalent (resident; owns main())
 NormalModule  <TgsName>.mod     ← one per .tgs program (dynamically loaded from HOME:/TGS/)
 ```
@@ -723,10 +724,10 @@ with non-zero defaults (`abb_server.py`), fake-robot specs and tests updated
 ## 6. Assumptions & recommended defaults (speak up if wrong)
 
 1. **Robot = TCP server, port 2000** (same as FANUC). Port and server IP are
-   config data, not literals: `PERS num nTG_Port := 2000;` /
-   `PERS string stTG_ServerIP := "127.0.0.1";` — editable from
-   FlexPendant/RobotStudio without touching code. VC binds `127.0.0.1`, real cell
-   binds the controller LAN IP.
+   config data, not literals: `PERS num nTG_Port := 2000;` (`TG_Comms`) /
+   `PERS string stTG_ServerIP := "127.0.0.1";` (`TG_CellCal`, cell data, decision 7) —
+   editable from FlexPendant/RobotStudio without touching code. VC binds `127.0.0.1`,
+   real cell binds the controller LAN IP.
 2. **Byte-compatible wire format for everything except frames**: keep FANUC scalar
    field widths, prompts, and acks so the eventual C++ ABB class reuses the FANUC
    send/receive helpers. Frame/pose payloads use the ABB-native quaternion pose
@@ -828,3 +829,8 @@ with non-zero defaults (`abb_server.py`), fake-robot specs and tests updated
    the live value; the declarations commented out with nothing else declaring them = the tools
    vanish (40160); the same global `PERS` in two loaded modules = 40160 and PP to Main refused;
    declared only in a second module = links clean and the value survives `TG_Comms` reloads.
+   The same module holds the rest of the cell data: `stTG_ServerIP` (from `TG_Comms.sys`) and
+   the touch-sense I/O names `stTG_TouchDI`, `stTG_TouchOnDO`, `stTG_TouchActiveDI`,
+   `stTG_TeachModeDO` (from `TG_Cell.sys`). **Measured on the VC (2026-11-16):** the five, set
+   on the controller, survive a reload of `TG_Comms`, `TG_Cell` and `TG_Touch`; the ports stay in
+   `TG_Comms` (the HMI has 2000/2001 built in).

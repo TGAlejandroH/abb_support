@@ -291,7 +291,7 @@ def planner_cycle(label, shift, rec, *, auto=True, corrupt_tsp=False, miss_first
     if miss_first:
         # E5: the touch DI is pointed at a signal that never rises, so the first search runs its
         # whole stroke and pauses (D3); the rig's signal is put back while it waits.
-        set_sym("TG_Cell", "stTG_TouchDI", '"diWld1Touched"')
+        set_sym("TG_CellCal", "stTG_TouchDI", '"diWld1Touched"')
     hmi = EventHmi(host="127.0.0.1", port=2000, handshake_port=2001, rws=tp.URL, verbose=True)
     hmi.prog_name = meta["prog_name"]
     hmi.tgs_source_dir = OUT
@@ -323,7 +323,7 @@ def planner_cycle(label, shift, rec, *, auto=True, corrupt_tsp=False, miss_first
                 events.append((trace_now(), "PAUSED (reason %d) - rig signal back, Start" % pause_seen["reason"]))
                 log("  paused, reason %d, %d touch reports so far - putting the rig signal back, Start"
                     % (pause_seen["reason"], pause_seen["reports_before"]))
-                set_sym("TG_Cell", "stTG_TouchDI", '"diTG_SimTouched"')
+                set_sym("TG_CellCal", "stTG_TouchDI", '"diTG_SimTouched"')
                 time.sleep(1.0)
                 tp.start("once")
                 time.sleep(1.0)
@@ -497,8 +497,8 @@ def run():
                 step()
             except Exception as exc:
                 log("CLEAN-UP STEP FAILED: %s - finish by hand (TG_TrRestore, park, unload TG_TrRig, PP to main)" % exc)
-        names = {k: sym("TG_Cell", k) for k in ("stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI")}
-        rows.append(("TG_Cell welder names restored", names == {"stTG_TouchDI": '"diWld1Touched"',
+        names = {k: sym("TG_CellCal", k) for k in ("stTG_TouchDI", "stTG_TouchOnDO", "stTG_TouchActiveDI")}
+        rows.append(("TG_CellCal welder names restored", names == {"stTG_TouchDI": '"diWld1Touched"',
                      "stTG_TouchOnDO": '"doWld1TouchOn"', "stTG_TouchActiveDI": '"diWld1TouchActive"'}, "%s" % names))
     log("")
     for label in ("baseline", "shifted", "aligned"):
