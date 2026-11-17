@@ -9,6 +9,7 @@ used automatically when present.
 | `comms_probe.py` | The whole PC side: ping, Robot Web Services (RWS) checklist, module upload, TCP echo test, bench helpers. Standard library only. |
 | `comms_probe.cmd` | Runs the script with the Anaconda interpreter (plain `python` is not on this laptop's PowerShell path). `.\comms_probe.cmd --ip <IP> all` is the same as `python comms_probe.py --ip <IP> all`. |
 | `TG_SocketProbe.mod` | The whole robot side: a standalone RAPID echo server. No `main`, no motion, no I/O, no dependency on `TG_Comms`. |
+| `tg_deploy.py` / `tg_deploy.cmd` | Replace the resident TG modules on a controller that already has an older build (section 8). |
 | `logs/` | One timestamped log per run (git-ignored). Paste these into the trip report. |
 
 **How to run it.** Always from inside this folder (`cd tools\comms_check`):
@@ -261,3 +262,80 @@ device and it does not need mastership.
 - Real IRC5 round trip through this probe: 250-375 ms, dominated by RAPID scan and the
   TPWrite calls in the loop, with a 1-2 ms ping. The production request loop has
   the same shape, so expect that order of magnitude per exchange, as on FANUC.
+
+---
+
+## 8. Replacing the TG modules (`tg_deploy.py`)
+
+For a controller that already runs an older TG build, such as MONARC since 2026-10-21. The
+script takes a copy of everything first, deletes only the files it has a copy of, and keeps
+the cell's own settings (tool calibration, taught part data, touch I/O names) across the
+swap. It never starts RAPID.
+
+    Anaconda Prompt:   python tg_deploy.py --ip 10.8.8.56 status
+    Plain PowerShell:  .\tg_deploy.cmd     --ip 10.8.8.56 status
+
+**The set, in load order:** `TG_CellCal.sys` (new since 2026-10-24: `tTG_Cam`, `tTG_Weld`),
+`TG_Comms.sys`, `TG_Cell.sys`, `TG_Touch.sys`, `TG_Weld.sys`, `TG_Main.mod`, `TG_Parts.mod`.
+`TG_SocketProbe_Mod` (left from 2026-09-24) is removed with the old set.
+
+**Why a snapshot comes first.** Unloading a module throws away its live `PERS` values.
+`backup` records them together with the old files. For each configuration value (list:
+`CONFIG_PERS` in the script), `stage` compares three values: the old file's, the live one,
+and the new file's.
+- Live equals the old file: nobody changed it on the controller, so the new file's value
+  goes up. This is how the MONARC torch TCP in `TG_CellCal.sys` replaces the dummy the cell
+  still has.
+- Live differs from the old file: it was set on the controller, so the live value is
+  carried into the new copy.
+- Live differs and the repo changed it too: `stage` stops on a CONFLICT. `--prefer-file NAME`
+  keeps the repo value.
+
+Run-time counters and flags are not carried. A fresh load resets them, as intended.
+`stage` also refuses to stage the generic placeholder for `tTG_Weld` or `tTG_Cam`.
+
+### On site, in this order
+
+| # | Where | Do | Pass |
+|---|---|---|---|
+| 0 | Pendant | Take a full system backup (Backup and Restore). | Backup folder written. |
+| 1 | PC | `python comms_probe.py --ip 10.8.8.56 ping` | Reply. If the IP changed, use the new one everywhere below and in step 3 (`--server-ip`). |
+| 2 | PC | `python tg_deploy.py --ip 10.8.8.56 backup` | `OVERALL: PASS`. `logs\deploy_<stamp>\backup\` holds the old files. |
+| 3 | PC | `python tg_deploy.py stage` | `OVERALL: PASS`. Read the `carry` lines: each is a value taken from the cell. |
+| 4 | Pendant | Stop the program. Program Editor -> Modules: unload `TG_Parts`, `TG_Main`, `TG_Weld`, `TG_Touch`, `TG_Cell`, `TG_Comms`, `TG_SocketProbe_Mod`. (In AUTO with RAPID stopped, `tg_deploy.py ... unload` does this.) | None of them listed. |
+| 5 | PC | `python tg_deploy.py --ip 10.8.8.56 delete` | Lists the deleted files. Other files in `HOME:/TGS` stay. |
+| 6 | PC | `python tg_deploy.py --ip 10.8.8.56 upload` | 7 x `read-back identical`. |
+| 7 | Pendant | Load Module from `HOME:/TGS/`, in the order above, `TG_CellCal.sys` first. (In AUTO with RAPID stopped, `tg_deploy.py ... load` does this.) | No error after the last load. A transient 40160 between loads is expected. |
+| 8 | PC | `python tg_deploy.py --ip 10.8.8.56 status` | `program` PASS (the controller links the program), 7 files `identical to reference`, configuration differing: `none`. |
+| 9 | Pendant | PP to Main, then run as usual. Then take a second backup. | Production Manager idle as before. |
+
+`status` is read-only and can be run at any time. Run it before step 2 as well. If it
+reports `program FAIL` BEFORE anything was touched, the program already had errors and
+step 8 cannot judge our files. Every command writes `logs\comms_check_<stamp>.log`.
+
+**Going back:** the old files are in `logs\deploy_<stamp>\backup\`. Unload the new set,
+put the old files in `HOME:/TGS`, and load them (`TG_Comms` first; there is no
+`TG_CellCal` in the old set).
+
+**Checks `stage` makes:**
+- `stTG_ServerIP` equals `--server-ip` (default `10.8.8.56`).
+- `TG_Main.mod` declares `tgs_main()` and no `main()`, because Production Manager owns `main`.
+- The `SetDO doTG_Camera` lines are commented out: the cell has no such signal. Use `--camera-signal` once it does.
+- `rapid_check` passes on every file, and no global name is declared twice across the set.
+
+`status` also checks that no global name in the new set is already declared by a non-TG
+module (the cell's own `TG_Python`, for example).
+
+**Rehearsed 2026-11-16 on VC `4600-803651_Virtual`** (616-1, PM, the `TG_Python` module).
+The VC was first put in the cell's state: the 2026-10-21 site build loaded, plus
+`TG_SocketProbe_Mod`, an edited `tTG_Cam`, a taught `padvTG_9011` and a changed
+`stTG_TouchDI`, with `tTG_Weld` left on the old dummy. The steps status, backup, stage,
+unload, delete, upload, load and status then all passed:
+- the program linked;
+- the 7 files read back identical;
+- `tTG_Weld` became the MONARC torch TCP, and the 3 values edited on the controller were
+  carried;
+- the name-clash check passed with `TG_Python` loaded.
+
+The CONFLICT path and `--prefer-file` were tested offline. The VC was then restored
+exactly: same modules, same files, all 72 PERS values.
